@@ -1,0 +1,347 @@
+import { NextResponse } from "next/server";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import {
+  createAttachment,
+  createCashTransaction,
+  createContact,
+  createExpense,
+  createOrganization,
+  createVehicle,
+  deleteCashTransaction,
+  deleteExpense,
+  joinOrganization,
+  loadAppData,
+  recordVehicleSale,
+  updateCashTransaction,
+  updateDefaultPlateCommission,
+  updateExpense,
+  updateVehicle,
+  updateVehicleMainPhoto,
+} from "@/lib/supabase/repository";
+import { mapAttachment, mapVehicle } from "@/lib/supabase/mappers";
+import {
+  attachmentSchema,
+  backupSettingsSchema,
+  cashTransactionSchema,
+  cashUpdateSchema,
+  contactSchema,
+  expenseSchema,
+  formatValidationError,
+  formDataToObject,
+  invitationCodeSchema,
+  organizationSchema,
+  roleUpdateSchema,
+  saleSchema,
+  vehicleSchema,
+  vehicleUpdateSchema,
+} from "@/lib/validation";
+import type { Role } from "@/types/domain";
+import type { CompanyCashTransactionType, ExternalCashTransactionType } from "@/types/domain";
+
+type Operation =
+  | "createOrganization"
+  | "joinOrganization"
+  | "createVehicle"
+  | "updateVehicle"
+  | "createExpense"
+  | "updateExpense"
+  | "deleteExpense"
+  | "recordSale"
+  | "createCashTransaction"
+  | "updateCashTransaction"
+  | "deleteCashTransaction"
+  | "createContact"
+  | "createAttachment"
+  | "setVehicleMainPhoto"
+  | "updateDefaultPlateCommission"
+  | "updateMemberRole"
+  | "removeMember";
+
+export async function POST(request: Request) {
+  const supabase = await createSupabaseServerClient();
+  if (!supabase) {
+    return NextResponse.json({ ok: false, message: "Supabase is not configured." }, { status: 503 });
+  }
+
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  if (userError || !userData.user) {
+    return NextResponse.json({ ok: false, message: "Authentication required." }, { status: 401 });
+  }
+
+  const formData = await request.formData();
+  const operation = String(formData.get("operation") || "") as Operation;
+  const organizationId = String(formData.get("organizationId") || "");
+
+  try {
+    switch (operation) {
+      case "createOrganization": {
+        organizationSchema.parse(formDataToObject(formData));
+        await createOrganization(supabase, String(formData.get("organizationName") || ""));
+        return ok();
+      }
+      case "joinOrganization": {
+        invitationCodeSchema.parse(formDataToObject(formData));
+        await joinOrganization(supabase, String(formData.get("inviteCode") || ""));
+        return ok();
+      }
+      case "createVehicle": {
+        await requireRole(supabase, organizationId, ["owner", "admin", "member"]);
+        vehicleSchema.parse(formDataToObject(formData));
+        const id = await createVehicle(supabase, organizationId, formData);
+        return ok({ id });
+      }
+      case "updateVehicle": {
+        await requireRole(supabase, organizationId, ["owner", "admin", "member"]);
+        vehicleUpdateSchema.parse(formDataToObject(formData));
+        const vehicle = await getVehicle(supabase, organizationId, String(formData.get("vehicleId") || ""));
+        await updateVehicle(supabase, vehicle, formData);
+        return ok();
+      }
+      case "createExpense": {
+        await requireRole(supabase, organizationId, ["owner", "admin", "member"]);
+        expenseSchema.parse(formDataToObject(formData));
+        const vehicle = await getVehicle(supabase, organizationId, String(formData.get("vehicleId") || ""));
+        const id = await createExpense(supabase, vehicle, formData);
+        return ok({ id });
+      }
+      case "updateExpense": {
+        await requireRole(supabase, organizationId, ["owner", "admin", "member"]);
+        expenseSchema.parse(formDataToObject(formData));
+        const vehicle = await getVehicle(supabase, organizationId, String(formData.get("vehicleId") || ""));
+        await updateExpense(supabase, vehicle, String(formData.get("expenseId") || ""), formData);
+        return ok();
+      }
+      case "deleteExpense": {
+        await requireRole(supabase, organizationId, ["owner", "admin", "member"]);
+        const vehicle = await getVehicle(supabase, organizationId, String(formData.get("vehicleId") || ""));
+        await deleteExpense(supabase, vehicle, String(formData.get("expenseId") || ""));
+        return ok();
+      }
+      case "recordSale": {
+        await requireRole(supabase, organizationId, ["owner", "admin", "member"]);
+        saleSchema.parse(formDataToObject(formData));
+        const vehicle = await getVehicle(supabase, organizationId, String(formData.get("vehicleId") || ""));
+        const appData = await loadAppData(supabase, userData.user, organizationId);
+        await recordVehicleSale(supabase, appData, vehicle, formData);
+        return ok();
+      }
+      case "createCashTransaction": {
+        await requireRole(supabase, organizationId, ["owner", "admin"]);
+        cashTransactionSchema.parse(formDataToObject(formData));
+        await createCashTransaction(
+          supabase,
+          organizationId,
+          String(formData.get("type")) as CompanyCashTransactionType | ExternalCashTransactionType,
+          Number(formData.get("amount")),
+          String(formData.get("note") || ""),
+          String(formData.get("date") || ""),
+        );
+        return ok();
+      }
+      case "updateCashTransaction": {
+        await requireRole(supabase, organizationId, ["owner", "admin"]);
+        cashUpdateSchema.parse(formDataToObject(formData));
+        await updateCashTransaction(
+          supabase,
+          organizationId,
+          String(formData.get("account") || "") as "company" | "external",
+          String(formData.get("transactionId") || ""),
+          formData,
+        );
+        return ok();
+      }
+      case "deleteCashTransaction": {
+        await requireRole(supabase, organizationId, ["owner", "admin"]);
+        await deleteCashTransaction(
+          supabase,
+          organizationId,
+          String(formData.get("account") || "") as "company" | "external",
+          String(formData.get("transactionId") || ""),
+          String(formData.get("reason") || ""),
+        );
+        return ok();
+      }
+      case "createContact": {
+        await requireRole(supabase, organizationId, ["owner", "admin", "member"]);
+        contactSchema.parse(formDataToObject(formData));
+        await createContact(supabase, organizationId, formData);
+        return ok();
+      }
+      case "createAttachment": {
+        await requireRole(supabase, organizationId, ["owner", "admin", "member"]);
+        attachmentSchema.parse(formDataToObject(formData));
+        await createAttachment(supabase, organizationId, formData, {
+          vehicleId: optionalId(formData.get("vehicleId")),
+          expenseId: optionalId(formData.get("expenseId")),
+          saleId: optionalId(formData.get("saleId")),
+          contactId: optionalId(formData.get("contactId")),
+          companyCashTransactionId: optionalId(formData.get("companyCashTransactionId")),
+          externalCashTransactionId: optionalId(formData.get("externalCashTransactionId")),
+        });
+        return ok();
+      }
+      case "setVehicleMainPhoto": {
+        await requireRole(supabase, organizationId, ["owner", "admin", "member"]);
+        const vehicle = await getVehicle(supabase, organizationId, String(formData.get("vehicleId") || ""));
+        const attachment = await getAttachment(supabase, organizationId, String(formData.get("attachmentId") || ""));
+        await updateVehicleMainPhoto(supabase, vehicle, attachment);
+        return ok();
+      }
+      case "updateDefaultPlateCommission": {
+        await requireRole(supabase, organizationId, ["owner"]);
+        backupSettingsSchema.parse(formDataToObject(formData));
+        await updateDefaultPlateCommission(supabase, organizationId, Number(formData.get("defaultPlateCommissionAmount")));
+        return ok();
+      }
+      case "updateMemberRole": {
+        await requireRole(supabase, organizationId, ["owner"]);
+        roleUpdateSchema.parse(formDataToObject(formData));
+        await updateMemberRole(
+          supabase,
+          organizationId,
+          String(formData.get("membershipId") || ""),
+          String(formData.get("role") || "") as Role,
+        );
+        return ok();
+      }
+      case "removeMember": {
+        await requireRole(supabase, organizationId, ["owner"]);
+        await removeMember(supabase, organizationId, String(formData.get("membershipId") || ""));
+        return ok();
+      }
+      default:
+        return NextResponse.json({ ok: false, message: "Unknown operation." }, { status: 400 });
+    }
+  } catch (error) {
+    return NextResponse.json({ ok: false, message: formatValidationError(error) }, { status: 400 });
+  }
+}
+
+function ok(extra?: Record<string, unknown>) {
+  return NextResponse.json({ ok: true, ...extra });
+}
+
+async function requireRole(client: Awaited<ReturnType<typeof createSupabaseServerClient>>, organizationId: string, roles: Role[]) {
+  if (!client || !organizationId) throw new Error("Organization is required.");
+  const { data, error } = await client
+    .from("organization_memberships")
+    .select("role")
+    .eq("organization_id", organizationId)
+    .in("role", roles)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("You do not have permission for this action.");
+}
+
+async function getVehicle(client: Awaited<ReturnType<typeof createSupabaseServerClient>>, organizationId: string, vehicleId: string) {
+  if (!client || !vehicleId) throw new Error("Vehicle is required.");
+  const { data, error } = await client
+    .from("vehicles")
+    .select("*")
+    .eq("id", vehicleId)
+    .eq("organization_id", organizationId)
+    .single();
+  if (error) throw error;
+  return mapVehicle(data as Record<string, unknown>);
+}
+
+async function getAttachment(client: Awaited<ReturnType<typeof createSupabaseServerClient>>, organizationId: string, attachmentId: string) {
+  if (!client || !attachmentId) throw new Error("Attachment is required.");
+  const { data, error } = await client
+    .from("attachments")
+    .select("*")
+    .eq("id", attachmentId)
+    .eq("organization_id", organizationId)
+    .single();
+  if (error) throw error;
+  return mapAttachment(data as Record<string, unknown>);
+}
+
+function optionalId(value: FormDataEntryValue | null) {
+  const text = String(value ?? "").trim();
+  return text || undefined;
+}
+
+async function updateMemberRole(
+  client: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  organizationId: string,
+  membershipId: string,
+  role: Role,
+) {
+  if (!client) throw new Error("Supabase is not configured.");
+  const membership = await getMembership(client, organizationId, membershipId);
+  if (membership.role === "owner" && role !== "owner") {
+    await assertAnotherOwnerExists(client, organizationId, membershipId);
+  }
+  const { error } = await client
+    .from("organization_memberships")
+    .update({ role })
+    .eq("id", membershipId)
+    .eq("organization_id", organizationId);
+  if (error) throw error;
+  await logServerActivity(client, organizationId, "role_changed", "organization_membership", membershipId, `Role changed to ${role}`);
+}
+
+async function removeMember(
+  client: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  organizationId: string,
+  membershipId: string,
+) {
+  if (!client) throw new Error("Supabase is not configured.");
+  const membership = await getMembership(client, organizationId, membershipId);
+  if (membership.role === "owner") {
+    await assertAnotherOwnerExists(client, organizationId, membershipId);
+  }
+  const { error } = await client
+    .from("organization_memberships")
+    .delete()
+    .eq("id", membershipId)
+    .eq("organization_id", organizationId);
+  if (error) throw error;
+  await logServerActivity(client, organizationId, "member_removed", "organization_membership", membershipId, "Organization member removed");
+}
+
+async function getMembership(client: Awaited<ReturnType<typeof createSupabaseServerClient>>, organizationId: string, membershipId: string) {
+  if (!client || !membershipId) throw new Error("Membership is required.");
+  const { data, error } = await client
+    .from("organization_memberships")
+    .select("id, role, user_id")
+    .eq("id", membershipId)
+    .eq("organization_id", organizationId)
+    .single();
+  if (error) throw error;
+  return data as { id: string; role: Role; user_id: string };
+}
+
+async function assertAnotherOwnerExists(client: Awaited<ReturnType<typeof createSupabaseServerClient>>, organizationId: string, membershipId: string) {
+  if (!client) throw new Error("Supabase is not configured.");
+  const { data, error } = await client
+    .from("organization_memberships")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .eq("role", "owner")
+    .neq("id", membershipId)
+    .limit(1);
+  if (error) throw error;
+  if (!data || data.length === 0) throw new Error("An organization must keep at least one owner.");
+}
+
+async function logServerActivity(
+  client: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  organizationId: string,
+  action: string,
+  entityType: string,
+  entityId: string,
+  message: string,
+) {
+  if (!client) return;
+  const { data: userData } = await client.auth.getUser();
+  await client.from("activity_logs").insert({
+    organization_id: organizationId,
+    action,
+    entity_type: entityType,
+    entity_id: entityId,
+    message,
+    created_by: userData.user?.id,
+  });
+}

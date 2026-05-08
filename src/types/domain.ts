@@ -56,6 +56,14 @@ export interface Organization {
   defaultPlateCommissionAmount: number;
 }
 
+export interface OrganizationMembership {
+  id: string;
+  organizationId: string;
+  userId: string;
+  role: Role;
+  createdAt: string;
+}
+
 export interface Vehicle {
   id: string;
   organizationId: string;
@@ -200,6 +208,7 @@ export interface ActivityLog {
 
 export interface AppData {
   organizations: Organization[];
+  memberships: OrganizationMembership[];
   activeOrganizationId: string;
   userName: string;
   userId?: string;

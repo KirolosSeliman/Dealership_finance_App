@@ -5,7 +5,7 @@ import {
   calculateVehicleTotalCost,
 } from "@/lib/domain/calculations";
 import { DEFAULT_PLATE_COMMISSION_AMOUNT, OPENLANE_PURCHASE_TAX_RATE } from "@/lib/domain/constants";
-import { emptyAppData, mapActivityLog, mapAttachment, mapCompanyCashTransaction, mapContact, mapExpense, mapExternalCashTransaction, mapOrganization, mapSale, mapVehicle } from "@/lib/supabase/mappers";
+import { emptyAppData, mapActivityLog, mapAttachment, mapCompanyCashTransaction, mapContact, mapExpense, mapExternalCashTransaction, mapMembership, mapOrganization, mapSale, mapVehicle } from "@/lib/supabase/mappers";
 import type {
   AppData,
   Attachment,
@@ -128,6 +128,7 @@ export async function loadAppData(client: Client, user: User, activeOrganization
 
   return {
     organizations,
+    memberships: memberships.map(mapMembership),
     activeOrganizationId: organizationId,
     userId: user.id,
     userEmail: user.email,

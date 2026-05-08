@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import JSZip from "jszip";
 import {
   calculateCompanyCashBalance,
   calculateDashboardMetrics,
@@ -8,6 +9,8 @@ import {
   calculateSaleBreakdown,
   calculateVehicleTotalCost,
 } from "../src/lib/domain/calculations";
+import { generateBackupExport, restoreBackupDryRun, verifyBackupExport } from "../src/lib/backup/export";
+import { emptyAppData } from "../src/lib/supabase/mappers";
 import type {
   CompanyCashTransaction,
   ExternalCashTransaction,
@@ -127,6 +130,20 @@ test("vehicle total cost and cash balances are calculated", () => {
   assert.equal(calculateExternalCashBalance(external), 500);
 });
 
+test("deleted cash transactions are excluded from balances", () => {
+  const company: CompanyCashTransaction[] = [
+    { id: "1", organizationId: "org-1", type: "company_cash_added", amount: 5000, date: "2026-01-01", createdAt: "2026-01-01", createdBy: "user-1" },
+    { id: "2", organizationId: "org-1", type: "company_cash_added", amount: 9000, date: "2026-01-02", createdAt: "2026-01-02", createdBy: "user-1", deletedAt: "2026-01-03" },
+  ];
+  const external: ExternalCashTransaction[] = [
+    { id: "1", organizationId: "org-1", type: "external_commission_earned", amount: 1200, date: "2026-01-01", createdAt: "2026-01-01", createdBy: "user-1" },
+    { id: "2", organizationId: "org-1", type: "external_cash_personally_removed", amount: 400, date: "2026-01-02", createdAt: "2026-01-02", createdBy: "user-1", deletedAt: "2026-01-03" },
+  ];
+
+  assert.equal(calculateCompanyCashBalance(company), 5000);
+  assert.equal(calculateExternalCashBalance(external), 1200);
+});
+
 test("vehicle purchase price expense does not duplicate the vehicle purchase price", () => {
   const tiguan: Vehicle = {
     ...vehicle,
@@ -190,4 +207,59 @@ test("dashboard metrics use sold and in-stock vehicle status", () => {
   assert.equal(metrics.vehiclesSold, 1);
   assert.equal(metrics.netProfit, 780);
   assert.equal(metrics.averageTimeToSell, 10);
+});
+
+test("backup export includes required restorable files", async () => {
+  const backup = await generateBackupExport({
+    ...emptyAppData,
+    activeOrganizationId: "org-1",
+    vehicles: [vehicle],
+  });
+  const verification = await verifyBackupExport(backup);
+  const zip = await JSZip.loadAsync(await backup.arrayBuffer());
+  const pdfHeader = (await zip.file("summary.pdf")!.async("text")).slice(0, 8);
+
+  assert.equal(verification.ok, true);
+  assert.deepEqual(verification.missing, []);
+  assert.equal(pdfHeader, "%PDF-1.4");
+});
+
+test("backup verifier rejects invalid ZIP structure", async () => {
+  const zip = new JSZip();
+  zip.file("full-backup.json", JSON.stringify({ activeOrganizationId: "org-1" }));
+  const invalidBackup = await zip.generateAsync({ type: "blob" });
+  const verification = await verifyBackupExport(invalidBackup);
+
+  assert.equal(verification.ok, false);
+  assert.equal(verification.invalid, true);
+  assert.ok(verification.missing.includes("backup-manifest.json"));
+});
+
+test("restore dry-run parses backup counts without writing data", async () => {
+  const backup = await generateBackupExport({
+    ...emptyAppData,
+    activeOrganizationId: "org-1",
+    vehicles: [vehicle],
+    expenses: [
+      {
+        id: "expense-1",
+        organizationId: "org-1",
+        vehicleId: "vehicle-1",
+        category: "repair",
+        amountBeforeTax: 100,
+        taxRate: 0.15,
+        taxAmount: 15,
+        totalAmount: 115,
+        date: "2026-01-02",
+        createdAt: "2026-01-02",
+        createdBy: "user-1",
+      },
+    ],
+  });
+  const dryRun = await restoreBackupDryRun(backup);
+
+  assert.equal(dryRun.ok, true);
+  assert.equal(dryRun.summary?.vehicles, 1);
+  assert.equal(dryRun.summary?.expenses, 1);
+  assert.deepEqual(dryRun.conflicts, []);
 });

@@ -5,6 +5,7 @@ import type {
   CompanyCashTransaction,
   Contact,
   ExternalCashTransaction,
+  OrganizationMembership,
   Organization,
   Sale,
   Vehicle,
@@ -16,6 +17,7 @@ type Row = Record<string, unknown>;
 
 export const emptyAppData: AppData = {
   organizations: [],
+  memberships: [],
   activeOrganizationId: "",
   userName: "",
   vehicles: [],
@@ -38,6 +40,16 @@ export function mapOrganization(row: Row): Organization {
     defaultPlateCommissionAmount: numberValue(
       organization?.default_plate_commission_amount ?? row.default_plate_commission_amount ?? DEFAULT_PLATE_COMMISSION_AMOUNT,
     ),
+  };
+}
+
+export function mapMembership(row: Row): OrganizationMembership {
+  return {
+    id: String(row.id),
+    organizationId: String(row.organization_id),
+    userId: String(row.user_id),
+    role: String(row.role ?? "viewer") as OrganizationMembership["role"],
+    createdAt: dateTimeValue(row.created_at),
   };
 }
 

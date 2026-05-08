@@ -1,6 +1,6 @@
 # Dealer Flow
 
-Dealer Flow is a personal finance, inventory, tax-reporting, backup, and contact-management MVP for an independent vehicle dealer in Quebec.
+Dealer Flow is a personal finance, inventory, tax-reporting, backup, and contact-management app for an independent vehicle dealer in Quebec.
 
 ## Stack
 
@@ -22,7 +22,29 @@ npm run dev
 
 Open `http://localhost:3000`.
 
-Copy `.env.example` to `.env.local` and configure Supabase before using the app. The UI no longer uses demo data as the source of truth.
+Copy `.env.example` to `.env.local` and configure Supabase before using the app. Production flows use Supabase data as the source of truth.
+
+## Environment variables
+
+Required client-safe variables:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `NEXT_PUBLIC_APP_URL`
+
+Required server-only variables:
+
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `CRON_SECRET`
+
+Cloudflare R2 automatic backups require:
+
+- `R2_ACCOUNT_ID`
+- `R2_ACCESS_KEY_ID`
+- `R2_SECRET_ACCESS_KEY`
+- `R2_BUCKET_NAME`
+
+Do not expose service-role or R2 secrets to the browser. `CRON_SECRET` is required; `/api/backups/daily` returns an error when it is missing or incorrect.
 
 ## Database
 
@@ -37,9 +59,39 @@ The schema includes:
 - activity logs
 - backup job/file tables
 
+After the base schema, run the migrations in `supabase/migrations`:
+
+```text
+20260507_sales_member_policy.sql
+20260508_production_constraints.sql
+```
+
+The production constraints migration adds financial data checks, prevents duplicate sales for the same vehicle, validates organization matches for expenses/sales, and adds the sales update RLS policy.
+
 ## Backups
 
-Local backups are generated in the browser from the currently loaded organization data. Automatic Cloudflare R2 backups are available at `/api/backups/daily` and scheduled by `vercel.json`; configure the R2 and service-role environment variables before enabling the cron in production.
+Local backups are generated from the currently loaded organization data as ZIP files. The ZIP includes JSON, CSV, a manifest, attachment metadata, activity logs, and a real PDF summary.
+
+The Backups page can verify a backup ZIP before trusting it and can run a restore dry-run. Dry-run parses the ZIP and reports counts/conflicts without writing to Supabase.
+
+Automatic Cloudflare R2 backups are available at `/api/backups/daily` and scheduled by `vercel.json`; configure the R2, service-role, and `CRON_SECRET` environment variables before enabling the cron in production. Backups are written under:
+
+```text
+dealer-flow-backups/{organization_id}/{year}/{month}/dealer-flow-backup-{date}-{timestamp}.zip
+```
+
+Manual R2 uploads require an authenticated owner/admin of the selected organization.
+
+## Deployment checklist
+
+- Configure all environment variables from `.env.example`.
+- Run `supabase/schema.sql`, then every SQL file in `supabase/migrations`.
+- Confirm `dealer-flow-private` is a private Supabase Storage bucket.
+- Confirm RLS is enabled on organization-owned tables.
+- Confirm `CRON_SECRET` is set in production and in the Vercel cron authorization header.
+- Run `npm test`, `npm run lint`, and `npm run build`.
+- Generate a local backup, verify it, and run restore dry-run before relying on backup files.
+- Trigger one manual R2 backup upload as an owner/admin and confirm the object appears in Cloudflare R2.
 
 ## Validation
 

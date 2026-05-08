@@ -2,7 +2,7 @@ import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { createClient } from "@supabase/supabase-js";
 import JSZip from "jszip";
 import { NextResponse } from "next/server";
-import { toCsv } from "@/lib/backup/export";
+import { BACKUP_VERSION, generateReportPdf, toCsv } from "@/lib/backup/export";
 
 const organizationTables = [
   "vehicles",
@@ -19,7 +19,13 @@ const organizationTables = [
 export async function GET(request: Request) {
   const cronSecret = process.env.CRON_SECRET;
   const authHeader = request.headers.get("authorization");
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+  if (!cronSecret) {
+    return NextResponse.json(
+      { ok: false, message: "CRON_SECRET is required before daily backups can run." },
+      { status: 503 },
+    );
+  }
+  if (authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ ok: false, message: "Unauthorized." }, { status: 401 });
   }
 
@@ -56,6 +62,7 @@ export async function GET(request: Request) {
   const uploaded: string[] = [];
   for (const organization of organizations ?? []) {
     const organizationId = String(organization.id);
+    const now = new Date();
     const backupData: Record<string, unknown[]> = {};
     const zip = new JSZip();
 
@@ -66,6 +73,13 @@ export async function GET(request: Request) {
     }
 
     zip.file("full-backup.json", JSON.stringify({ organization, ...backupData }, null, 2));
+    zip.file("backup-manifest.json", JSON.stringify({
+      appName: "Dealer Flow",
+      backupVersion: BACKUP_VERSION,
+      generatedAt: now.toISOString(),
+      organizationId,
+      counts: Object.fromEntries(Object.entries(backupData).map(([table, rows]) => [table, rows.length])),
+    }, null, 2));
     zip.file("vehicles.csv", toCsv(backupData.vehicles as object[]));
     zip.file("expenses.csv", toCsv(backupData.vehicle_expenses as object[]));
     zip.file("sales.csv", toCsv(backupData.sales as object[]));
@@ -75,9 +89,19 @@ export async function GET(request: Request) {
     zip.file("tax-reports.csv", toCsv(backupData.tax_reports as object[]));
     zip.file("attachments-metadata.json", JSON.stringify(backupData.attachments, null, 2));
     zip.file("activity-logs.csv", toCsv(backupData.activity_logs as object[]));
-    zip.file("summary.pdf.txt", "Dealer Flow backup summary. PDF renderer can replace this text artifact later.");
+    const summaryPdf = await generateReportPdf({
+      title: "Dealer Flow Daily Backup Summary",
+      organizationId,
+      lines: [
+        `Generated: ${now.toISOString()}`,
+        `Vehicles: ${backupData.vehicles.length}`,
+        `Expenses: ${backupData.vehicle_expenses.length}`,
+        `Sales: ${backupData.sales.length}`,
+        `Contacts: ${backupData.contacts.length}`,
+      ],
+    });
+    zip.file("summary.pdf", await summaryPdf.arrayBuffer());
 
-    const now = new Date();
     const date = now.toISOString().slice(0, 10);
     const year = now.getUTCFullYear();
     const month = String(now.getUTCMonth() + 1).padStart(2, "0");

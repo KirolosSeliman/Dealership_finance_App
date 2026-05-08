@@ -24,14 +24,13 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Area,
   AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
@@ -52,33 +51,18 @@ import {
   daysBetween,
   generateTaxReport,
 } from "@/lib/domain/calculations";
-import { generateBackupExport } from "@/lib/backup/export";
+import { generateBackupExport, restoreBackupDryRun, verifyBackupExport } from "@/lib/backup/export";
 import { getDictionary } from "@/lib/i18n";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { emptyAppData } from "@/lib/supabase/mappers";
 import {
-  createAttachment as createAttachmentRecord,
-  createCashTransaction,
-  createContact as createContactRecord,
-  createExpense,
-  deleteCashTransaction,
-  deleteExpense,
-  createOrganization as createOrganizationRecord,
-  createVehicle,
   getCurrentUser,
   isSupabaseConfigured,
-  joinOrganization as joinOrganizationRecord,
   loadAppData,
-  recordVehicleSale,
   saveLanguagePreference,
   signIn,
   signOut,
   signUp,
-  updateDefaultPlateCommission,
-  updateCashTransaction,
-  updateVehicleMainPhoto,
-  updateVehicle,
-  updateExpense,
 } from "@/lib/supabase/repository";
 import type {
   AppData,
@@ -98,6 +82,7 @@ type VehicleMode = "list" | "new" | "detail";
 type VehicleTab = "overview" | "details" | "expenses" | "documents" | "sale" | "timeline";
 type CashAccount = "company" | "external";
 type CashTransaction = CompanyCashTransaction | ExternalCashTransaction;
+type Permissions = ReturnType<typeof getPermissions>;
 
 const languageKey = "dealer-flow-language";
 
@@ -244,6 +229,7 @@ export function DealerFlowApp() {
     () => (activeOrganization ? scopeData(data, activeOrganization.id) : data),
     [data, activeOrganization],
   );
+  const permissions = getPermissions(activeOrganization?.role);
   const metrics = useMemo(() => calculateDashboardMetrics(scoped), [scoped]);
   const selectedVehicle =
     scoped.vehicles.find((vehicle) => vehicle.id === selectedVehicleId) ?? scoped.vehicles[0];
@@ -308,7 +294,7 @@ export function DealerFlowApp() {
     setLoading(true);
     setErrorMessage("");
     try {
-      await createOrganizationRecord(supabase, name);
+      await serverMutation("createOrganization", formData);
       await refreshData();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Could not create organization.");
@@ -324,7 +310,7 @@ export function DealerFlowApp() {
     setLoading(true);
     setErrorMessage("");
     try {
-      await joinOrganizationRecord(supabase, code);
+      await serverMutation("joinOrganization", formData);
       await refreshData();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Could not join organization.");
@@ -339,14 +325,42 @@ export function DealerFlowApp() {
     setLoading(true);
     setErrorMessage("");
     try {
-      await updateDefaultPlateCommission(
-        supabase,
-        activeOrganization.id,
-        Number.isFinite(amount) ? Math.max(0, amount) : 250,
-      );
+      const payload = cloneFormData(formData, {
+        organizationId: activeOrganization.id,
+        defaultPlateCommissionAmount: String(Number.isFinite(amount) ? Math.max(0, amount) : 250),
+      });
+      await serverMutation("updateDefaultPlateCommission", payload);
       await refreshData(activeOrganization.id);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Could not update Commission Plaque.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function updateMemberRole(formData: FormData) {
+    if (!activeOrganization) return;
+    setLoading(true);
+    setErrorMessage("");
+    try {
+      await serverMutation("updateMemberRole", cloneFormData(formData, { organizationId: activeOrganization.id }));
+      await refreshData(activeOrganization.id);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not update member role.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function removeMember(membershipId: string) {
+    if (!activeOrganization) return;
+    setLoading(true);
+    setErrorMessage("");
+    try {
+      await serverMutation("removeMember", newMutationForm({ organizationId: activeOrganization.id, membershipId }));
+      await refreshData(activeOrganization.id);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not remove member.");
     } finally {
       setLoading(false);
     }
@@ -357,7 +371,8 @@ export function DealerFlowApp() {
     setLoading(true);
     setErrorMessage("");
     try {
-      const id = await createVehicle(supabase, activeOrganization.id, formData);
+      const response = await serverMutation("createVehicle", cloneFormData(formData, { organizationId: activeOrganization.id }));
+      const id = String(response.id ?? "");
       await refreshData(activeOrganization.id);
       setSelectedVehicleId(id);
       setSelectedVehicleTab("overview");
@@ -375,7 +390,7 @@ export function DealerFlowApp() {
     setLoading(true);
     setErrorMessage("");
     try {
-      await createExpense(supabase, vehicleSnapshot, formData);
+      await serverMutation("createExpense", cloneFormData(formData, { organizationId: vehicleSnapshot.organizationId, vehicleId: vehicleSnapshot.id }));
       await refreshData(vehicleSnapshot.organizationId);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Could not add expense.");
@@ -390,7 +405,7 @@ export function DealerFlowApp() {
     setLoading(true);
     setErrorMessage("");
     try {
-      await updateExpense(supabase, vehicleSnapshot, expenseId, formData);
+      await serverMutation("updateExpense", cloneFormData(formData, { organizationId: vehicleSnapshot.organizationId, vehicleId: vehicleSnapshot.id, expenseId }));
       await refreshData(vehicleSnapshot.organizationId);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Could not update expense.");
@@ -405,7 +420,7 @@ export function DealerFlowApp() {
     setLoading(true);
     setErrorMessage("");
     try {
-      await deleteExpense(supabase, vehicleSnapshot, expenseId);
+      await serverMutation("deleteExpense", newMutationForm({ organizationId: vehicleSnapshot.organizationId, vehicleId: vehicleSnapshot.id, expenseId }));
       setData((current) => ({
         ...current,
         expenses: current.expenses.filter((expense) => expense.id !== expenseId),
@@ -423,7 +438,7 @@ export function DealerFlowApp() {
     setLoading(true);
     setErrorMessage("");
     try {
-      await recordVehicleSale(supabase, scoped, selectedVehicle, formData);
+      await serverMutation("recordSale", cloneFormData(formData, { organizationId: selectedVehicle.organizationId, vehicleId: selectedVehicle.id }));
       await refreshData(selectedVehicle.organizationId);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Could not record sale.");
@@ -437,7 +452,13 @@ export function DealerFlowApp() {
     setLoading(true);
     setErrorMessage("");
     try {
-      await createCashTransaction(supabase, activeOrganization.id, type, amount, note, date);
+      await serverMutation("createCashTransaction", newMutationForm({
+        organizationId: activeOrganization.id,
+        type,
+        amount: String(amount),
+        note,
+        date: date || today(),
+      }));
       await refreshData(activeOrganization.id);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Could not create cash transaction.");
@@ -451,7 +472,7 @@ export function DealerFlowApp() {
     setLoading(true);
     setErrorMessage("");
     try {
-      await updateCashTransaction(supabase, activeOrganization.id, account, transactionId, formData);
+      await serverMutation("updateCashTransaction", cloneFormData(formData, { organizationId: activeOrganization.id, account, transactionId }));
       await refreshData(activeOrganization.id);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Could not update cash transaction.");
@@ -465,7 +486,7 @@ export function DealerFlowApp() {
     setLoading(true);
     setErrorMessage("");
     try {
-      await deleteCashTransaction(supabase, activeOrganization.id, account, transactionId, reason);
+      await serverMutation("deleteCashTransaction", newMutationForm({ organizationId: activeOrganization.id, account, transactionId, reason }));
       await refreshData(activeOrganization.id);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Could not delete cash transaction.");
@@ -479,7 +500,7 @@ export function DealerFlowApp() {
     setLoading(true);
     setErrorMessage("");
     try {
-      await updateVehicle(supabase, selectedVehicle, formData);
+      await serverMutation("updateVehicle", cloneFormData(formData, { organizationId: selectedVehicle.organizationId, vehicleId: selectedVehicle.id }));
       await refreshData(selectedVehicle.organizationId);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Could not update vehicle.");
@@ -493,7 +514,7 @@ export function DealerFlowApp() {
     setLoading(true);
     setErrorMessage("");
     try {
-      await createContactRecord(supabase, activeOrganization.id, formData);
+      await serverMutation("createContact", cloneFormData(formData, { organizationId: activeOrganization.id }));
       await refreshData(activeOrganization.id);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Could not create contact.");
@@ -507,7 +528,7 @@ export function DealerFlowApp() {
     setLoading(true);
     setErrorMessage("");
     try {
-      await createAttachmentRecord(supabase, activeOrganization.id, formData, relation);
+      await serverMutation("createAttachment", cloneFormData(formData, { organizationId: activeOrganization.id, ...withoutUndefined(relation) }));
       await refreshData(activeOrganization.id);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Could not save attachment.");
@@ -521,7 +542,11 @@ export function DealerFlowApp() {
     setLoading(true);
     setErrorMessage("");
     try {
-      await updateVehicleMainPhoto(supabase, selectedVehicle, attachment);
+      await serverMutation("setVehicleMainPhoto", newMutationForm({
+        organizationId: selectedVehicle.organizationId,
+        vehicleId: selectedVehicle.id,
+        attachmentId: attachment.id,
+      }));
       await refreshData(selectedVehicle.organizationId);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Could not set main photo.");
@@ -545,6 +570,68 @@ export function DealerFlowApp() {
     anchor.click();
     URL.revokeObjectURL(url);
     setStatusMessage("Local backup generated.");
+  }
+
+  async function uploadR2Backup() {
+    if (!activeOrganization) return;
+    setLoading(true);
+    setErrorMessage("");
+    setStatusMessage("");
+    try {
+      const blob = await generateBackupExport(scoped);
+      const backupBase64 = await blobToBase64(blob);
+      const fileName = `dealer-flow-backup-${today()}-${Date.now()}.zip`;
+      const response = await fetch("/api/backups/r2", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          organizationId: activeOrganization.id,
+          fileName,
+          backupBase64,
+        }),
+      });
+      const result = (await response.json()) as { ok?: boolean; key?: string; message?: string };
+      if (!response.ok || !result.ok) throw new Error(result.message || "Cloudflare R2 backup failed.");
+      setStatusMessage(`Cloudflare R2 backup uploaded: ${result.key}`);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not upload Cloudflare R2 backup.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function verifyBackupFile(file: File) {
+    setLoading(true);
+    setErrorMessage("");
+    setStatusMessage("");
+    try {
+      const result = await verifyBackupExport(file);
+      if (!result.ok) {
+        throw new Error(`Backup verification failed. Missing: ${result.missing.join(", ") || "none"}. Errors: ${result.errors.join(", ") || "none"}.`);
+      }
+      setStatusMessage("Backup ZIP verified successfully.");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not verify backup ZIP.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function dryRunRestore(file: File) {
+    setLoading(true);
+    setErrorMessage("");
+    setStatusMessage("");
+    try {
+      const result = await restoreBackupDryRun(file);
+      if (!result.ok) {
+        throw new Error(`Restore dry-run found conflicts: ${result.conflicts.join(", ") || "unknown conflict"}`);
+      }
+      setStatusMessage(`Restore dry-run OK: ${result.summary?.vehicles ?? 0} vehicles, ${result.summary?.expenses ?? 0} expenses, ${result.summary?.sales ?? 0} sales, ${result.summary?.contacts ?? 0} contacts. No data was written.`);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not run restore dry-run.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   const pageTitle =
@@ -665,6 +752,7 @@ export function DealerFlowApp() {
               dateRange={dateRange}
               setDateRange={setDateRange}
               navigate={navigate}
+              permissions={permissions}
             />
           )}
           {view === "vehicles" && (
@@ -698,6 +786,7 @@ export function DealerFlowApp() {
               recordSale={recordSale}
               addAttachment={addAttachment}
               setMainPhoto={setVehicleMainPhoto}
+              permissions={permissions}
             />
           )}
           {view === "cash" && (
@@ -709,20 +798,24 @@ export function DealerFlowApp() {
               onQuickTransaction={addCashTransaction}
               onEditTransaction={editCashTransaction}
               onDeleteTransaction={removeCashTransaction}
+              permissions={permissions}
             />
           )}
-          {view === "contacts" && <Contacts t={t} contacts={scoped.contacts} attachments={scoped.attachments} onSubmit={addContact} />}
+          {view === "contacts" && <Contacts t={t} contacts={scoped.contacts} attachments={scoped.attachments} onSubmit={addContact} permissions={permissions} />}
           {view === "taxes" && <Taxes t={t} scoped={scoped} dateRange={dateRange} setDateRange={setDateRange} />}
-          {view === "backups" && <Backups t={t} organizationId={activeOrganization.id} onDownload={downloadBackup} />}
+          {view === "backups" && <Backups t={t} organizationId={activeOrganization.id} onDownload={downloadBackup} onUploadR2={uploadR2Backup} onVerify={verifyBackupFile} onRestoreDryRun={dryRunRestore} permissions={permissions} />}
           {view === "settings" && (
             <SettingsPage
               t={t}
-              organizations={data.organizations}
+              memberships={scoped.memberships}
               activeOrganization={activeOrganization}
               onCreate={createOrganization}
               onJoin={joinOrganization}
               onSaveDefaultPlateCommission={saveDefaultPlateCommission}
+              onUpdateMemberRole={updateMemberRole}
+              onRemoveMember={removeMember}
               onSignOut={logout}
+              permissions={permissions}
             />
           )}
         </section>
@@ -743,7 +836,7 @@ function SupabaseSetupScreen({ t }: { t: ReturnType<typeof getDictionary> }) {
           and create the private storage bucket `dealer-flow-private`.
         </p>
         <p className="mt-4 rounded-lg border border-amber-400/20 bg-amber-400/8 p-3 text-sm text-amber-100">
-          Demo data is no longer used as the application source of truth.
+          Production pages require Supabase data and private organization access.
         </p>
       </div>
     </div>
@@ -868,6 +961,7 @@ function Dashboard({
   dateRange,
   setDateRange,
   navigate,
+  permissions,
 }: {
   t: ReturnType<typeof getDictionary>;
   metrics: ReturnType<typeof calculateDashboardMetrics>;
@@ -875,6 +969,7 @@ function Dashboard({
   dateRange: { start: string; end: string };
   setDateRange: (range: { start: string; end: string }) => void;
   navigate: (view: View, options?: { mode?: VehicleMode; vehicleId?: string; tab?: VehicleTab }) => void;
+  permissions: Permissions;
 }) {
   const visibleSales = scoped.sales.filter((sale) => isInDateRange(sale.saleDate, dateRange));
   const visibleExpenses = scoped.expenses.filter((expense) => isInDateRange(expense.date, dateRange));
@@ -934,10 +1029,12 @@ function Dashboard({
         <div className="flex flex-wrap items-center gap-2">
           <input className="control compact-control" type="date" value={dateRange.start} onChange={(event) => setDateRange({ ...dateRange, start: event.target.value })} />
           <input className="control compact-control" type="date" value={dateRange.end} onChange={(event) => setDateRange({ ...dateRange, end: event.target.value })} />
-          <button className="primary-button" onClick={() => navigate("vehicles", { mode: "new" })}>
-            <Plus size={18} />
-            {t.actions.addVehicle}
-          </button>
+          {permissions.manageVehicles && (
+            <button className="primary-button" onClick={() => navigate("vehicles", { mode: "new" })}>
+              <Plus size={18} />
+              {t.actions.addVehicle}
+            </button>
+          )}
         </div>
       </div>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -980,11 +1077,18 @@ function Dashboard({
 }
 
 function ChartPanel({ title, data, type, summary }: { title: string; data: { label: string; value: number }[]; type: "area" | "bar"; summary: string }) {
-  const [mounted, setMounted] = useState(false);
+  const chartRef = useRef<HTMLDivElement>(null);
+  const [chartWidth, setChartWidth] = useState(0);
   useEffect(() => {
-    const timeout = window.setTimeout(() => setMounted(true), 0);
-    return () => window.clearTimeout(timeout);
+    const element = chartRef.current;
+    if (!element) return;
+    const updateWidth = () => setChartWidth(Math.floor(element.getBoundingClientRect().width));
+    updateWidth();
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(element);
+    return () => observer.disconnect();
   }, []);
+  const chartHeight = 224;
   return (
     <div className="panel h-80">
       <div className="mb-3 flex items-start justify-between gap-3">
@@ -994,29 +1098,29 @@ function ChartPanel({ title, data, type, summary }: { title: string; data: { lab
           <p className="mt-1 text-sm font-semibold text-white">{summary}</p>
         </div>
       </div>
-      {mounted ? (
-        <ResponsiveContainer width="100%" height="76%">
-          {type === "area" ? (
-            <AreaChart data={data}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(100,116,139,.16)" />
-              <XAxis dataKey="label" stroke="#64748b" />
-              <YAxis stroke="#64748b" />
-              <Tooltip contentStyle={{ background: "#101827", border: "1px solid rgba(71,85,105,.55)", borderRadius: 8 }} />
-              <Area type="monotone" dataKey="value" stroke="#67b7c7" fill="#67b7c7" fillOpacity={0.16} />
-            </AreaChart>
-          ) : (
-            <BarChart data={data}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(100,116,139,.16)" />
-              <XAxis dataKey="label" stroke="#64748b" />
-              <YAxis stroke="#64748b" />
-              <Tooltip contentStyle={{ background: "#101827", border: "1px solid rgba(71,85,105,.55)", borderRadius: 8 }} />
-              <Bar dataKey="value" fill="#7ca98f" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          )}
-        </ResponsiveContainer>
-      ) : (
-        <div className="h-[76%] rounded-md border border-slate-800 bg-slate-900/40" />
-      )}
+      <div ref={chartRef} className="h-56 min-h-0 min-w-0">
+        {chartWidth > 0 ? (
+          type === "area" ? (
+              <AreaChart data={data} width={chartWidth} height={chartHeight}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(100,116,139,.16)" />
+                <XAxis dataKey="label" stroke="#64748b" />
+                <YAxis stroke="#64748b" />
+                <Tooltip contentStyle={{ background: "#101827", border: "1px solid rgba(71,85,105,.55)", borderRadius: 8 }} />
+                <Area type="monotone" dataKey="value" stroke="#67b7c7" fill="#67b7c7" fillOpacity={0.16} />
+              </AreaChart>
+            ) : (
+              <BarChart data={data} width={chartWidth} height={chartHeight}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(100,116,139,.16)" />
+                <XAxis dataKey="label" stroke="#64748b" />
+                <YAxis stroke="#64748b" />
+                <Tooltip contentStyle={{ background: "#101827", border: "1px solid rgba(71,85,105,.55)", borderRadius: 8 }} />
+                <Bar dataKey="value" fill="#7ca98f" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            )
+        ) : (
+          <div className="h-56 rounded-md border border-slate-800 bg-slate-900/40" />
+        )}
+      </div>
     </div>
   );
 }
@@ -1048,6 +1152,7 @@ function VehiclesSection(props: {
   recordSale: (formData: FormData) => void;
   addAttachment: (formData: FormData, relation: Record<string, string | undefined>) => void;
   setMainPhoto: (attachment: Attachment) => void;
+  permissions: Permissions;
 }) {
   if (props.mode === "new") {
     return (
@@ -1056,7 +1161,7 @@ function VehiclesSection(props: {
           <ChevronLeft size={18} />
           {props.t.nav.inventory}
         </button>
-        <AddVehicle t={props.t} onSubmit={props.addVehicle} />
+        {props.permissions.manageVehicles ? <AddVehicle t={props.t} onSubmit={props.addVehicle} /> : <EmptyState title="Read-only access" copy="Your role cannot add vehicles." />}
       </div>
     );
   }
@@ -1078,6 +1183,7 @@ function Inventory({
   statusFilter,
   setStatusFilter,
   navigate,
+  permissions,
 }: Parameters<typeof VehiclesSection>[0]) {
   return (
     <div className="space-y-4">
@@ -1095,11 +1201,12 @@ function Inventory({
             <button className={inventoryMode === "cards" ? "segmented-active" : ""} onClick={() => setInventoryMode("cards")}>{t.inventory.cardView}</button>
             <button className={inventoryMode === "table" ? "segmented-active" : ""} onClick={() => setInventoryMode("table")}>{t.inventory.tableView}</button>
           </div>
-          <button className="primary-button" onClick={() => navigate("vehicles", { mode: "new" })}><Plus size={18} />{t.actions.addVehicle}</button>
+          {permissions.manageVehicles && <button className="primary-button" onClick={() => navigate("vehicles", { mode: "new" })}><Plus size={18} />{t.actions.addVehicle}</button>}
         </div>
       </div>
       {inventoryMode === "cards" ? (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {vehicles.length === 0 && <EmptyState title="No vehicles yet" copy={permissions.manageVehicles ? "Add your first vehicle to start tracking inventory." : "No vehicles are available for this organization."} />}
           {vehicles.map((vehicle) => (
             <VehicleCard
               key={vehicle.id}
@@ -1168,6 +1275,7 @@ function VehicleDetailTabs({
   recordSale,
   addAttachment,
   setMainPhoto,
+  permissions,
 }: Parameters<typeof VehiclesSection>[0] & { vehicle: Vehicle }) {
   const sale = sales.find((item) => item.vehicleId === vehicle.id);
   const vehicleAttachments = attachments.filter((attachment) => attachment.vehicleId === vehicle.id || attachment.saleId === sale?.id);
@@ -1192,8 +1300,8 @@ function VehicleDetailTabs({
           </div>
         </div>
         <div className="flex flex-col gap-2 lg:items-end">
-          <button className="secondary-button" onClick={() => setSelectedTab("expenses")}><Receipt size={18} />{t.actions.addExpense}</button>
-          <button className="primary-button" onClick={() => setSelectedTab("sale")}><Banknote size={18} />{t.actions.recordSale}</button>
+          {permissions.manageExpenses && <button className="secondary-button" onClick={() => setSelectedTab("expenses")}><Receipt size={18} />{t.actions.addExpense}</button>}
+          {permissions.manageSales && <button className="primary-button" onClick={() => setSelectedTab("sale")}><Banknote size={18} />{t.actions.recordSale}</button>}
         </div>
       </div>
       <div className="tabs-strip">
@@ -1220,14 +1328,14 @@ function VehicleDetailTabs({
             <p className="mt-4 rounded-md border border-amber-400/20 bg-amber-400/8 p-3 text-sm text-amber-100">{TAX_DISCLAIMER}</p>
           </Panel>
           <div className="xl:col-span-2">
-            <PhotoManager t={t} vehicle={vehicle} photos={vehiclePhotos} onUpload={addAttachment} onSetMain={setMainPhoto} />
+            <PhotoManager t={t} vehicle={vehicle} photos={vehiclePhotos} onUpload={addAttachment} onSetMain={setMainPhoto} permissions={permissions} />
           </div>
         </div>
       )}
-      {selectedTab === "details" && <VehicleDetailsTab t={t} vehicle={vehicle} onSubmit={editVehicle} />}
-      {selectedTab === "expenses" && <Expenses t={t} vehicle={vehicle} expenses={expenses} onSubmit={addExpense} onEdit={editExpense} onDelete={deleteExpense} />}
-      {selectedTab === "documents" && <DocumentsTab t={t} vehicle={vehicle} attachments={vehicleAttachments} onSubmit={addAttachment} />}
-      {selectedTab === "sale" && <SaleForm t={t} vehicle={vehicle} expenses={expenses} onSubmit={recordSale} sale={sale} contacts={contacts} />}
+      {selectedTab === "details" && <VehicleDetailsTab t={t} vehicle={vehicle} onSubmit={editVehicle} permissions={permissions} />}
+      {selectedTab === "expenses" && <Expenses t={t} vehicle={vehicle} expenses={expenses} onSubmit={addExpense} onEdit={editExpense} onDelete={deleteExpense} permissions={permissions} />}
+      {selectedTab === "documents" && <DocumentsTab t={t} vehicle={vehicle} attachments={vehicleAttachments} onSubmit={addAttachment} permissions={permissions} />}
+      {selectedTab === "sale" && <SaleForm t={t} vehicle={vehicle} expenses={expenses} onSubmit={recordSale} sale={sale} contacts={contacts} permissions={permissions} />}
       {selectedTab === "timeline" && (
         <Panel title={tabLabel(t, "timeline")}>
           <Ledger rows={activityLogs.filter((log) => !log.entityId || log.entityId === vehicle.id).map((log) => [log.createdAt.slice(0, 10), log.action, log.message])} />
@@ -1278,21 +1386,25 @@ function PhotoManager({
   photos,
   onUpload,
   onSetMain,
+  permissions,
 }: {
   t: ReturnType<typeof getDictionary>;
   vehicle: Vehicle;
   photos: Attachment[];
   onUpload: (formData: FormData, relation: Record<string, string | undefined>) => void;
   onSetMain: (attachment: Attachment) => void;
+  permissions: Permissions;
 }) {
   return (
     <Panel title={t.sections.vehiclePhotos}>
-      <form className="grid gap-3 md:grid-cols-[1fr_1fr_auto]" action={(formData) => onUpload(formData, { vehicleId: vehicle.id })}>
-        <input type="hidden" name="type" value="photo" />
-        <Field label={t.fields.fileTitle}><input className="control w-full" name="title" placeholder={`${vehicle.year ?? ""} ${vehicle.make ?? ""} photo`} required /></Field>
-        <Field label={t.sections.photos}><input className="control w-full" name="file" type="file" accept="image/*" required /></Field>
-        <div className="flex items-end"><button className="primary-button" type="submit"><Upload size={18} />Upload</button></div>
-      </form>
+      {permissions.manageAttachments && (
+        <form className="grid gap-3 md:grid-cols-[1fr_1fr_auto]" action={(formData) => onUpload(formData, { vehicleId: vehicle.id })}>
+          <input type="hidden" name="type" value="photo" />
+          <Field label={t.fields.fileTitle}><input className="control w-full" name="title" placeholder={`${vehicle.year ?? ""} ${vehicle.make ?? ""} photo`} required /></Field>
+          <Field label={t.sections.photos}><input className="control w-full" name="file" type="file" accept="image/*" required /></Field>
+          <div className="flex items-end"><button className="primary-button" type="submit"><Upload size={18} />Upload</button></div>
+        </form>
+      )}
       <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {photos.length === 0 && <p className="text-sm text-slate-500">No photos uploaded yet.</p>}
         {photos.map((photo) => {
@@ -1311,9 +1423,11 @@ function PhotoManager({
                 <p className="truncate text-sm font-medium text-slate-200">{photo.title}</p>
                 {isMain && <Badge>Front</Badge>}
               </div>
-              <button className="secondary-button mt-3 w-full justify-center" type="button" disabled={isMain} onClick={() => onSetMain(photo)}>
-                {isMain ? "Selected front image" : "Set as front image"}
-              </button>
+              {permissions.manageAttachments && (
+                <button className="secondary-button mt-3 w-full justify-center" type="button" disabled={isMain} onClick={() => onSetMain(photo)}>
+                  {isMain ? "Selected front image" : "Set as front image"}
+                </button>
+              )}
             </div>
           );
         })}
@@ -1356,7 +1470,7 @@ function AddVehicle({ t, onSubmit }: { t: ReturnType<typeof getDictionary>; onSu
   );
 }
 
-function VehicleDetailsTab({ t, vehicle, onSubmit }: { t: ReturnType<typeof getDictionary>; vehicle: Vehicle; onSubmit: (formData: FormData) => void }) {
+function VehicleDetailsTab({ t, vehicle, onSubmit, permissions }: { t: ReturnType<typeof getDictionary>; vehicle: Vehicle; onSubmit: (formData: FormData) => void; permissions: Permissions }) {
   return (
     <Panel title={tabLabel(t, "details")}>
       <form className="grid gap-4 lg:grid-cols-2" action={onSubmit}>
@@ -1368,7 +1482,7 @@ function VehicleDetailsTab({ t, vehicle, onSubmit }: { t: ReturnType<typeof getD
         <Field label={t.fields.color}><input className="control w-full" name="color" defaultValue={vehicle.color} /></Field>
         <Field label={t.fields.mileage}><input className="control w-full" name="mileage" type="number" defaultValue={vehicle.mileage} /></Field>
         <Field label={t.fields.notes}><textarea className="control min-h-24 w-full" name="notes" defaultValue={vehicle.notes} /></Field>
-        <div className="lg:col-span-2"><button className="primary-button" type="submit">{t.actions.saveVehicle}</button></div>
+        {permissions.manageVehicles && <div className="lg:col-span-2"><button className="primary-button" type="submit">{t.actions.saveVehicle}</button></div>}
       </form>
     </Panel>
   );
@@ -1381,6 +1495,7 @@ function Expenses({
   onSubmit,
   onEdit,
   onDelete,
+  permissions,
 }: {
   t: ReturnType<typeof getDictionary>;
   vehicle: Vehicle;
@@ -1388,12 +1503,13 @@ function Expenses({
   onSubmit: (formData: FormData) => void;
   onEdit: (expenseId: string, formData: FormData) => void;
   onDelete: (expenseId: string) => void;
+  permissions: Permissions;
 }) {
   const vehicleExpenses = expenses.filter((expense) => expense.vehicleId === vehicle.id);
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
   return (
     <div className="grid gap-4 xl:grid-cols-[420px_1fr]">
-      <form className="panel space-y-4" action={onSubmit}>
+      {permissions.manageExpenses ? <form className="panel space-y-4" action={onSubmit}>
         <h3 className="section-title">{t.actions.addExpense}</h3>
         <Field label={t.fields.category}><select className="control w-full" name="category">{EXPENSE_CATEGORIES.map((category) => <option key={category} value={category}>{formatLabel(category)}</option>)}</select></Field>
         <Field label={t.fields.amountBeforeTax}><input className="control w-full" name="amountBeforeTax" type="number" step="0.01" required /></Field>
@@ -1402,12 +1518,12 @@ function Expenses({
         <Field label={t.fields.fileTitle}><input className="control w-full" placeholder="private://..." /></Field>
         <Field label={t.fields.notes}><textarea className="control min-h-24 w-full" name="note" /></Field>
         <button className="primary-button" type="submit">{t.actions.addExpense}</button>
-      </form>
+      </form> : <EmptyState title="Read-only expenses" copy="Your role can view expenses but cannot add or edit them." />}
       <Panel title={`${vehicle.year ?? ""} ${vehicle.make ?? ""} ${vehicle.model ?? ""}`}>
         <div className="space-y-3">
           {vehicleExpenses.map((expense) => (
             <div key={expense.id} className="rounded-lg border border-slate-800 bg-slate-950/35 p-3">
-              {editingExpenseId === expense.id ? (
+              {editingExpenseId === expense.id && permissions.manageExpenses ? (
                 <form className="grid gap-3 lg:grid-cols-2" action={(formData) => {
                   onEdit(expense.id, formData);
                   setEditingExpenseId(null);
@@ -1437,10 +1553,10 @@ function Expenses({
                     [t.fields.totalAmount, money(expense.totalAmount)],
                     [t.fields.notes, expense.note],
                   ]} />
-                  <div className="flex gap-2">
+                  {permissions.manageExpenses && <div className="flex gap-2">
                     <button className="secondary-button" type="button" onClick={() => setEditingExpenseId(expense.id)}>Edit</button>
                     <button className="secondary-button" type="button" onClick={() => onDelete(expense.id)}>Delete</button>
-                  </div>
+                  </div>}
                 </div>
               )}
             </div>
@@ -1457,16 +1573,18 @@ function DocumentsTab({
   vehicle,
   attachments,
   onSubmit,
+  permissions,
 }: {
   t: ReturnType<typeof getDictionary>;
   vehicle: Vehicle;
   attachments: AppData["attachments"];
   onSubmit: (formData: FormData, relation: Record<string, string | undefined>) => void;
+  permissions: Permissions;
 }) {
   return (
     <div className="grid gap-4 xl:grid-cols-[360px_1fr]">
       <Panel title={t.sections.photos}>
-        <form className="grid gap-3" action={(formData) => onSubmit(formData, { vehicleId: vehicle.id })}>
+        {permissions.manageAttachments ? <form className="grid gap-3" action={(formData) => onSubmit(formData, { vehicleId: vehicle.id })}>
           <Field label={t.fields.type}>
             <select className="control w-full" name="type">
               <option value="link">Link</option>
@@ -1480,7 +1598,7 @@ function DocumentsTab({
           <label className="flex items-center gap-2 text-sm text-slate-300"><input type="checkbox" name="isSensitive" />Private/sensitive</label>
           <Field label={t.fields.notes}><textarea className="control min-h-20 w-full" name="notes" /></Field>
           <button className="primary-button" type="submit"><Upload size={18} />{t.sections.documentsLinks}</button>
-        </form>
+        </form> : <p className="text-sm text-slate-500">Your role can view documents but cannot upload them.</p>}
       </Panel>
       <Panel title={t.sections.documentsLinks}>
         <AttachmentList attachments={attachments} />
@@ -1489,14 +1607,14 @@ function DocumentsTab({
   );
 }
 
-function SaleForm({ t, vehicle, expenses, onSubmit, sale, contacts }: { t: ReturnType<typeof getDictionary>; vehicle: Vehicle; expenses: VehicleExpense[]; onSubmit: (formData: FormData) => void; sale?: Sale; contacts: ContactRecord[] }) {
+function SaleForm({ t, vehicle, expenses, onSubmit, sale, contacts, permissions }: { t: ReturnType<typeof getDictionary>; vehicle: Vehicle; expenses: VehicleExpense[]; onSubmit: (formData: FormData) => void; sale?: Sale; contacts: ContactRecord[]; permissions: Permissions }) {
   const [taxableProfitAmount, setTaxableProfitAmount] = useState(sale?.taxableProfitAmount ?? 1500);
   const [realClientPayment, setRealClientPayment] = useState(sale?.realClientPayment ?? 0);
   const vehicleTotalCost = calculateVehicleTotalCost(vehicle, expenses);
   const breakdown = calculateSaleBreakdown({ vehicleTotalCost, taxableProfitAmount, realClientPayment });
   return (
     <div className="grid gap-4 xl:grid-cols-[420px_1fr]">
-      <form className="panel space-y-4" action={onSubmit}>
+      {permissions.manageSales ? <form className="panel space-y-4" action={onSubmit}>
         <h3 className="section-title">{t.actions.recordSale}</h3>
         <Field label={t.fields.saleDate}><input className="control w-full" name="saleDate" type="date" defaultValue={sale?.saleDate ?? today()} /></Field>
         <Field label={t.fields.taxableProfit}><input className="control w-full" name="taxableProfitAmount" type="number" step="0.01" value={taxableProfitAmount} onChange={(event) => setTaxableProfitAmount(Number(event.target.value))} /></Field>
@@ -1508,7 +1626,7 @@ function SaleForm({ t, vehicle, expenses, onSubmit, sale, contacts }: { t: Retur
         <Field label={t.fields.fileTitle}><input className="control w-full" placeholder="driver-license-private-path" /></Field>
         <Field label={t.fields.notes}><textarea className="control min-h-24 w-full" name="notes" defaultValue={sale?.notes} /></Field>
         <button className="primary-button" type="submit">{t.actions.recordSale}</button>
-      </form>
+      </form> : <EmptyState title="Read-only sale details" copy="Your role cannot mark vehicles as sold." />}
       <Panel title={t.sections.saleDetails}>
         <InfoGrid rows={[
           [t.fields.vehicleTotalCost, money(vehicleTotalCost)],
@@ -1541,6 +1659,7 @@ function CashManagement({
   onQuickTransaction,
   onEditTransaction,
   onDeleteTransaction,
+  permissions,
 }: {
   t: ReturnType<typeof getDictionary>;
   metrics: ReturnType<typeof calculateDashboardMetrics>;
@@ -1549,6 +1668,7 @@ function CashManagement({
   onQuickTransaction: (type: CompanyCashTransaction["type"] | ExternalCashTransaction["type"], amount: number, note: string, date?: string) => void;
   onEditTransaction: (account: CashAccount, transactionId: string, formData: FormData) => void;
   onDeleteTransaction: (account: CashAccount, transactionId: string, reason: string) => void;
+  permissions: Permissions;
 }) {
   const activeCompanyTransactions = companyTransactions.filter((transaction) => !transaction.deletedAt);
   const activeExternalTransactions = externalTransactions.filter((transaction) => !transaction.deletedAt);
@@ -1563,26 +1683,26 @@ function CashManagement({
         <div className="metric-card min-h-36">
           <p className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{t.metrics.companyCash}</p>
           <p className="mt-3 text-3xl font-semibold text-white">{money(metrics.companyCash)}</p>
-          <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          {permissions.manageCash ? <div className="mt-4 grid gap-3 lg:grid-cols-2">
             <CashActionForm t={t} label={t.actions.addCompanyCash} type="company_cash_added" onSubmit={onQuickTransaction} />
             <CashActionForm t={t} label={t.actions.withdrawCompanyCash} type="company_cash_withdrawn" onSubmit={onQuickTransaction} />
-          </div>
+          </div> : <p className="mt-4 text-sm text-slate-500">Read-only cash access.</p>}
         </div>
         <div className="metric-card min-h-36">
           <p className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{t.metrics.externalCash}</p>
           <p className="mt-3 text-3xl font-semibold text-white">{money(metrics.externalCash)}</p>
-          <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          {permissions.manageCash ? <div className="mt-4 grid gap-3 lg:grid-cols-2">
             <CashActionForm t={t} label={t.actions.transferExternalCash} type="external_cash_transferred_to_company" onSubmit={onQuickTransaction} />
             <CashActionForm t={t} label={t.actions.removeExternalCash} type="external_cash_personally_removed" onSubmit={onQuickTransaction} />
-          </div>
+          </div> : <p className="mt-4 text-sm text-slate-500">Read-only external cash access.</p>}
         </div>
       </div>
       <div className="grid gap-4 xl:grid-cols-2">
         <Panel title={t.sections.companyLedger}>
-          <CashLedger account="company" transactions={activeCompanyTransactions} onEdit={onEditTransaction} onDelete={onDeleteTransaction} />
+          <CashLedger account="company" transactions={activeCompanyTransactions} onEdit={onEditTransaction} onDelete={onDeleteTransaction} canManage={permissions.manageCash} />
         </Panel>
         <Panel title={t.sections.externalLedger}>
-          <CashLedger account="external" transactions={activeExternalTransactions} onEdit={onEditTransaction} onDelete={onDeleteTransaction} />
+          <CashLedger account="external" transactions={activeExternalTransactions} onEdit={onEditTransaction} onDelete={onDeleteTransaction} canManage={permissions.manageCash} />
         </Panel>
       </div>
       {deletedTransactions.length > 0 && (
@@ -1607,11 +1727,13 @@ function CashLedger({
   transactions,
   onEdit,
   onDelete,
+  canManage,
 }: {
   account: CashAccount;
   transactions: CashTransaction[];
   onEdit: (account: CashAccount, transactionId: string, formData: FormData) => void;
   onDelete: (account: CashAccount, transactionId: string, reason: string) => void;
+  canManage: boolean;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -1663,10 +1785,10 @@ function CashLedger({
                 ["Amount", money(transaction.amount)],
                 ["Notes", transaction.note ?? ""],
               ]} />
-              <div className="flex flex-wrap gap-2">
+              {canManage && <div className="flex flex-wrap gap-2">
                 <button className="secondary-button" type="button" onClick={() => setEditingId(transaction.id)}>Edit</button>
                 <button className="secondary-button" type="button" onClick={() => setDeletingId(transaction.id)}>Delete</button>
-              </div>
+              </div>}
             </div>
           )}
         </div>
@@ -1711,15 +1833,17 @@ function Contacts({
   contacts,
   attachments,
   onSubmit,
+  permissions,
 }: {
   t: ReturnType<typeof getDictionary>;
   contacts: ContactRecord[];
   attachments: AppData["attachments"];
   onSubmit: (formData: FormData) => void;
+  permissions: Permissions;
 }) {
   return (
     <div className="grid gap-4 xl:grid-cols-[380px_1fr]">
-      <form className="panel space-y-3" action={onSubmit}>
+      {permissions.manageContacts ? <form className="panel space-y-3" action={onSubmit}>
         <h3 className="section-title">{t.nav.contacts}</h3>
         <Field label={t.fields.buyerName}><input className="control w-full" name="fullName" required /></Field>
         <Field label={t.fields.contactType}>
@@ -1740,8 +1864,9 @@ function Contacts({
         <Field label="Country/region"><input className="control w-full" name="exportRegion" /></Field>
         <Field label={t.fields.notes}><textarea className="control min-h-20 w-full" name="notes" /></Field>
         <button className="primary-button" type="submit"><Plus size={18} />{t.nav.contacts}</button>
-      </form>
+      </form> : <EmptyState title="Read-only contacts" copy="Your role can view contacts but cannot create or edit them." />}
       <div className="grid gap-4 md:grid-cols-2">
+        {contacts.length === 0 && <EmptyState title="No contacts yet" copy={permissions.manageContacts ? "Add a buyer, seller, partner, or export contact." : "No contacts are available for this organization."} />}
         {contacts.map((contact) => (
           <div className="panel" key={contact.id}>
             <div className="flex items-start justify-between gap-3">
@@ -1778,19 +1903,88 @@ function Taxes({ t, scoped, dateRange, setDateRange }: { t: ReturnType<typeof ge
   );
 }
 
-function Backups({ t, organizationId, onDownload }: { t: ReturnType<typeof getDictionary>; organizationId: string; onDownload: () => void }) {
+function Backups({
+  t,
+  organizationId,
+  onDownload,
+  onUploadR2,
+  onVerify,
+  onRestoreDryRun,
+  permissions,
+}: {
+  t: ReturnType<typeof getDictionary>;
+  organizationId: string;
+  onDownload: () => void;
+  onUploadR2: () => void;
+  onVerify: (file: File) => void;
+  onRestoreDryRun: (file: File) => void;
+  permissions: Permissions;
+}) {
+  const [r2Configured, setR2Configured] = useState<boolean | null>(null);
   const year = new Date().getFullYear();
   const month = String(new Date().getMonth() + 1).padStart(2, "0");
+  useEffect(() => {
+    let active = true;
+    fetch("/api/backups/r2")
+      .then((response) => response.json())
+      .then((status: { configured?: boolean }) => {
+        if (active) setR2Configured(Boolean(status.configured));
+      })
+      .catch(() => {
+        if (active) setR2Configured(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
   return (
     <Panel title={t.sections.backupStatus}>
       <div className="grid gap-3 lg:grid-cols-2">
         <div className="surface-muted p-4">
           <p className="font-medium text-white">{t.backup.localReady}</p>
-          <button className="primary-button mt-4" onClick={onDownload}><Download size={18} />{t.actions.downloadBackup}</button>
+          {permissions.exportBackups ? <button className="primary-button mt-4" onClick={onDownload}><Download size={18} />{t.actions.downloadBackup}</button> : <p className="mt-3 text-sm text-slate-500">Your role cannot export backups.</p>}
         </div>
         <div className="surface-muted p-4">
-          <p className="font-medium text-white">{t.backup.r2Inactive}</p>
+          <p className="font-medium text-white">
+            {r2Configured === null ? "Checking Cloudflare R2 backup status..." : r2Configured ? t.backup.r2Active : t.backup.r2Inactive}
+          </p>
           <p className="mt-3 text-sm text-slate-500">{t.backup.path}: dealer-flow-backups/{organizationId}/{year}/{month}/dealer-flow-backup-{today()}.zip</p>
+          <button className="secondary-button mt-4" type="button" onClick={onUploadR2} disabled={!r2Configured || !permissions.manageBackups}>
+            <Upload size={18} />
+            Upload backup to R2 now
+          </button>
+        </div>
+        <div className="surface-muted p-4 lg:col-span-2">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div>
+              <p className="font-medium text-white">Verify backup ZIP</p>
+              <p className="mt-2 text-sm text-slate-500">Checks that a downloaded backup contains the required JSON, CSV, metadata, and PDF files.</p>
+              <input
+                className="control mt-4 w-full"
+                type="file"
+                accept=".zip,application/zip"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) onVerify(file);
+                  event.currentTarget.value = "";
+                }}
+              />
+            </div>
+            <div>
+              <p className="font-medium text-white">Restore dry-run</p>
+              <p className="mt-2 text-sm text-slate-500">Parses a backup and shows what would be restored without writing to Supabase.</p>
+              <input
+                className="control mt-4 w-full"
+                type="file"
+                accept=".zip,application/zip"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) onRestoreDryRun(file);
+                  event.currentTarget.value = "";
+                }}
+              />
+            </div>
+          </div>
         </div>
       </div>
     </Panel>
@@ -1799,20 +1993,26 @@ function Backups({ t, organizationId, onDownload }: { t: ReturnType<typeof getDi
 
 function SettingsPage({
   t,
-  organizations,
+  memberships,
   activeOrganization,
   onCreate,
   onJoin,
   onSaveDefaultPlateCommission,
+  onUpdateMemberRole,
+  onRemoveMember,
   onSignOut,
+  permissions,
 }: {
   t: ReturnType<typeof getDictionary>;
-  organizations: AppData["organizations"];
+  memberships: AppData["memberships"];
   activeOrganization: AppData["organizations"][number];
   onCreate: (formData: FormData) => void;
   onJoin: (formData: FormData) => void;
   onSaveDefaultPlateCommission: (formData: FormData) => void;
+  onUpdateMemberRole: (formData: FormData) => void;
+  onRemoveMember: (membershipId: string) => void;
   onSignOut: () => void;
+  permissions: Permissions;
 }) {
   return (
     <div className="grid gap-4 xl:grid-cols-2">
@@ -1827,9 +2027,29 @@ function SettingsPage({
         </div>
         <p className="mt-4 text-sm text-slate-500">{t.onboarding.roleNote}</p>
       </Panel>
-      <Panel title={t.sections.roleManagement}><Ledger rows={organizations.map((organization) => [organization.name, formatLabel(organization.role), organization.inviteCode])} /><div className="mt-4 flex flex-wrap gap-2">{ROLES.map((role) => <Badge key={role}>{formatLabel(role)}</Badge>)}</div></Panel>
+      <Panel title={t.sections.roleManagement}>
+        <div className="space-y-3">
+          {memberships.length === 0 && <p className="text-sm text-slate-500">No members found.</p>}
+          {memberships.map((membership) => (
+            <div key={membership.id} className="rounded-md border border-slate-800 bg-slate-950/35 p-3">
+              <form className="grid gap-3 md:grid-cols-[1fr_180px_auto_auto] md:items-end" action={onUpdateMemberRole}>
+                <input type="hidden" name="membershipId" value={membership.id} />
+                <Info label="User" value={membership.userId} />
+                <Field label="Role">
+                  <select className="control w-full" name="role" defaultValue={membership.role} disabled={!permissions.manageRoles}>
+                    {ROLES.map((role) => <option key={role} value={role}>{formatLabel(role)}</option>)}
+                  </select>
+                </Field>
+                {permissions.manageRoles && <button className="secondary-button" type="submit">Save role</button>}
+                {permissions.manageRoles && membership.userId !== activeOrganization.id && <button className="secondary-button" type="button" onClick={() => onRemoveMember(membership.id)}>Remove</button>}
+              </form>
+            </div>
+          ))}
+        </div>
+        <p className="mt-4 text-sm text-slate-500">Invitation code: {activeOrganization.inviteCode || "-"}</p>
+      </Panel>
       <Panel title={t.sections.vehicleDefaults}>
-        <form className="space-y-3" action={onSaveDefaultPlateCommission}>
+        {permissions.manageSettings ? <form className="space-y-3" action={onSaveDefaultPlateCommission}>
           <Field label={t.fields.defaultPlateCommission}>
             <input
               className="control w-full"
@@ -1842,7 +2062,7 @@ function SettingsPage({
           </Field>
           <p className="text-sm text-slate-500">{t.settings.defaultPlateCommissionHelp}</p>
           <button className="secondary-button" type="submit">{t.actions.saveSettings}</button>
-        </form>
+        </form> : <p className="text-sm text-slate-500">Only owners can update organization defaults.</p>}
       </Panel>
       <Panel title={t.sections.privateStorage}><p className="flex items-center gap-2 text-slate-300"><Lock size={18} />{activeOrganization.name}</p><p className="mt-3 text-sm text-slate-500">{t.backup.r2Inactive}</p></Panel>
     </div>
@@ -1851,6 +2071,15 @@ function SettingsPage({
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
   return <div className="panel"><h3 className="section-title">{title}</h3>{children}</div>;
+}
+
+function EmptyState({ title, copy }: { title: string; copy: string }) {
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-950/35 p-4">
+      <p className="font-medium text-slate-100">{title}</p>
+      <p className="mt-2 text-sm text-slate-500">{copy}</p>
+    </div>
+  );
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -1913,6 +2142,7 @@ function tabLabel(t: ReturnType<typeof getDictionary>, key: string) {
 function scopeData(data: AppData, organizationId: string): AppData {
   return {
     ...data,
+    memberships: data.memberships.filter((row) => row.organizationId === organizationId),
     vehicles: data.vehicles.filter((row) => row.organizationId === organizationId),
     expenses: data.expenses.filter((row) => row.organizationId === organizationId),
     sales: data.sales.filter((row) => row.organizationId === organizationId),
@@ -1995,4 +2225,61 @@ function formatLabel(value: string) {
 
 function today() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function getPermissions(role?: string) {
+  const owner = role === "owner";
+  const admin = role === "admin";
+  const member = role === "member";
+  const accountant = role === "accountant";
+  return {
+    manageVehicles: owner || admin || member,
+    manageExpenses: owner || admin || member,
+    manageSales: owner || admin || member,
+    manageAttachments: owner || admin || member,
+    manageContacts: owner || admin || member,
+    manageCash: owner || admin,
+    manageBackups: owner || admin,
+    exportBackups: owner || admin || accountant,
+    manageReports: owner || admin || accountant,
+    manageRoles: owner,
+    manageSettings: owner,
+  };
+}
+
+async function blobToBase64(blob: Blob) {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return window.btoa(binary);
+}
+
+async function serverMutation(operation: string, formData: FormData) {
+  formData.set("operation", operation);
+  const response = await fetch("/api/mutations", {
+    method: "POST",
+    body: formData,
+  });
+  const result = (await response.json()) as { ok?: boolean; message?: string; [key: string]: unknown };
+  if (!response.ok || !result.ok) throw new Error(result.message || "Action failed.");
+  return result;
+}
+
+function cloneFormData(source: FormData, extra: Record<string, string>) {
+  const formData = new FormData();
+  source.forEach((value, key) => formData.append(key, value));
+  Object.entries(extra).forEach(([key, value]) => formData.set(key, value));
+  return formData;
+}
+
+function newMutationForm(values: Record<string, string>) {
+  const formData = new FormData();
+  Object.entries(values).forEach(([key, value]) => formData.set(key, value));
+  return formData;
+}
+
+function withoutUndefined(values: Record<string, string | undefined>) {
+  return Object.fromEntries(Object.entries(values).filter(([, value]) => value !== undefined)) as Record<string, string>;
 }

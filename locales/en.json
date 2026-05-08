@@ -33,7 +33,7 @@
   },
   "auth": {
     "title": "Login / Signup",
-    "copy": "Supabase Auth is wired for production. This MVP shell also runs locally with demo data so workflows can be validated before credentials are configured.",
+    "copy": "Supabase Auth is wired for production. Sign in to manage real organization data securely.",
     "email": "Email",
     "password": "Password",
     "continue": "Continue"

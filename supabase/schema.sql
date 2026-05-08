@@ -454,7 +454,7 @@ create policy "write contacts" on contacts for insert with check (has_org_role(o
 create policy "update contacts" on contacts for update using (has_org_role(organization_id, array['owner','admin','member']::app_role[]));
 
 create policy "read sales" on sales for select using (is_org_member(organization_id));
-create policy "write sales" on sales for insert with check (has_org_role(organization_id, array['owner','admin']::app_role[]));
+create policy "write sales" on sales for insert with check (has_org_role(organization_id, array['owner','admin','member']::app_role[]));
 
 create policy "read company cash" on company_cash_transactions for select using (is_org_member(organization_id));
 create policy "write company cash" on company_cash_transactions for insert with check (has_org_role(organization_id, array['owner','admin']::app_role[]));

@@ -1,13 +1,24 @@
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { NextResponse } from "next/server";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+
+const required = [
+  "R2_ACCOUNT_ID",
+  "R2_ACCESS_KEY_ID",
+  "R2_SECRET_ACCESS_KEY",
+  "R2_BUCKET_NAME",
+] as const;
+
+export async function GET() {
+  const missing = required.filter((key) => !process.env[key]);
+  return NextResponse.json({
+    configured: missing.length === 0,
+    bucketName: process.env.R2_BUCKET_NAME ?? null,
+    missing,
+  });
+}
 
 export async function POST(request: Request) {
-  const required = [
-    "R2_ACCOUNT_ID",
-    "R2_ACCESS_KEY_ID",
-    "R2_SECRET_ACCESS_KEY",
-    "R2_BUCKET_NAME",
-  ] as const;
   const missing = required.filter((key) => !process.env[key]);
 
   if (missing.length > 0) {
@@ -25,6 +36,26 @@ export async function POST(request: Request) {
 
   if (!body.organizationId || !body.fileName || !body.backupBase64) {
     return NextResponse.json({ ok: false, message: "Missing backup payload." }, { status: 400 });
+  }
+
+  const supabase = await createSupabaseServerClient();
+  if (!supabase) {
+    return NextResponse.json({ ok: false, message: "Supabase is not configured." }, { status: 503 });
+  }
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  if (userError || !userData.user) {
+    return NextResponse.json({ ok: false, message: "Authentication required." }, { status: 401 });
+  }
+  const { data: membership, error: membershipError } = await supabase
+    .from("organization_memberships")
+    .select("role")
+    .eq("organization_id", body.organizationId)
+    .eq("user_id", userData.user.id)
+    .in("role", ["owner", "admin"])
+    .maybeSingle();
+  if (membershipError) throw membershipError;
+  if (!membership) {
+    return NextResponse.json({ ok: false, message: "Owner or admin role required." }, { status: 403 });
   }
 
   const now = new Date();

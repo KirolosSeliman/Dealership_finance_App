@@ -33,7 +33,7 @@
   },
   "auth": {
     "title": "Connexion / Inscription",
-    "copy": "Supabase Auth est prévu pour la production. Cette coquille MVP fonctionne aussi localement avec des données démo pour valider les flux avant la configuration.",
+    "copy": "Supabase Auth est configure pour la production. Connectez-vous pour gerer les donnees de votre organisation.",
     "email": "Courriel",
     "password": "Mot de passe",
     "continue": "Continuer"
