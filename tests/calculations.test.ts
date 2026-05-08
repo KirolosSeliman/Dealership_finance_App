@@ -10,6 +10,8 @@ import {
   calculateVehicleTotalCost,
 } from "../src/lib/domain/calculations";
 import { generateBackupExport, restoreBackupDryRun, verifyBackupExport } from "../src/lib/backup/export";
+import { assertAllowedUpload, canManageBackups, sanitizeCsvCell, sanitizeStorageFileName } from "../src/lib/security";
+import { attachmentSchema } from "../src/lib/validation";
 import { emptyAppData } from "../src/lib/supabase/mappers";
 import type {
   CompanyCashTransaction,
@@ -262,4 +264,38 @@ test("restore dry-run parses backup counts without writing data", async () => {
   assert.equal(dryRun.summary?.vehicles, 1);
   assert.equal(dryRun.summary?.expenses, 1);
   assert.deepEqual(dryRun.conflicts, []);
+});
+
+test("security helpers restrict full backup roles", () => {
+  assert.equal(canManageBackups("owner"), true);
+  assert.equal(canManageBackups("admin"), true);
+  assert.equal(canManageBackups("accountant"), false);
+  assert.equal(canManageBackups("viewer"), false);
+});
+
+test("CSV export escapes formula injection", () => {
+  assert.equal(sanitizeCsvCell("=cmd|' /C calc'!A0"), "\"'=cmd|' /C calc'!A0\"");
+  assert.equal(sanitizeCsvCell("+SUM(A1:A2)"), "\"'+SUM(A1:A2)\"");
+});
+
+test("upload validation rejects dangerous files and sanitizes names", () => {
+  assert.equal(sanitizeStorageFileName("../driver license<script>.pdf"), "driver_license_script_.pdf");
+  assert.throws(
+    () => assertAllowedUpload(new File(["alert(1)"], "x.html", { type: "text/html" })),
+    /not allowed/,
+  );
+  assert.doesNotThrow(() => assertAllowedUpload(new File(["pdf"], "invoice.pdf", { type: "application/pdf" })));
+});
+
+test("attachment links reject script URLs", () => {
+  assert.equal(attachmentSchema.safeParse({
+    type: "link",
+    title: "bad",
+    urlOrPath: "javascript:alert(1)",
+  }).success, false);
+  assert.equal(attachmentSchema.safeParse({
+    type: "link",
+    title: "good",
+    urlOrPath: "https://example.com/invoice",
+  }).success, true);
 });

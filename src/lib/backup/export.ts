@@ -1,6 +1,7 @@
 import JSZip from "jszip";
 import type { AppData } from "@/types/domain";
 import { generateTaxReport } from "@/lib/domain/calculations";
+import { MAX_BACKUP_VERIFY_BYTES, sanitizeCsvCell } from "@/lib/security";
 
 export const BACKUP_VERSION = 1;
 
@@ -57,6 +58,17 @@ export async function generateBackupExport(data: AppData) {
 }
 
 export async function verifyBackupExport(file: Blob) {
+  if (file.size > MAX_BACKUP_VERIFY_BYTES) {
+    return {
+      ok: false,
+      valid: false,
+      invalid: true,
+      warnings: [] as string[],
+      missing: [] as string[],
+      errors: ["Backup ZIP is larger than the verification limit."],
+      manifest: null,
+    };
+  }
   const requiredFiles = [
     "backup-manifest.json",
     "full-backup.json",
@@ -193,7 +205,7 @@ export function toCsv<T extends object>(rows: T[]) {
       .map((header) => {
         const value = row[header];
         const text = value === undefined || value === null ? "" : String(value);
-        return `"${text.replaceAll('"', '""')}"`;
+        return sanitizeCsvCell(text);
       })
       .join(","),
   );

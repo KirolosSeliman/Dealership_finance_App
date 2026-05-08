@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { calculateCompanyCashBalance, calculateExternalCashBalance } from "@/lib/domain/calculations";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
   createAttachment,
@@ -85,61 +86,76 @@ export async function POST(request: Request) {
         return ok();
       }
       case "createVehicle": {
-        await requireRole(supabase, organizationId, ["owner", "admin", "member"]);
+        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin", "member"]);
         vehicleSchema.parse(formDataToObject(formData));
         const id = await createVehicle(supabase, organizationId, formData);
         return ok({ id });
       }
       case "updateVehicle": {
-        await requireRole(supabase, organizationId, ["owner", "admin", "member"]);
+        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin", "member"]);
         vehicleUpdateSchema.parse(formDataToObject(formData));
         const vehicle = await getVehicle(supabase, organizationId, String(formData.get("vehicleId") || ""));
         await updateVehicle(supabase, vehicle, formData);
         return ok();
       }
       case "createExpense": {
-        await requireRole(supabase, organizationId, ["owner", "admin", "member"]);
+        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin", "member"]);
         expenseSchema.parse(formDataToObject(formData));
         const vehicle = await getVehicle(supabase, organizationId, String(formData.get("vehicleId") || ""));
         const id = await createExpense(supabase, vehicle, formData);
         return ok({ id });
       }
       case "updateExpense": {
-        await requireRole(supabase, organizationId, ["owner", "admin", "member"]);
+        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin", "member"]);
         expenseSchema.parse(formDataToObject(formData));
         const vehicle = await getVehicle(supabase, organizationId, String(formData.get("vehicleId") || ""));
         await updateExpense(supabase, vehicle, String(formData.get("expenseId") || ""), formData);
         return ok();
       }
       case "deleteExpense": {
-        await requireRole(supabase, organizationId, ["owner", "admin", "member"]);
+        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin", "member"]);
         const vehicle = await getVehicle(supabase, organizationId, String(formData.get("vehicleId") || ""));
         await deleteExpense(supabase, vehicle, String(formData.get("expenseId") || ""));
         return ok();
       }
       case "recordSale": {
-        await requireRole(supabase, organizationId, ["owner", "admin", "member"]);
+        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin", "member"]);
         saleSchema.parse(formDataToObject(formData));
         const vehicle = await getVehicle(supabase, organizationId, String(formData.get("vehicleId") || ""));
         const appData = await loadAppData(supabase, userData.user, organizationId);
+        if (appData.sales.some((sale) => sale.vehicleId === vehicle.id)) {
+          throw new ApiError(400, "This vehicle already has a sale record.");
+        }
         await recordVehicleSale(supabase, appData, vehicle, formData);
         return ok();
       }
       case "createCashTransaction": {
-        await requireRole(supabase, organizationId, ["owner", "admin"]);
+        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin"]);
         cashTransactionSchema.parse(formDataToObject(formData));
+        const appData = await loadAppData(supabase, userData.user, organizationId);
+        const type = String(formData.get("type")) as CompanyCashTransactionType | ExternalCashTransactionType;
+        const amount = Number(formData.get("amount"));
+        if (type === "company_cash_withdrawn" && amount > calculateCompanyCashBalance(appData.companyCashTransactions)) {
+          throw new ApiError(400, "Company cash withdrawal exceeds available balance.");
+        }
+        if (
+          (type === "external_cash_transferred_to_company" || type === "external_cash_personally_removed") &&
+          amount > calculateExternalCashBalance(appData.externalCashTransactions)
+        ) {
+          throw new ApiError(400, "External cash action exceeds available balance.");
+        }
         await createCashTransaction(
           supabase,
           organizationId,
-          String(formData.get("type")) as CompanyCashTransactionType | ExternalCashTransactionType,
-          Number(formData.get("amount")),
+          type,
+          amount,
           String(formData.get("note") || ""),
           String(formData.get("date") || ""),
         );
         return ok();
       }
       case "updateCashTransaction": {
-        await requireRole(supabase, organizationId, ["owner", "admin"]);
+        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin"]);
         cashUpdateSchema.parse(formDataToObject(formData));
         await updateCashTransaction(
           supabase,
@@ -151,7 +167,7 @@ export async function POST(request: Request) {
         return ok();
       }
       case "deleteCashTransaction": {
-        await requireRole(supabase, organizationId, ["owner", "admin"]);
+        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin"]);
         await deleteCashTransaction(
           supabase,
           organizationId,
@@ -162,39 +178,41 @@ export async function POST(request: Request) {
         return ok();
       }
       case "createContact": {
-        await requireRole(supabase, organizationId, ["owner", "admin", "member"]);
+        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin", "member"]);
         contactSchema.parse(formDataToObject(formData));
         await createContact(supabase, organizationId, formData);
         return ok();
       }
       case "createAttachment": {
-        await requireRole(supabase, organizationId, ["owner", "admin", "member"]);
+        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin", "member"]);
         attachmentSchema.parse(formDataToObject(formData));
-        await createAttachment(supabase, organizationId, formData, {
+        const relation = {
           vehicleId: optionalId(formData.get("vehicleId")),
           expenseId: optionalId(formData.get("expenseId")),
           saleId: optionalId(formData.get("saleId")),
           contactId: optionalId(formData.get("contactId")),
           companyCashTransactionId: optionalId(formData.get("companyCashTransactionId")),
           externalCashTransactionId: optionalId(formData.get("externalCashTransactionId")),
-        });
+        };
+        await assertRelationBelongsToOrganization(supabase, organizationId, relation);
+        await createAttachment(supabase, organizationId, formData, relation);
         return ok();
       }
       case "setVehicleMainPhoto": {
-        await requireRole(supabase, organizationId, ["owner", "admin", "member"]);
+        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin", "member"]);
         const vehicle = await getVehicle(supabase, organizationId, String(formData.get("vehicleId") || ""));
         const attachment = await getAttachment(supabase, organizationId, String(formData.get("attachmentId") || ""));
         await updateVehicleMainPhoto(supabase, vehicle, attachment);
         return ok();
       }
       case "updateDefaultPlateCommission": {
-        await requireRole(supabase, organizationId, ["owner"]);
+        await requireRole(supabase, userData.user.id, organizationId, ["owner"]);
         backupSettingsSchema.parse(formDataToObject(formData));
         await updateDefaultPlateCommission(supabase, organizationId, Number(formData.get("defaultPlateCommissionAmount")));
         return ok();
       }
       case "updateMemberRole": {
-        await requireRole(supabase, organizationId, ["owner"]);
+        await requireRole(supabase, userData.user.id, organizationId, ["owner"]);
         roleUpdateSchema.parse(formDataToObject(formData));
         await updateMemberRole(
           supabase,
@@ -205,7 +223,7 @@ export async function POST(request: Request) {
         return ok();
       }
       case "removeMember": {
-        await requireRole(supabase, organizationId, ["owner"]);
+        await requireRole(supabase, userData.user.id, organizationId, ["owner"]);
         await removeMember(supabase, organizationId, String(formData.get("membershipId") || ""));
         return ok();
       }
@@ -213,7 +231,8 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: false, message: "Unknown operation." }, { status: 400 });
     }
   } catch (error) {
-    return NextResponse.json({ ok: false, message: formatValidationError(error) }, { status: 400 });
+    const status = error instanceof ApiError ? error.status : 400;
+    return NextResponse.json({ ok: false, message: formatValidationError(error) }, { status });
   }
 }
 
@@ -221,16 +240,51 @@ function ok(extra?: Record<string, unknown>) {
   return NextResponse.json({ ok: true, ...extra });
 }
 
-async function requireRole(client: Awaited<ReturnType<typeof createSupabaseServerClient>>, organizationId: string, roles: Role[]) {
-  if (!client || !organizationId) throw new Error("Organization is required.");
+async function requireRole(client: Awaited<ReturnType<typeof createSupabaseServerClient>>, userId: string, organizationId: string, roles: Role[]) {
+  if (!client || !organizationId) throw new ApiError(400, "Organization is required.");
   const { data, error } = await client
     .from("organization_memberships")
     .select("role")
     .eq("organization_id", organizationId)
+    .eq("user_id", userId)
     .in("role", roles)
     .maybeSingle();
   if (error) throw error;
-  if (!data) throw new Error("You do not have permission for this action.");
+  if (!data) throw new ApiError(403, "You do not have permission for this action.");
+}
+
+async function assertRelationBelongsToOrganization(
+  client: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  organizationId: string,
+  relation: Record<string, string | undefined>,
+) {
+  if (!client) throw new ApiError(503, "Supabase is not configured.");
+  const checks: Array<[string, string]> = [
+    ["vehicleId", "vehicles"],
+    ["expenseId", "vehicle_expenses"],
+    ["saleId", "sales"],
+    ["contactId", "contacts"],
+    ["companyCashTransactionId", "company_cash_transactions"],
+    ["externalCashTransactionId", "external_cash_transactions"],
+  ];
+  for (const [key, table] of checks) {
+    const id = relation[key];
+    if (!id) continue;
+    const { data, error } = await client
+      .from(table)
+      .select("organization_id")
+      .eq("id", id)
+      .eq("organization_id", organizationId)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) throw new ApiError(400, "Attachment relation does not belong to this organization.");
+  }
+}
+
+class ApiError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+  }
 }
 
 async function getVehicle(client: Awaited<ReturnType<typeof createSupabaseServerClient>>, organizationId: string, vehicleId: string) {

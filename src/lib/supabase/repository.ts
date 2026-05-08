@@ -5,6 +5,7 @@ import {
   calculateVehicleTotalCost,
 } from "@/lib/domain/calculations";
 import { DEFAULT_PLATE_COMMISSION_AMOUNT, OPENLANE_PURCHASE_TAX_RATE } from "@/lib/domain/constants";
+import { assertAllowedUpload, sanitizeStorageFileName } from "@/lib/security";
 import { emptyAppData, mapActivityLog, mapAttachment, mapCompanyCashTransaction, mapContact, mapExpense, mapExternalCashTransaction, mapMembership, mapOrganization, mapSale, mapVehicle } from "@/lib/supabase/mappers";
 import type {
   AppData,
@@ -327,6 +328,9 @@ export async function recordVehicleSale(client: Client, appData: AppData, vehicl
   const taxableProfitAmount = numberValue(formData.get("taxableProfitAmount"));
   const realClientPayment = numberValue(formData.get("realClientPayment"));
   const breakdown = calculateSaleBreakdown({ vehicleTotalCost, taxableProfitAmount, realClientPayment });
+  if (breakdown.externalCommission < 0) {
+    throw new Error("Real client payment cannot be lower than the paper sale price.");
+  }
   const saleDate = stringValue(formData.get("saleDate")) || today();
   const buyerName = stringValue(formData.get("buyerName"));
   let contactId: string | null = null;
@@ -506,10 +510,14 @@ export async function createAttachment(client: Client, organizationId: string, f
   let type = (stringValue(formData.get("type")) || "link") as AttachmentType;
 
   if (file instanceof File && file.size > 0) {
+    assertAllowedUpload(file);
     type = file.type.startsWith("image/") ? "photo" : "file";
-    path = `organizations/${organizationId}/${crypto.randomUUID()}-${file.name}`;
+    path = `organizations/${organizationId}/${crypto.randomUUID()}-${sanitizeStorageFileName(file.name)}`;
     const { error: uploadError } = await client.storage.from("dealer-flow-private").upload(path, file, { upsert: false });
     if (uploadError) throw uploadError;
+  }
+  if (!path) {
+    throw new Error("A file or valid link is required.");
   }
 
   const { error } = await client.from("attachments").insert({

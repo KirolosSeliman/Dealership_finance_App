@@ -1,5 +1,6 @@
 import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { createClient } from "@supabase/supabase-js";
+import { timingSafeEqual } from "node:crypto";
 import JSZip from "jszip";
 import { NextResponse } from "next/server";
 import { BACKUP_VERSION, generateReportPdf, toCsv } from "@/lib/backup/export";
@@ -19,13 +20,13 @@ const organizationTables = [
 export async function GET(request: Request) {
   const cronSecret = process.env.CRON_SECRET;
   const authHeader = request.headers.get("authorization");
-  if (!cronSecret) {
+  if (!cronSecret?.trim()) {
     return NextResponse.json(
       { ok: false, message: "CRON_SECRET is required before daily backups can run." },
       { status: 503 },
     );
   }
-  if (authHeader !== `Bearer ${cronSecret}`) {
+  if (!hasValidBearerSecret(authHeader, cronSecret)) {
     return NextResponse.json({ ok: false, message: "Unauthorized." }, { status: 401 });
   }
 
@@ -140,4 +141,13 @@ export async function GET(request: Request) {
   }
 
   return NextResponse.json({ ok: true, uploaded });
+}
+
+function hasValidBearerSecret(authHeader: string | null, secret: string) {
+  const prefix = "Bearer ";
+  if (!authHeader?.startsWith(prefix)) return false;
+  const provided = authHeader.slice(prefix.length);
+  const providedBuffer = Buffer.from(provided);
+  const secretBuffer = Buffer.from(secret);
+  return providedBuffer.length === secretBuffer.length && timingSafeEqual(providedBuffer, secretBuffer);
 }

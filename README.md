@@ -64,9 +64,10 @@ After the base schema, run the migrations in `supabase/migrations`:
 ```text
 20260507_sales_member_policy.sql
 20260508_production_constraints.sql
+20260508_attachment_security.sql
 ```
 
-The production constraints migration adds financial data checks, prevents duplicate sales for the same vehicle, validates organization matches for expenses/sales, and adds the sales update RLS policy.
+The production constraints migrations add financial data checks, prevent duplicate sales for the same vehicle, validate organization matches for expenses/sales/attachments, enforce private attachment paths, and add the sales update RLS policy.
 
 ## Backups
 
@@ -92,6 +93,7 @@ Manual R2 uploads require an authenticated owner/admin of the selected organizat
 - Run `npm test`, `npm run lint`, and `npm run build`.
 - Generate a local backup, verify it, and run restore dry-run before relying on backup files.
 - Trigger one manual R2 backup upload as an owner/admin and confirm the object appears in Cloudflare R2.
+- Review [SECURITY.md](SECURITY.md) and [docs/deployment-security.md](docs/deployment-security.md) before real business use.
 
 ## Validation
 

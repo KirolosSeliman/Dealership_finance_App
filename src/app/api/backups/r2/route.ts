@@ -13,8 +13,6 @@ export async function GET() {
   const missing = required.filter((key) => !process.env[key]);
   return NextResponse.json({
     configured: missing.length === 0,
-    bucketName: process.env.R2_BUCKET_NAME ?? null,
-    missing,
   });
 }
 
@@ -37,6 +35,9 @@ export async function POST(request: Request) {
   if (!body.organizationId || !body.fileName || !body.backupBase64) {
     return NextResponse.json({ ok: false, message: "Missing backup payload." }, { status: 400 });
   }
+  if (!/^dealer-flow-backup-\d{4}-\d{2}-\d{2}-\d+\.zip$/.test(body.fileName)) {
+    return NextResponse.json({ ok: false, message: "Invalid backup file name." }, { status: 400 });
+  }
 
   const supabase = await createSupabaseServerClient();
   if (!supabase) {
@@ -58,6 +59,11 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, message: "Owner or admin role required." }, { status: 403 });
   }
 
+  const backupBuffer = Buffer.from(body.backupBase64, "base64");
+  if (backupBuffer.byteLength > 50 * 1024 * 1024) {
+    return NextResponse.json({ ok: false, message: "Backup file is too large." }, { status: 400 });
+  }
+
   const now = new Date();
   const year = now.getUTCFullYear();
   const month = String(now.getUTCMonth() + 1).padStart(2, "0");
@@ -75,7 +81,7 @@ export async function POST(request: Request) {
     new PutObjectCommand({
       Bucket: process.env.R2_BUCKET_NAME!,
       Key: key,
-      Body: Buffer.from(body.backupBase64, "base64"),
+      Body: backupBuffer,
       ContentType: "application/zip",
     }),
   );

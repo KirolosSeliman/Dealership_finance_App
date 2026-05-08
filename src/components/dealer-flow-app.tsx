@@ -562,6 +562,10 @@ export function DealerFlowApp() {
   }
 
   async function downloadBackup() {
+    if (!permissions.exportBackups) {
+      setStatusMessage("Owner or admin role is required to export full backups.");
+      return;
+    }
     const blob = await generateBackupExport(scoped);
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement("a");
@@ -574,6 +578,10 @@ export function DealerFlowApp() {
 
   async function uploadR2Backup() {
     if (!activeOrganization) return;
+    if (!permissions.manageBackups) {
+      setStatusMessage("Owner or admin role is required to upload backups.");
+      return;
+    }
     setLoading(true);
     setErrorMessage("");
     setStatusMessage("");
@@ -2115,12 +2123,12 @@ function AttachmentList({ attachments }: { attachments: AppData["attachments"] }
           <p className="font-medium text-slate-200">{attachment.title}</p>
           <p className="mt-1 text-slate-500">{attachment.isSensitive ? "Private" : formatLabel(attachment.type)}</p>
           {attachment.type === "link" && (
-            <a className="mt-2 block text-cyan-100 underline-offset-4 hover:underline" href={attachment.urlOrPath} target="_blank" rel="noreferrer">
+            <a className="mt-2 block text-cyan-100 underline-offset-4 hover:underline" href={attachment.urlOrPath} target="_blank" rel="noopener noreferrer">
               {attachment.urlOrPath}
             </a>
           )}
           {attachment.type !== "link" && attachment.previewUrl && (
-            <a className="mt-2 block text-cyan-100 underline-offset-4 hover:underline" href={attachment.previewUrl} target="_blank" rel="noreferrer">
+            <a className="mt-2 block text-cyan-100 underline-offset-4 hover:underline" href={attachment.previewUrl} target="_blank" rel="noopener noreferrer">
               Open private file
             </a>
           )}
@@ -2240,7 +2248,7 @@ function getPermissions(role?: string) {
     manageContacts: owner || admin || member,
     manageCash: owner || admin,
     manageBackups: owner || admin,
-    exportBackups: owner || admin || accountant,
+    exportBackups: owner || admin,
     manageReports: owner || admin || accountant,
     manageRoles: owner,
     manageSettings: owner,

@@ -99,6 +99,17 @@ export const attachmentSchema = z.object({
   urlOrPath: optionalText,
   notes: optionalText,
   isSensitive: z.string().optional(),
+}).superRefine((value, context) => {
+  if (value.urlOrPath) {
+    try {
+      const url = new URL(value.urlOrPath);
+      if (!["http:", "https:"].includes(url.protocol)) {
+        context.addIssue({ code: "custom", path: ["urlOrPath"], message: "Only http and https links are allowed." });
+      }
+    } catch {
+      context.addIssue({ code: "custom", path: ["urlOrPath"], message: "Enter a valid URL." });
+    }
+  }
 });
 
 export const roleUpdateSchema = z.object({
