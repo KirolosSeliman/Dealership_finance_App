@@ -51,7 +51,7 @@ import {
   daysBetween,
   generateTaxReport,
 } from "@/lib/domain/calculations";
-import { generateBackupExport, restoreBackupDryRun, verifyBackupExport } from "@/lib/backup/export";
+import { verifyBackupExport } from "@/lib/backup/export";
 import { getDictionary } from "@/lib/i18n";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { emptyAppData } from "@/lib/supabase/mappers";
@@ -270,7 +270,7 @@ export function DealerFlowApp() {
     setErrorMessage("");
     setStatusMessage("");
     try {
-      const email = String(formData.get("email") || "");
+      const email = String(formData.get("email") || "").trim().toLowerCase();
       const password = String(formData.get("password") || "");
       const fullName = String(formData.get("fullName") || "");
       if (authMode === "signup") {
@@ -361,6 +361,22 @@ export function DealerFlowApp() {
       await refreshData(activeOrganization.id);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Could not remove member.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function regenerateInvitationCode() {
+    if (!activeOrganization) return;
+    setLoading(true);
+    setErrorMessage("");
+    setStatusMessage("");
+    try {
+      const result = await serverMutation("regenerateInvitationCode", newMutationForm({ organizationId: activeOrganization.id }));
+      setStatusMessage(`Invitation code regenerated: ${String(result.inviteCode ?? "")}`);
+      await refreshData(activeOrganization.id);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not regenerate invitation code.");
     } finally {
       setLoading(false);
     }
@@ -562,18 +578,37 @@ export function DealerFlowApp() {
   }
 
   async function downloadBackup() {
+    if (!activeOrganization) return;
     if (!permissions.exportBackups) {
       setStatusMessage("Owner or admin role is required to export full backups.");
       return;
     }
-    const blob = await generateBackupExport(scoped);
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `dealer-flow-backup-${today()}.zip`;
-    anchor.click();
-    URL.revokeObjectURL(url);
-    setStatusMessage("Local backup generated.");
+    setLoading(true);
+    setErrorMessage("");
+    setStatusMessage("");
+    try {
+      const response = await fetch("/api/backups/export", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ organizationId: activeOrganization.id }),
+      });
+      if (!response.ok) {
+        const result = (await response.json().catch(() => null)) as { message?: string } | null;
+        throw new Error(result?.message || "Could not generate backup.");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = getDownloadFileName(response, `dealer-flow-backup-${today()}.zip`);
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setStatusMessage("Local backup generated.");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not generate local backup.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function uploadR2Backup() {
@@ -586,17 +621,10 @@ export function DealerFlowApp() {
     setErrorMessage("");
     setStatusMessage("");
     try {
-      const blob = await generateBackupExport(scoped);
-      const backupBase64 = await blobToBase64(blob);
-      const fileName = `dealer-flow-backup-${today()}-${Date.now()}.zip`;
       const response = await fetch("/api/backups/r2", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          organizationId: activeOrganization.id,
-          fileName,
-          backupBase64,
-        }),
+        body: JSON.stringify({ organizationId: activeOrganization.id }),
       });
       const result = (await response.json()) as { ok?: boolean; key?: string; message?: string };
       if (!response.ok || !result.ok) throw new Error(result.message || "Cloudflare R2 backup failed.");
@@ -609,6 +637,7 @@ export function DealerFlowApp() {
   }
 
   async function verifyBackupFile(file: File) {
+    if (!activeOrganization) return;
     setLoading(true);
     setErrorMessage("");
     setStatusMessage("");
@@ -616,6 +645,14 @@ export function DealerFlowApp() {
       const result = await verifyBackupExport(file);
       if (!result.ok) {
         throw new Error(`Backup verification failed. Missing: ${result.missing.join(", ") || "none"}. Errors: ${result.errors.join(", ") || "none"}.`);
+      }
+      if (permissions.exportBackups) {
+        await serverMutation("logActivity", newMutationForm({
+          organizationId: activeOrganization.id,
+          action: "backup_verified",
+          entityType: "backup",
+          message: "Backup ZIP verified successfully.",
+        }));
       }
       setStatusMessage("Backup ZIP verified successfully.");
     } catch (error) {
@@ -626,13 +663,30 @@ export function DealerFlowApp() {
   }
 
   async function dryRunRestore(file: File) {
+    if (!activeOrganization) return;
+    if (activeOrganization.role !== "owner") {
+      setStatusMessage("Owner role is required to prepare a restore.");
+      return;
+    }
     setLoading(true);
     setErrorMessage("");
     setStatusMessage("");
     try {
-      const result = await restoreBackupDryRun(file);
-      if (!result.ok) {
-        throw new Error(`Restore dry-run found conflicts: ${result.conflicts.join(", ") || "unknown conflict"}`);
+      const formData = new FormData();
+      formData.set("organizationId", activeOrganization.id);
+      formData.set("file", file);
+      const response = await fetch("/api/backups/restore/prepare", {
+        method: "POST",
+        body: formData,
+      });
+      const result = (await response.json()) as {
+        ok?: boolean;
+        summary?: { vehicles?: number; expenses?: number; sales?: number; contacts?: number };
+        conflicts?: string[];
+        message?: string;
+      };
+      if (!response.ok || !result.ok) {
+        throw new Error(result.message || `Restore dry-run found conflicts: ${result.conflicts?.join(", ") || "unknown conflict"}`);
       }
       setStatusMessage(`Restore dry-run OK: ${result.summary?.vehicles ?? 0} vehicles, ${result.summary?.expenses ?? 0} expenses, ${result.summary?.sales ?? 0} sales, ${result.summary?.contacts ?? 0} contacts. No data was written.`);
     } catch (error) {
@@ -686,7 +740,7 @@ export function DealerFlowApp() {
   }
 
   return (
-    <div className="min-h-screen text-slate-100">
+    <div className="app-shell text-slate-100">
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-72 border-r border-slate-800/80 bg-slate-950/92 p-5 shadow-2xl shadow-black/30 xl:block">
         <Brand t={t} />
         <Navigation view={view} navigate={navigate} t={t} />
@@ -749,9 +803,9 @@ export function DealerFlowApp() {
         </header>
 
         <section className="px-4 py-6 lg:px-8">
-          {loading && <div className="mb-4 rounded-lg border border-cyan-300/15 bg-cyan-300/8 p-3 text-sm text-cyan-100">Loading Dealer Flow data...</div>}
-          {statusMessage && <div className="mb-4 rounded-lg border border-emerald-400/20 bg-emerald-400/10 p-3 text-sm text-emerald-100">{statusMessage}</div>}
-          {errorMessage && <div className="mb-4 rounded-lg border border-rose-400/20 bg-rose-400/10 p-3 text-sm text-rose-100">{errorMessage}</div>}
+          {loading && <LoadingState message="Loading Dealer Flow data..." />}
+          {statusMessage && <div className="message-banner mb-4 border border-emerald-400/20 bg-emerald-400/10 text-emerald-100">{statusMessage}</div>}
+          {errorMessage && <div className="message-banner mb-4 border border-rose-400/20 bg-rose-400/10 text-rose-100">{errorMessage}</div>}
           {view === "dashboard" && (
             <Dashboard
               t={t}
@@ -810,7 +864,7 @@ export function DealerFlowApp() {
             />
           )}
           {view === "contacts" && <Contacts t={t} contacts={scoped.contacts} attachments={scoped.attachments} onSubmit={addContact} permissions={permissions} />}
-          {view === "taxes" && <Taxes t={t} scoped={scoped} dateRange={dateRange} setDateRange={setDateRange} />}
+          {view === "taxes" && <Taxes t={t} scoped={scoped} dateRange={dateRange} setDateRange={setDateRange} permissions={permissions} />}
           {view === "backups" && <Backups t={t} organizationId={activeOrganization.id} onDownload={downloadBackup} onUploadR2={uploadR2Backup} onVerify={verifyBackupFile} onRestoreDryRun={dryRunRestore} permissions={permissions} />}
           {view === "settings" && (
             <SettingsPage
@@ -822,6 +876,7 @@ export function DealerFlowApp() {
               onSaveDefaultPlateCommission={saveDefaultPlateCommission}
               onUpdateMemberRole={updateMemberRole}
               onRemoveMember={removeMember}
+              onRegenerateInvitation={regenerateInvitationCode}
               onSignOut={logout}
               permissions={permissions}
             />
@@ -879,8 +934,8 @@ function AuthScreen({
         {statusMessage && <div className="rounded-lg border border-emerald-400/20 bg-emerald-400/10 p-3 text-sm text-emerald-100">{statusMessage}</div>}
         {errorMessage && <div className="rounded-lg border border-rose-400/20 bg-rose-400/10 p-3 text-sm text-rose-100">{errorMessage}</div>}
         {authMode === "signup" && <Field label="Full name"><input className="control w-full" name="fullName" required /></Field>}
-        <Field label={t.auth.email}><input className="control w-full" name="email" type="email" required /></Field>
-        <Field label={t.auth.password}><input className="control w-full" name="password" type="password" required minLength={6} /></Field>
+        <Field label={t.auth.email}><input className="control w-full" name="email" type="email" autoComplete="email" autoCapitalize="none" autoCorrect="off" inputMode="email" required /></Field>
+        <Field label={t.auth.password}><input className="control w-full" name="password" type="password" autoComplete={authMode === "login" ? "current-password" : "new-password"} required minLength={6} /></Field>
         <button className="primary-button w-full" type="submit" disabled={loading}>{loading ? "Loading..." : t.auth.continue}</button>
         <button className="secondary-button w-full" type="button" onClick={() => setAuthMode(authMode === "login" ? "signup" : "login")}>
           {authMode === "login" ? "Create account" : "Use existing account"}
@@ -1067,18 +1122,22 @@ function Dashboard({
         <ChartPanel title={t.charts.lotTime} data={lotTimeSeries} type="bar" summary={`${rangeMetrics.averageTimeToSell}`} />
       </div>
       <Panel title={t.inventory.recentVehicles}>
-        <div className="grid gap-3 md:grid-cols-3">
-          {scoped.vehicles.slice(0, 3).map((vehicle) => (
-            <VehicleCard
-              key={vehicle.id}
-              t={t}
-              vehicle={vehicle}
-              expenses={scoped.expenses}
-              sale={scoped.sales.find((item) => item.vehicleId === vehicle.id)}
-              onOpen={() => navigate("vehicles", { mode: "detail", vehicleId: vehicle.id, tab: "overview" })}
-            />
-          ))}
-        </div>
+        {scoped.vehicles.length === 0 ? (
+          <EmptyState title="No vehicles in this organization" copy={permissions.manageVehicles ? "Use Add Vehicle to create your first inventory record." : "No inventory has been added yet."} />
+        ) : (
+          <div className="grid gap-3 md:grid-cols-3">
+            {scoped.vehicles.slice(0, 3).map((vehicle) => (
+              <VehicleCard
+                key={vehicle.id}
+                t={t}
+                vehicle={vehicle}
+                expenses={scoped.expenses}
+                sale={scoped.sales.find((item) => item.vehicleId === vehicle.id)}
+                onOpen={() => navigate("vehicles", { mode: "detail", vehicleId: vehicle.id, tab: "overview" })}
+              />
+            ))}
+          </div>
+        )}
       </Panel>
     </div>
   );
@@ -1107,7 +1166,11 @@ function ChartPanel({ title, data, type, summary }: { title: string; data: { lab
         </div>
       </div>
       <div ref={chartRef} className="h-56 min-h-0 min-w-0">
-        {chartWidth > 0 ? (
+        {data.length === 0 ? (
+          <div className="grid h-56 place-items-center rounded-md border border-slate-800 bg-slate-900/40 px-4 text-center text-sm text-slate-500">
+            No data in the selected range.
+          </div>
+        ) : chartWidth > 0 ? (
           type === "area" ? (
               <AreaChart data={data} width={chartWidth} height={chartHeight}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(100,116,139,.16)" />
@@ -1235,6 +1298,13 @@ function Inventory({
               </tr>
             </thead>
             <tbody>
+              {vehicles.length === 0 && (
+                <tr>
+                  <td colSpan={13}>
+                    <EmptyState title="No matching vehicles" copy="Adjust the search or filters, or add a new vehicle." />
+                  </td>
+                </tr>
+              )}
               {vehicles.map((vehicle) => {
                 const sale = sales.find((item) => item.vehicleId === vehicle.id);
                 const totalCost = calculateVehicleTotalCost(vehicle, expenses);
@@ -1343,10 +1413,14 @@ function VehicleDetailTabs({
       {selectedTab === "details" && <VehicleDetailsTab t={t} vehicle={vehicle} onSubmit={editVehicle} permissions={permissions} />}
       {selectedTab === "expenses" && <Expenses t={t} vehicle={vehicle} expenses={expenses} onSubmit={addExpense} onEdit={editExpense} onDelete={deleteExpense} permissions={permissions} />}
       {selectedTab === "documents" && <DocumentsTab t={t} vehicle={vehicle} attachments={vehicleAttachments} onSubmit={addAttachment} permissions={permissions} />}
-      {selectedTab === "sale" && <SaleForm t={t} vehicle={vehicle} expenses={expenses} onSubmit={recordSale} sale={sale} contacts={contacts} permissions={permissions} />}
+      {selectedTab === "sale" && <SaleForm t={t} vehicle={vehicle} expenses={expenses} onSubmit={recordSale} sale={sale} permissions={permissions} />}
       {selectedTab === "timeline" && (
         <Panel title={tabLabel(t, "timeline")}>
-          <Ledger rows={activityLogs.filter((log) => !log.entityId || log.entityId === vehicle.id).map((log) => [log.createdAt.slice(0, 10), log.action, log.message])} />
+          <Ledger
+            emptyTitle="No timeline activity yet"
+            emptyCopy="Vehicle changes, expenses, documents, sale activity, and cash events will appear here."
+            rows={activityLogs.filter((log) => !log.entityId || log.entityId === vehicle.id).map((log) => [log.createdAt.slice(0, 10), formatLabel(log.action), log.message])}
+          />
         </Panel>
       )}
     </div>
@@ -1414,7 +1488,11 @@ function PhotoManager({
         </form>
       )}
       <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {photos.length === 0 && <p className="text-sm text-slate-500">No photos uploaded yet.</p>}
+        {photos.length === 0 && (
+          <div className="sm:col-span-2 xl:col-span-4">
+            <EmptyState title="No vehicle photos yet" copy={permissions.manageAttachments ? "Upload photos here, then choose the one that should be used as the front image." : "No photos have been uploaded for this vehicle."} />
+          </div>
+        )}
         {photos.map((photo) => {
           const isMain = photo.urlOrPath === vehicle.mainPhotoPath;
           return (
@@ -1529,6 +1607,9 @@ function Expenses({
       </form> : <EmptyState title="Read-only expenses" copy="Your role can view expenses but cannot add or edit them." />}
       <Panel title={`${vehicle.year ?? ""} ${vehicle.make ?? ""} ${vehicle.model ?? ""}`}>
         <div className="space-y-3">
+          {vehicleExpenses.length === 0 && (
+            <EmptyState title="No expenses for this vehicle" copy={permissions.manageExpenses ? "Add repair, auction, transport, or other vehicle costs from the form beside this list." : "No expenses have been recorded for this vehicle."} />
+          )}
           {vehicleExpenses.map((expense) => (
             <div key={expense.id} className="rounded-lg border border-slate-800 bg-slate-950/35 p-3">
               {editingExpenseId === expense.id && permissions.manageExpenses ? (
@@ -1609,30 +1690,32 @@ function DocumentsTab({
         </form> : <p className="text-sm text-slate-500">Your role can view documents but cannot upload them.</p>}
       </Panel>
       <Panel title={t.sections.documentsLinks}>
-        <AttachmentList attachments={attachments} />
+        <AttachmentList attachments={attachments} emptyCopy={permissions.manageAttachments ? "Upload a photo, invoice, PDF, or link from the form beside this panel." : "No documents or links are available for this vehicle."} />
       </Panel>
     </div>
   );
 }
 
-function SaleForm({ t, vehicle, expenses, onSubmit, sale, contacts, permissions }: { t: ReturnType<typeof getDictionary>; vehicle: Vehicle; expenses: VehicleExpense[]; onSubmit: (formData: FormData) => void; sale?: Sale; contacts: ContactRecord[]; permissions: Permissions }) {
+function SaleForm({ t, vehicle, expenses, onSubmit, sale, permissions }: { t: ReturnType<typeof getDictionary>; vehicle: Vehicle; expenses: VehicleExpense[]; onSubmit: (formData: FormData) => void; sale?: Sale; permissions: Permissions }) {
   const [taxableProfitAmount, setTaxableProfitAmount] = useState(sale?.taxableProfitAmount ?? 1500);
   const [realClientPayment, setRealClientPayment] = useState(sale?.realClientPayment ?? 0);
   const vehicleTotalCost = calculateVehicleTotalCost(vehicle, expenses);
   const breakdown = calculateSaleBreakdown({ vehicleTotalCost, taxableProfitAmount, realClientPayment });
   return (
     <div className="grid gap-4 xl:grid-cols-[420px_1fr]">
-      {permissions.manageSales ? <form className="panel space-y-4" action={onSubmit}>
+      {sale ? (
+        <EmptyState title="Vehicle already sold" copy="The recorded sale is shown in the summary. A second sale cannot be created for the same vehicle." />
+      ) : permissions.manageSales ? <form className="panel space-y-4" action={onSubmit}>
         <h3 className="section-title">{t.actions.recordSale}</h3>
-        <Field label={t.fields.saleDate}><input className="control w-full" name="saleDate" type="date" defaultValue={sale?.saleDate ?? today()} /></Field>
+        <Field label={t.fields.saleDate}><input className="control w-full" name="saleDate" type="date" defaultValue={today()} /></Field>
         <Field label={t.fields.taxableProfit}><input className="control w-full" name="taxableProfitAmount" type="number" step="0.01" value={taxableProfitAmount} onChange={(event) => setTaxableProfitAmount(Number(event.target.value))} /></Field>
         <Field label={t.fields.realClientPayment}><input className="control w-full" name="realClientPayment" type="number" step="0.01" value={realClientPayment} onChange={(event) => setRealClientPayment(Number(event.target.value))} /></Field>
-        <Field label={t.fields.buyerName}><input className="control w-full" name="buyerName" defaultValue={sale ? contacts.find((contact) => contact.id === sale.contactId)?.fullName : ""} required /></Field>
+        <Field label={t.fields.buyerName}><input className="control w-full" name="buyerName" required /></Field>
         <Field label={t.fields.phone}><input className="control w-full" name="phone" /></Field>
         <Field label={t.fields.email}><input className="control w-full" name="email" type="email" /></Field>
         <Field label={t.fields.address}><input className="control w-full" name="address" /></Field>
         <Field label={t.fields.fileTitle}><input className="control w-full" placeholder="driver-license-private-path" /></Field>
-        <Field label={t.fields.notes}><textarea className="control min-h-24 w-full" name="notes" defaultValue={sale?.notes} /></Field>
+        <Field label={t.fields.notes}><textarea className="control min-h-24 w-full" name="notes" /></Field>
         <button className="primary-button" type="submit">{t.actions.recordSale}</button>
       </form> : <EmptyState title="Read-only sale details" copy="Your role cannot mark vehicles as sold." />}
       <Panel title={t.sections.saleDetails}>
@@ -1707,15 +1790,15 @@ function CashManagement({
       </div>
       <div className="grid gap-4 xl:grid-cols-2">
         <Panel title={t.sections.companyLedger}>
-          <CashLedger account="company" transactions={activeCompanyTransactions} onEdit={onEditTransaction} onDelete={onDeleteTransaction} canManage={permissions.manageCash} />
+          <CashLedger account="company" transactions={activeCompanyTransactions} onEdit={onEditTransaction} onDelete={onDeleteTransaction} canManage={permissions.manageCash} emptyCopy={permissions.manageCash ? "Add company cash or record a business withdrawal to start the ledger." : "No company cash transactions have been recorded."} />
         </Panel>
         <Panel title={t.sections.externalLedger}>
-          <CashLedger account="external" transactions={activeExternalTransactions} onEdit={onEditTransaction} onDelete={onDeleteTransaction} canManage={permissions.manageCash} />
+          <CashLedger account="external" transactions={activeExternalTransactions} onEdit={onEditTransaction} onDelete={onDeleteTransaction} canManage={permissions.manageCash} emptyCopy={permissions.manageCash ? "External commission cash from sales will appear here, and can be transferred or removed." : "No external cash transactions have been recorded."} />
         </Panel>
       </div>
       {deletedTransactions.length > 0 && (
         <Panel title="Deleted cash history">
-          <Ledger rows={deletedTransactions.map(({ account, transaction }) => [
+          <Ledger emptyTitle="No deleted cash history" emptyCopy="Deleted or voided cash entries will appear here for audit review." rows={deletedTransactions.map(({ account, transaction }) => [
             formatLabel(account),
             transaction.date,
             formatLabel(transaction.type),
@@ -1736,17 +1819,19 @@ function CashLedger({
   onEdit,
   onDelete,
   canManage,
+  emptyCopy,
 }: {
   account: CashAccount;
   transactions: CashTransaction[];
   onEdit: (account: CashAccount, transactionId: string, formData: FormData) => void;
   onDelete: (account: CashAccount, transactionId: string, reason: string) => void;
   canManage: boolean;
+  emptyCopy: string;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  if (transactions.length === 0) return <p className="text-sm text-slate-500">-</p>;
+  if (transactions.length === 0) return <EmptyState title="No ledger activity" copy={emptyCopy} />;
 
   return (
     <div className="space-y-3">
@@ -1887,7 +1972,7 @@ function Contacts({
             <InfoGrid rows={[[t.fields.phone, contact.phone], [t.fields.email, contact.email], [t.fields.address, contact.address], [t.fields.notes, contact.notes]]} />
             <div className="mt-4 rounded-md border border-slate-800 bg-slate-950/40 p-3">
               <p className="flex items-center gap-2 text-sm text-slate-300"><FolderLock size={16} />{t.sections.privateStorage}</p>
-              <AttachmentList attachments={attachments.filter((attachment) => attachment.contactId === contact.id)} />
+              <AttachmentList attachments={attachments.filter((attachment) => attachment.contactId === contact.id)} emptyCopy="No private files or links are attached to this contact." />
             </div>
           </div>
         ))}
@@ -1896,15 +1981,68 @@ function Contacts({
   );
 }
 
-function Taxes({ t, scoped, dateRange, setDateRange }: { t: ReturnType<typeof getDictionary>; scoped: AppData; dateRange: { start: string; end: string }; setDateRange: (range: { start: string; end: string }) => void }) {
+function Taxes({
+  t,
+  scoped,
+  dateRange,
+  setDateRange,
+  permissions,
+}: {
+  t: ReturnType<typeof getDictionary>;
+  scoped: AppData;
+  dateRange: { start: string; end: string };
+  setDateRange: (range: { start: string; end: string }) => void;
+  permissions: Permissions;
+}) {
   const report = generateTaxReport({ ...scoped, startDate: dateRange.start, endDate: dateRange.end });
+  const hasFinancialData =
+    scoped.sales.length > 0 ||
+    scoped.expenses.length > 0 ||
+    scoped.companyCashTransactions.length > 0 ||
+    scoped.externalCashTransactions.length > 0;
+  async function exportReport(format: "pdf" | "csv" | "json") {
+    if (!permissions.manageReports) return;
+    const response = await fetch("/api/taxes/export", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        organizationId: scoped.activeOrganizationId,
+        startDate: dateRange.start,
+        endDate: dateRange.end,
+        format,
+      }),
+    });
+    if (!response.ok) {
+      const result = (await response.json().catch(() => null)) as { message?: string } | null;
+      throw new Error(result?.message || "Could not export tax report.");
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = getDownloadFileName(response, `dealer-flow-tax-report.${format}`);
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
   return (
     <div className="space-y-4">
       <div className="rounded-lg border border-amber-400/20 bg-amber-400/8 p-4 text-sm text-amber-100">{t.disclaimer}</div>
+      {!hasFinancialData && (
+        <EmptyState title="No reportable financial data yet" copy="Tax summaries and exports will become useful after vehicles, expenses, sales, and cash transactions are recorded." />
+      )}
       <div className="surface-muted flex flex-wrap gap-2 p-4">
         <input className="control compact-control" type="date" value={dateRange.start} onChange={(event) => setDateRange({ ...dateRange, start: event.target.value })} />
         <input className="control compact-control" type="date" value={dateRange.end} onChange={(event) => setDateRange({ ...dateRange, end: event.target.value })} />
-        {[t.reports.monthly, t.reports.quarterly, t.reports.yearly, t.reports.custom, t.reports.pdf, t.reports.csv, t.reports.json].map((label) => <Badge key={label}>{label}</Badge>)}
+        {[t.reports.monthly, t.reports.quarterly, t.reports.yearly, t.reports.custom].map((label) => <Badge key={label}>{label}</Badge>)}
+        {permissions.manageReports ? (
+          <>
+            <button className="secondary-button" type="button" disabled={!hasFinancialData} onClick={() => exportReport("pdf").catch(showClientError)}>{t.reports.pdf}</button>
+            <button className="secondary-button" type="button" disabled={!hasFinancialData} onClick={() => exportReport("csv").catch(showClientError)}>{t.reports.csv}</button>
+            <button className="secondary-button" type="button" disabled={!hasFinancialData} onClick={() => exportReport("json").catch(showClientError)}>{t.reports.json}</button>
+          </>
+        ) : (
+          <span className="text-sm text-slate-500">Your role cannot export tax reports.</span>
+        )}
       </div>
       <Panel title={t.sections.taxSummary}><InfoGrid rows={Object.entries(report).map(([key, value]) => [key, typeof value === "number" ? money(value) : String(value)])} /></Panel>
     </div>
@@ -1956,7 +2094,7 @@ function Backups({
           <p className="font-medium text-white">
             {r2Configured === null ? "Checking Cloudflare R2 backup status..." : r2Configured ? t.backup.r2Active : t.backup.r2Inactive}
           </p>
-          <p className="mt-3 text-sm text-slate-500">{t.backup.path}: dealer-flow-backups/{organizationId}/{year}/{month}/dealer-flow-backup-{today()}.zip</p>
+          <p className="mt-3 break-words text-sm text-slate-500">{t.backup.path}: dealer-flow-backups/{organizationId}/{year}/{month}/dealer-flow-backup-{today()}.zip</p>
           <button className="secondary-button mt-4" type="button" onClick={onUploadR2} disabled={!r2Configured || !permissions.manageBackups}>
             <Upload size={18} />
             Upload backup to R2 now
@@ -1979,9 +2117,9 @@ function Backups({
               />
             </div>
             <div>
-              <p className="font-medium text-white">Restore dry-run</p>
-              <p className="mt-2 text-sm text-slate-500">Parses a backup and shows what would be restored without writing to Supabase.</p>
-              <input
+              <p className="font-medium text-white">Restore preparation</p>
+              <p className="mt-2 text-sm text-slate-500">Owner-only safety check. It parses a backup, detects conflicts, and creates a pending restore job without writing business records.</p>
+              {permissions.manageSettings ? <input
                 className="control mt-4 w-full"
                 type="file"
                 accept=".zip,application/zip"
@@ -1990,7 +2128,11 @@ function Backups({
                   if (file) onRestoreDryRun(file);
                   event.currentTarget.value = "";
                 }}
-              />
+              /> : <p className="mt-4 text-sm text-slate-500">Only owners can prepare a restore.</p>}
+              <button className="secondary-button mt-3" type="button" disabled title="Actual restore execution requires a reviewed database transaction/RPC before launch.">
+                Restore execution disabled
+              </button>
+              <p className="mt-2 text-xs text-slate-600">Actual restore is intentionally disabled until a transaction-backed restore RPC is reviewed with real backup samples.</p>
             </div>
           </div>
         </div>
@@ -2008,6 +2150,7 @@ function SettingsPage({
   onSaveDefaultPlateCommission,
   onUpdateMemberRole,
   onRemoveMember,
+  onRegenerateInvitation,
   onSignOut,
   permissions,
 }: {
@@ -2019,6 +2162,7 @@ function SettingsPage({
   onSaveDefaultPlateCommission: (formData: FormData) => void;
   onUpdateMemberRole: (formData: FormData) => void;
   onRemoveMember: (membershipId: string) => void;
+  onRegenerateInvitation: () => void;
   onSignOut: () => void;
   permissions: Permissions;
 }) {
@@ -2040,7 +2184,7 @@ function SettingsPage({
           {memberships.length === 0 && <p className="text-sm text-slate-500">No members found.</p>}
           {memberships.map((membership) => (
             <div key={membership.id} className="rounded-md border border-slate-800 bg-slate-950/35 p-3">
-              <form className="grid gap-3 md:grid-cols-[1fr_180px_auto_auto] md:items-end" action={onUpdateMemberRole}>
+              <form className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px_auto_auto] lg:items-end" action={onUpdateMemberRole}>
                 <input type="hidden" name="membershipId" value={membership.id} />
                 <Info label="User" value={membership.userId} />
                 <Field label="Role">
@@ -2054,7 +2198,16 @@ function SettingsPage({
             </div>
           ))}
         </div>
-        <p className="mt-4 text-sm text-slate-500">Invitation code: {activeOrganization.inviteCode || "-"}</p>
+        <div className="mt-4 rounded-md border border-slate-800 bg-slate-950/35 p-3">
+          <p className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">Invitation access code</p>
+          <p className="mt-2 break-all text-lg font-semibold tracking-[0.08em] text-white">{activeOrganization.inviteCode || "No active code"}</p>
+          <p className="mt-2 text-sm text-slate-500">New users who join with this code are added as viewers by default. Regenerating it invalidates the old code.</p>
+          {permissions.manageBackups ? (
+            <button className="secondary-button mt-3" type="button" onClick={onRegenerateInvitation}>Regenerate access code</button>
+          ) : (
+            <p className="mt-3 text-sm text-slate-500">Only owner/admin roles can manage invitation codes.</p>
+          )}
+        </div>
       </Panel>
       <Panel title={t.sections.vehicleDefaults}>
         {permissions.manageSettings ? <form className="space-y-3" action={onSaveDefaultPlateCommission}>
@@ -2083,9 +2236,18 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
 
 function EmptyState({ title, copy }: { title: string; copy: string }) {
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-950/35 p-4">
+    <div className="empty-state">
       <p className="font-medium text-slate-100">{title}</p>
       <p className="mt-2 text-sm text-slate-500">{copy}</p>
+    </div>
+  );
+}
+
+function LoadingState({ message }: { message: string }) {
+  return (
+    <div className="message-banner mb-4 flex items-center gap-3 border border-cyan-300/15 bg-cyan-300/8 text-cyan-100">
+      <span className="h-2 w-2 animate-pulse rounded-full bg-cyan-200" />
+      {message}
     </div>
   );
 }
@@ -2095,7 +2257,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 }
 
 function Info({ label, value }: { label: string; value: React.ReactNode }) {
-  return <div><dt className="text-xs font-medium uppercase tracking-[0.1em] text-slate-500">{label}</dt><dd className="mt-1 font-medium text-slate-100">{value}</dd></div>;
+  return <div className="min-w-0"><dt className="text-xs font-medium uppercase tracking-[0.1em] text-slate-500">{label}</dt><dd className="mt-1 break-words font-medium text-slate-100">{value}</dd></div>;
 }
 
 function InfoGrid({ rows }: { rows: Array<[React.ReactNode, React.ReactNode]> }) {
@@ -2106,8 +2268,8 @@ function Badge({ children }: { children: React.ReactNode }) {
   return <span className="inline-flex items-center rounded-md border border-cyan-300/15 bg-cyan-300/8 px-2 py-1 text-xs font-medium text-cyan-100">{children}</span>;
 }
 
-function AttachmentList({ attachments }: { attachments: AppData["attachments"] }) {
-  if (attachments.length === 0) return <p className="mt-3 text-sm text-slate-500">-</p>;
+function AttachmentList({ attachments, emptyCopy }: { attachments: AppData["attachments"]; emptyCopy?: string }) {
+  if (attachments.length === 0) return <div className="mt-3"><EmptyState title="No attachments yet" copy={emptyCopy ?? "Files, photos, and links will appear here after they are added."} /></div>;
   return (
     <div className="mt-3 grid gap-3 sm:grid-cols-2">
       {attachments.map((attachment) => (
@@ -2139,7 +2301,8 @@ function AttachmentList({ attachments }: { attachments: AppData["attachments"] }
   );
 }
 
-function Ledger({ rows }: { rows: React.ReactNode[][] }) {
+function Ledger({ rows, emptyTitle = "No records yet", emptyCopy = "Records will appear here once activity is created." }: { rows: React.ReactNode[][]; emptyTitle?: string; emptyCopy?: string }) {
+  if (rows.length === 0) return <EmptyState title={emptyTitle} copy={emptyCopy} />;
   return <div className="overflow-x-auto"><table className="data-table"><tbody>{rows.map((row, index) => <tr key={index}>{row.map((cell, cellIndex) => <td key={cellIndex}>{cell}</td>)}</tr>)}</tbody></table></div>;
 }
 
@@ -2255,13 +2418,14 @@ function getPermissions(role?: string) {
   };
 }
 
-async function blobToBase64(blob: Blob) {
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  let binary = "";
-  bytes.forEach((byte) => {
-    binary += String.fromCharCode(byte);
-  });
-  return window.btoa(binary);
+function getDownloadFileName(response: Response, fallback: string) {
+  const disposition = response.headers.get("content-disposition") || "";
+  const match = disposition.match(/filename="([^"]+)"/);
+  return match?.[1] || fallback;
+}
+
+function showClientError(error: unknown) {
+  window.alert(error instanceof Error ? error.message : "Action failed.");
 }
 
 async function serverMutation(operation: string, formData: FormData) {

@@ -4,6 +4,7 @@ import { timingSafeEqual } from "node:crypto";
 import JSZip from "jszip";
 import { NextResponse } from "next/server";
 import { BACKUP_VERSION, generateReportPdf, toCsv } from "@/lib/backup/export";
+import { checkRateLimit, routeErrorResponse } from "@/lib/server/security";
 
 const organizationTables = [
   "vehicles",
@@ -18,17 +19,19 @@ const organizationTables = [
 ];
 
 export async function GET(request: Request) {
-  const cronSecret = process.env.CRON_SECRET;
-  const authHeader = request.headers.get("authorization");
-  if (!cronSecret?.trim()) {
-    return NextResponse.json(
-      { ok: false, message: "CRON_SECRET is required before daily backups can run." },
-      { status: 503 },
-    );
-  }
-  if (!hasValidBearerSecret(authHeader, cronSecret)) {
-    return NextResponse.json({ ok: false, message: "Unauthorized." }, { status: 401 });
-  }
+  try {
+    checkRateLimit(request, "daily-backup", { limit: 5, windowMs: 60_000 });
+    const cronSecret = process.env.CRON_SECRET;
+    const authHeader = request.headers.get("authorization");
+    if (!cronSecret?.trim()) {
+      return NextResponse.json(
+        { ok: false, message: "CRON_SECRET is required before daily backups can run." },
+        { status: 503 },
+      );
+    }
+    if (!hasValidBearerSecret(authHeader, cronSecret)) {
+      return NextResponse.json({ ok: false, message: "Unauthorized." }, { status: 401 });
+    }
 
   const missing = [
     "NEXT_PUBLIC_SUPABASE_URL",
@@ -140,7 +143,11 @@ export async function GET(request: Request) {
     uploaded.push(key);
   }
 
-  return NextResponse.json({ ok: true, uploaded });
+    return NextResponse.json({ ok: true, uploaded });
+  } catch (error) {
+    const response = routeErrorResponse(error);
+    return NextResponse.json(response.body, { status: response.status });
+  }
 }
 
 function hasValidBearerSecret(authHeader: string | null, secret: string) {

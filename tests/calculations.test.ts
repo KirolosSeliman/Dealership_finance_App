@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
 import JSZip from "jszip";
 import {
@@ -9,9 +11,10 @@ import {
   calculateSaleBreakdown,
   calculateVehicleTotalCost,
 } from "../src/lib/domain/calculations";
-import { generateBackupExport, restoreBackupDryRun, verifyBackupExport } from "../src/lib/backup/export";
-import { assertAllowedUpload, canManageBackups, sanitizeCsvCell, sanitizeStorageFileName } from "../src/lib/security";
-import { attachmentSchema } from "../src/lib/validation";
+import { generateBackupExport, generateTaxReportExport, restoreBackupDryRun, verifyBackupExport } from "../src/lib/backup/export";
+import { assertAllowedUpload, canExportTaxReports, canManageBackups, sanitizeCsvCell, sanitizeStorageFileName } from "../src/lib/security";
+import { assertSameOrigin, checkRateLimit, resetRateLimitForTests, RouteSecurityError } from "../src/lib/server/security";
+import { activityLogSchema, attachmentSchema, backupRequestSchema, regenerateInvitationSchema, taxExportSchema } from "../src/lib/validation";
 import { emptyAppData } from "../src/lib/supabase/mappers";
 import type {
   CompanyCashTransaction,
@@ -273,9 +276,82 @@ test("security helpers restrict full backup roles", () => {
   assert.equal(canManageBackups("viewer"), false);
 });
 
+test("tax export roles are limited to owner, admin, and accountant", () => {
+  assert.equal(canExportTaxReports("owner"), true);
+  assert.equal(canExportTaxReports("admin"), true);
+  assert.equal(canExportTaxReports("accountant"), true);
+  assert.equal(canExportTaxReports("member"), false);
+  assert.equal(canExportTaxReports("viewer"), false);
+});
+
+test("server origin checks reject unsafe cross-origin mutations", () => {
+  assert.doesNotThrow(() => assertSameOrigin(new Request("http://localhost:3000/api/mutations", {
+    method: "POST",
+    headers: { origin: "http://localhost:3000" },
+  })));
+  assert.throws(
+    () => assertSameOrigin(new Request("http://localhost:3000/api/mutations", {
+      method: "POST",
+      headers: { origin: "https://evil.example" },
+    })),
+    RouteSecurityError,
+  );
+});
+
+test("rate limiter blocks obvious repeated route abuse", () => {
+  resetRateLimitForTests();
+  const request = new Request("http://localhost:3000/api/vin", {
+    headers: { "x-forwarded-for": "203.0.113.10" },
+  });
+  assert.doesNotThrow(() => checkRateLimit(request, "test-bucket", { limit: 2, windowMs: 60_000 }));
+  assert.doesNotThrow(() => checkRateLimit(request, "test-bucket", { limit: 2, windowMs: 60_000 }));
+  assert.throws(() => checkRateLimit(request, "test-bucket", { limit: 2, windowMs: 60_000 }), RouteSecurityError);
+  resetRateLimitForTests();
+});
+
+test("backup and tax export request schemas reject invalid payloads", () => {
+  assert.equal(backupRequestSchema.safeParse({ organizationId: "not-a-uuid" }).success, false);
+  assert.equal(taxExportSchema.safeParse({
+    organizationId: "63c47786-fb41-40c1-a573-71346969b9e0",
+    startDate: "2026-05-08",
+    endDate: "2026-05-01",
+    format: "pdf",
+  }).success, false);
+});
+
 test("CSV export escapes formula injection", () => {
   assert.equal(sanitizeCsvCell("=cmd|' /C calc'!A0"), "\"'=cmd|' /C calc'!A0\"");
   assert.equal(sanitizeCsvCell("+SUM(A1:A2)"), "\"'+SUM(A1:A2)\"");
+});
+
+test("tax report exports produce real PDF, CSV, and JSON", async () => {
+  const data = {
+    ...emptyAppData,
+    activeOrganizationId: "org-1",
+    sales: [
+      {
+        id: "sale-1",
+        organizationId: "org-1",
+        vehicleId: "vehicle-1",
+        saleDate: "2026-05-01",
+        vehicleTotalCost: 10000,
+        taxableProfitAmount: 1000,
+        profitTaxDue: 220,
+        paperSalePrice: 11000,
+        realClientPayment: 11500,
+        externalCommission: 500,
+        createdAt: "2026-05-01",
+        createdBy: "user-1",
+      },
+    ],
+  };
+  const pdf = await generateTaxReportExport(data, { format: "pdf", startDate: "2026-05-01", endDate: "2026-05-31" });
+  const csv = await generateTaxReportExport(data, { format: "csv", startDate: "2026-05-01", endDate: "2026-05-31" });
+  const json = await generateTaxReportExport(data, { format: "json", startDate: "2026-05-01", endDate: "2026-05-31" });
+
+  assert.equal((await pdf.text()).slice(0, 8), "%PDF-1.4");
+  assert.match(await csv.text(), /These calculations are estimates/);
+  assert.equal(JSON.parse(await json.text()).report.taxDue, 220);
 });
 
 test("upload validation rejects dangerous files and sanitizes names", () => {
@@ -298,4 +374,62 @@ test("attachment links reject script URLs", () => {
     title: "good",
     urlOrPath: "https://example.com/invoice",
   }).success, true);
+});
+
+test("PWA manifest is installable and branded", () => {
+  const manifest = JSON.parse(readFileSync(join(process.cwd(), "public/manifest.webmanifest"), "utf8")) as {
+    name?: string;
+    display?: string;
+    theme_color?: string;
+    icons?: Array<{ src?: string }>;
+  };
+
+  assert.equal(manifest.name, "Dealer Flow");
+  assert.equal(manifest.display, "standalone");
+  assert.equal(manifest.theme_color, "#0b1120");
+  assert.ok(manifest.icons?.some((icon) => icon.src === "/icon.svg"));
+  assert.equal(existsSync(join(process.cwd(), "public/icon.svg")), true);
+});
+
+test("activity log schema allows backup verification only", () => {
+  assert.equal(activityLogSchema.safeParse({
+    organizationId: "63c47786-fb41-40c1-a573-71346969b9e0",
+    action: "backup_verified",
+    entityType: "backup",
+    message: "Backup ZIP verified successfully.",
+  }).success, true);
+  assert.equal(activityLogSchema.safeParse({
+    organizationId: "63c47786-fb41-40c1-a573-71346969b9e0",
+    action: "document_uploaded",
+    entityType: "attachment",
+    message: "not allowed through generic log route",
+  }).success, false);
+});
+
+test("invitation regeneration schema requires an organization id", () => {
+  assert.equal(regenerateInvitationSchema.safeParse({
+    organizationId: "63c47786-fb41-40c1-a573-71346969b9e0",
+  }).success, true);
+  assert.equal(regenerateInvitationSchema.safeParse({ organizationId: "bad" }).success, false);
+});
+
+test("P0 migration adds atomic vehicle and sale RPCs", () => {
+  const sql = readFileSync(join(process.cwd(), "supabase/migrations/20260508_p0_atomic_security.sql"), "utf8");
+
+  assert.match(sql, /create or replace function create_vehicle_with_defaults/i);
+  assert.match(sql, /create or replace function record_vehicle_sale_atomic/i);
+  assert.match(sql, /for update/i);
+  assert.match(sql, /return new_vehicle_id/i);
+  assert.match(sql, /return sale_id/i);
+});
+
+test("P0 migration protects sensitive files and final owner", () => {
+  const sql = readFileSync(join(process.cwd(), "supabase/migrations/20260508_p0_atomic_security.sql"), "utf8");
+
+  assert.match(sql, /assert_final_owner_preserved/i);
+  assert.match(sql, /organization_memberships_final_owner/i);
+  assert.match(sql, /drop policy if exists "read attachments"/i);
+  assert.match(sql, /is_sensitive = false/i);
+  assert.match(sql, /operational roles read private organization files/i);
+  assert.match(sql, /array\['owner','admin','member'\]::app_role\[\]/i);
 });

@@ -23,6 +23,10 @@ export function canManageBackups(role?: Role | string) {
   return role === "owner" || role === "admin";
 }
 
+export function canExportTaxReports(role?: Role | string) {
+  return role === "owner" || role === "admin" || role === "accountant";
+}
+
 export function canManageRoles(role?: Role | string) {
   return role === "owner";
 }
@@ -45,4 +49,3 @@ export function sanitizeCsvCell(value: unknown) {
   const escapedFormula = /^[=+\-@]/.test(text) ? `'${text}` : text;
   return `"${escapedFormula.replaceAll('"', '""')}"`;
 }
-

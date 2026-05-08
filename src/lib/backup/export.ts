@@ -2,6 +2,7 @@ import JSZip from "jszip";
 import type { AppData } from "@/types/domain";
 import { generateTaxReport } from "@/lib/domain/calculations";
 import { MAX_BACKUP_VERIFY_BYTES, sanitizeCsvCell } from "@/lib/security";
+import { TAX_DISCLAIMER } from "@/lib/domain/constants";
 
 export const BACKUP_VERSION = 1;
 
@@ -55,6 +56,47 @@ export async function generateBackupExport(data: AppData) {
   zip.file("summary.pdf", await summaryPdf.arrayBuffer());
 
   return zip.generateAsync({ type: "blob" });
+}
+
+export async function generateTaxReportExport(
+  data: AppData,
+  input: { startDate?: string; endDate?: string; format: "pdf" | "csv" | "json" },
+) {
+  const report = generateTaxReport({ ...data, startDate: input.startDate, endDate: input.endDate });
+  const period = formatPeriod(input.startDate, input.endDate);
+
+  if (input.format === "json") {
+    return new Blob([JSON.stringify({ period, disclaimer: TAX_DISCLAIMER, report }, null, 2)], {
+      type: "application/json",
+    });
+  }
+
+  if (input.format === "csv") {
+    return new Blob([toCsv([{ period, disclaimer: TAX_DISCLAIMER, ...report }])], {
+      type: "text/csv",
+    });
+  }
+
+  return generateReportPdf({
+    title: "Dealer Flow Tax Report",
+    organizationId: data.activeOrganizationId,
+    lines: [
+      `Period: ${period}`,
+      `Generated: ${new Date().toISOString()}`,
+      TAX_DISCLAIMER,
+      `Total taxable profit: ${report.totalTaxableProfit}`,
+      `Estimated 22% tax due: ${report.taxDue}`,
+      `Company/paper sales: ${report.totalCompanySales}`,
+      `External commission earned: ${report.totalExternalCommission}`,
+      `External transferred to company: ${report.externalTransferredToCompany}`,
+      `External personally removed: ${report.externalPersonallyRemoved}`,
+      `Vehicle purchase costs: ${report.vehiclePurchaseCosts}`,
+      `Auction fees: ${report.auctionFees}`,
+      `Total expenses: ${report.totalExpenses}`,
+      `Taxes paid on purchases and expenses: ${report.taxesPaidOnPurchasesAndExpenses}`,
+      `Net profit after estimated tax: ${report.netProfitAfterTax}`,
+    ],
+  });
 }
 
 export async function verifyBackupExport(file: Blob) {
@@ -224,4 +266,11 @@ function findDuplicateIds(values: string[]) {
 
 function escapePdfText(value: string) {
   return value.replaceAll("\\", "\\\\").replaceAll("(", "\\(").replaceAll(")", "\\)");
+}
+
+function formatPeriod(startDate?: string, endDate?: string) {
+  if (startDate && endDate) return `${startDate} to ${endDate}`;
+  if (startDate) return `From ${startDate}`;
+  if (endDate) return `Until ${endDate}`;
+  return "All available data";
 }

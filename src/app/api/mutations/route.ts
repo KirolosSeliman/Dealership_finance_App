@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { calculateCompanyCashBalance, calculateExternalCashBalance } from "@/lib/domain/calculations";
+import { assertSameOrigin, checkRateLimit } from "@/lib/server/security";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
   createAttachment,
@@ -22,6 +23,7 @@ import {
 import { mapAttachment, mapVehicle } from "@/lib/supabase/mappers";
 import {
   attachmentSchema,
+  activityLogSchema,
   backupSettingsSchema,
   cashTransactionSchema,
   cashUpdateSchema,
@@ -31,6 +33,7 @@ import {
   formDataToObject,
   invitationCodeSchema,
   organizationSchema,
+  regenerateInvitationSchema,
   roleUpdateSchema,
   saleSchema,
   vehicleSchema,
@@ -56,9 +59,19 @@ type Operation =
   | "setVehicleMainPhoto"
   | "updateDefaultPlateCommission"
   | "updateMemberRole"
-  | "removeMember";
+  | "removeMember"
+  | "logActivity"
+  | "regenerateInvitationCode";
 
 export async function POST(request: Request) {
+  try {
+    assertSameOrigin(request);
+    checkRateLimit(request, "mutations", { limit: 90, windowMs: 60_000 });
+  } catch (error) {
+    const status = error instanceof Error && "status" in error ? Number((error as { status: number }).status) : 400;
+    return NextResponse.json({ ok: false, message: error instanceof Error ? error.message : "Request failed." }, { status });
+  }
+
   const supabase = await createSupabaseServerClient();
   if (!supabase) {
     return NextResponse.json({ ok: false, message: "Supabase is not configured." }, { status: 503 });
@@ -67,6 +80,12 @@ export async function POST(request: Request) {
   const { data: userData, error: userError } = await supabase.auth.getUser();
   if (userError || !userData.user) {
     return NextResponse.json({ ok: false, message: "Authentication required." }, { status: 401 });
+  }
+  try {
+    checkRateLimit(request, "mutations-user", { limit: 60, windowMs: 60_000, userId: userData.user.id });
+  } catch (error) {
+    const status = error instanceof Error && "status" in error ? Number((error as { status: number }).status) : 400;
+    return NextResponse.json({ ok: false, message: error instanceof Error ? error.message : "Request failed." }, { status });
   }
 
   const formData = await request.formData();
@@ -157,6 +176,13 @@ export async function POST(request: Request) {
       case "updateCashTransaction": {
         await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin"]);
         cashUpdateSchema.parse(formDataToObject(formData));
+        const appData = await loadAppData(supabase, userData.user, organizationId);
+        assertCashUpdateKeepsBalance(
+          appData,
+          String(formData.get("account") || "") as "company" | "external",
+          String(formData.get("transactionId") || ""),
+          Number(formData.get("amount")),
+        );
         await updateCashTransaction(
           supabase,
           organizationId,
@@ -226,6 +252,25 @@ export async function POST(request: Request) {
         await requireRole(supabase, userData.user.id, organizationId, ["owner"]);
         await removeMember(supabase, organizationId, String(formData.get("membershipId") || ""));
         return ok();
+      }
+      case "logActivity": {
+        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin"]);
+        activityLogSchema.parse(formDataToObject(formData));
+        await logServerActivity(
+          supabase,
+          organizationId,
+          String(formData.get("action") || ""),
+          String(formData.get("entityType") || ""),
+          undefined,
+          String(formData.get("message") || ""),
+        );
+        return ok();
+      }
+      case "regenerateInvitationCode": {
+        regenerateInvitationSchema.parse(formDataToObject(formData));
+        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin"]);
+        const inviteCode = await regenerateInvitationCode(supabase, organizationId);
+        return ok({ inviteCode });
       }
       default:
         return NextResponse.json({ ok: false, message: "Unknown operation." }, { status: 400 });
@@ -316,6 +361,33 @@ function optionalId(value: FormDataEntryValue | null) {
   return text || undefined;
 }
 
+function assertCashUpdateKeepsBalance(appData: Awaited<ReturnType<typeof loadAppData>>, account: "company" | "external", transactionId: string, amount: number) {
+  if (!transactionId) throw new ApiError(400, "Transaction is required.");
+  if (account === "company") {
+    const current = appData.companyCashTransactions.find((transaction) => transaction.id === transactionId && !transaction.deletedAt);
+    if (!current) throw new ApiError(404, "Company cash transaction was not found.");
+    const nextTransactions = appData.companyCashTransactions.map((transaction) =>
+      transaction.id === transactionId ? { ...transaction, amount } : transaction,
+    );
+    if (calculateCompanyCashBalance(nextTransactions) < 0) {
+      throw new ApiError(400, "This edit would make company cash negative.");
+    }
+    return;
+  }
+  if (account === "external") {
+    const current = appData.externalCashTransactions.find((transaction) => transaction.id === transactionId && !transaction.deletedAt);
+    if (!current) throw new ApiError(404, "External cash transaction was not found.");
+    const nextTransactions = appData.externalCashTransactions.map((transaction) =>
+      transaction.id === transactionId ? { ...transaction, amount } : transaction,
+    );
+    if (calculateExternalCashBalance(nextTransactions) < 0) {
+      throw new ApiError(400, "This edit would make external cash negative.");
+    }
+    return;
+  }
+  throw new ApiError(400, "Cash account is invalid.");
+}
+
 async function updateMemberRole(
   client: Awaited<ReturnType<typeof createSupabaseServerClient>>,
   organizationId: string,
@@ -385,7 +457,7 @@ async function logServerActivity(
   organizationId: string,
   action: string,
   entityType: string,
-  entityId: string,
+  entityId: string | undefined,
   message: string,
 ) {
   if (!client) return;
@@ -394,8 +466,52 @@ async function logServerActivity(
     organization_id: organizationId,
     action,
     entity_type: entityType,
-    entity_id: entityId,
+    entity_id: entityId ?? null,
     message,
     created_by: userData.user?.id,
   });
+}
+
+async function regenerateInvitationCode(
+  client: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  organizationId: string,
+) {
+  if (!client) throw new Error("Supabase is not configured.");
+  const { data: userData } = await client.auth.getUser();
+  const inviteCode = crypto.randomUUID().replaceAll("-", "").slice(0, 10).toUpperCase();
+  const { data: existingInvitation, error: readError } = await client
+    .from("organization_invitations")
+    .select("id")
+    .eq("organization_id", organizationId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (readError) throw readError;
+
+  if (existingInvitation?.id) {
+    const { error } = await client
+      .from("organization_invitations")
+      .update({ access_code: inviteCode, default_role: "viewer", expires_at: null })
+      .eq("id", existingInvitation.id)
+      .eq("organization_id", organizationId);
+    if (error) throw error;
+  } else {
+    const { error } = await client.from("organization_invitations").insert({
+      organization_id: organizationId,
+      access_code: inviteCode,
+      default_role: "viewer",
+      created_by: userData.user?.id,
+    });
+    if (error) throw error;
+  }
+
+  await logServerActivity(
+    client,
+    organizationId,
+    "invitation_regenerated",
+    "organization_invitation",
+    existingInvitation?.id,
+    "Organization invitation code regenerated.",
+  );
+  return inviteCode;
 }

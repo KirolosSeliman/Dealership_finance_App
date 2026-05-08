@@ -121,6 +121,32 @@ export const backupSettingsSchema = z.object({
   defaultPlateCommissionAmount: money,
 });
 
+export const backupRequestSchema = z.object({
+  organizationId: z.string().uuid(),
+});
+
+export const taxExportSchema = z.object({
+  organizationId: z.string().uuid(),
+  startDate: dateString.optional().or(z.literal("")),
+  endDate: dateString.optional().or(z.literal("")),
+  format: z.enum(["pdf", "csv", "json"]),
+}).superRefine((value, context) => {
+  if (value.startDate && value.endDate && value.startDate > value.endDate) {
+    context.addIssue({ code: "custom", path: ["endDate"], message: "End date must be after start date." });
+  }
+});
+
+export const activityLogSchema = z.object({
+  organizationId: z.string().uuid(),
+  action: z.enum(["backup_verified"]),
+  entityType: z.enum(["backup"]),
+  message: z.string().trim().min(1).max(240),
+});
+
+export const regenerateInvitationSchema = z.object({
+  organizationId: z.string().uuid(),
+});
+
 export function formDataToObject(formData: FormData) {
   return Object.fromEntries(formData.entries());
 }

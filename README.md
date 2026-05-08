@@ -65,9 +65,10 @@ After the base schema, run the migrations in `supabase/migrations`:
 20260507_sales_member_policy.sql
 20260508_production_constraints.sql
 20260508_attachment_security.sql
+20260508_p0_atomic_security.sql
 ```
 
-The production constraints migrations add financial data checks, prevent duplicate sales for the same vehicle, validate organization matches for expenses/sales/attachments, enforce private attachment paths, and add the sales update RLS policy.
+The production constraints migrations add financial data checks, prevent duplicate sales for the same vehicle, validate organization matches for expenses/sales/attachments, enforce private attachment paths, protect final owners, restrict sensitive file reads, and add atomic vehicle/sale RPCs.
 
 ## Backups
 

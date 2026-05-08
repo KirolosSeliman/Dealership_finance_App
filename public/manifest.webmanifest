@@ -2,18 +2,34 @@
   "name": "Dealer Flow",
   "short_name": "Dealer Flow",
   "description": "Finance, inventory, tax-reporting, and contact management for an independent Quebec vehicle dealer.",
+  "id": "/",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#07100f",
-  "theme_color": "#07100f",
+  "background_color": "#080d16",
+  "theme_color": "#0b1120",
   "orientation": "portrait-primary",
+  "categories": ["business", "finance", "productivity"],
   "icons": [
     {
       "src": "/icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
       "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Dashboard",
+      "url": "/dashboard"
+    },
+    {
+      "name": "Vehicles",
+      "url": "/vehicles"
+    },
+    {
+      "name": "Cash",
+      "url": "/cash"
     }
   ]
 }

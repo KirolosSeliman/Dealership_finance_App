@@ -1,10 +1,7 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import {
   calculateExpenseTax,
-  calculateSaleBreakdown,
-  calculateVehicleTotalCost,
 } from "@/lib/domain/calculations";
-import { DEFAULT_PLATE_COMMISSION_AMOUNT, OPENLANE_PURCHASE_TAX_RATE } from "@/lib/domain/constants";
 import { assertAllowedUpload, sanitizeStorageFileName } from "@/lib/security";
 import { emptyAppData, mapActivityLog, mapAttachment, mapCompanyCashTransaction, mapContact, mapExpense, mapExternalCashTransaction, mapMembership, mapOrganization, mapSale, mapVehicle } from "@/lib/supabase/mappers";
 import type {
@@ -33,13 +30,16 @@ export async function getCurrentUser(client: Client) {
 }
 
 export async function signIn(client: Client, email: string, password: string) {
-  const { error } = await client.auth.signInWithPassword({ email, password });
+  const { error } = await client.auth.signInWithPassword({
+    email: normalizeEmail(email),
+    password,
+  });
   if (error) throw error;
 }
 
 export async function signUp(client: Client, email: string, password: string, fullName: string) {
   const { error } = await client.auth.signUp({
-    email,
+    email: normalizeEmail(email),
     password,
     options: { data: { full_name: fullName } },
   });
@@ -146,13 +146,22 @@ export async function loadAppData(client: Client, user: User, activeOrganization
 }
 
 export async function createOrganization(client: Client, name: string) {
-  const { error } = await client.rpc("create_organization_with_owner", { organization_name: name });
+  const { data, error } = await client.rpc("create_organization_with_owner", { organization_name: name });
   if (error) throw error;
+  const organizationId = String(data ?? "");
+  if (organizationId) {
+    await logActivity(client, organizationId, "organization_created", "organization", organizationId, "Organization created");
+    await logActivity(client, organizationId, "invitation_created", "organization_invitation", undefined, "Default invitation code created");
+  }
 }
 
 export async function joinOrganization(client: Client, accessCode: string) {
-  const { error } = await client.rpc("join_organization_by_access_code", { invitation_code: accessCode });
+  const { data, error } = await client.rpc("join_organization_by_access_code", { invitation_code: accessCode });
   if (error) throw error;
+  const organizationId = String(data ?? "");
+  if (organizationId) {
+    await logActivity(client, organizationId, "organization_joined", "organization_membership", undefined, "User joined organization by invitation code");
+  }
 }
 
 export async function saveLanguagePreference(client: Client, language: "en" | "fr", activeOrganizationId?: string) {
@@ -176,66 +185,24 @@ export async function updateDefaultPlateCommission(client: Client, organizationI
 }
 
 export async function createVehicle(client: Client, organizationId: string, formData: FormData) {
-  const user = await requireUser(client);
-  const defaultPlateCommissionAmount = await getDefaultPlateCommissionAmount(client, organizationId);
-  const payload = {
-    organization_id: organizationId,
-    vin: stringValue(formData.get("vin")).toUpperCase(),
-    year: optionalNumber(formData.get("year")),
-    make: optionalString(formData.get("make")),
-    model: optionalString(formData.get("model")),
-    trim: optionalString(formData.get("trim")),
-    color: optionalString(formData.get("color")),
-    mileage: optionalNumber(formData.get("mileage")),
-    purchase_price: numberValue(formData.get("purchasePrice")),
-    purchase_date: stringValue(formData.get("purchaseDate")) || today(),
-    purchase_source: (stringValue(formData.get("purchaseSource")) || "other") as PurchaseSource,
-    status: (stringValue(formData.get("status")) || "purchased") as VehicleStatus,
-    listed_price: optionalNumber(formData.get("listedPrice")),
-    notes: optionalString(formData.get("notes")),
-    created_by: user.id,
-  };
-  const { data, error } = await client.from("vehicles").insert(payload).select("*").single();
+  const { data, error } = await client.rpc("create_vehicle_with_defaults", {
+    p_organization_id: organizationId,
+    p_vin: stringValue(formData.get("vin")),
+    p_year: optionalNumber(formData.get("year")),
+    p_make: optionalString(formData.get("make")),
+    p_model: optionalString(formData.get("model")),
+    p_trim: optionalString(formData.get("trim")),
+    p_color: optionalString(formData.get("color")),
+    p_mileage: optionalNumber(formData.get("mileage")),
+    p_purchase_price: numberValue(formData.get("purchasePrice")),
+    p_purchase_date: stringValue(formData.get("purchaseDate")) || today(),
+    p_purchase_source: (stringValue(formData.get("purchaseSource")) || "other") as PurchaseSource,
+    p_status: (stringValue(formData.get("status")) || "purchased") as VehicleStatus,
+    p_listed_price: optionalNumber(formData.get("listedPrice")),
+    p_notes: optionalString(formData.get("notes")),
+  });
   if (error) throw error;
-  if (payload.purchase_price > 0) {
-    const purchaseTaxAmount = roundMoney(payload.purchase_price * OPENLANE_PURCHASE_TAX_RATE);
-    const { error: purchaseTaxError } = await client.from("vehicle_expenses").insert({
-      organization_id: organizationId,
-      vehicle_id: data.id,
-      category: "vehicle_purchase_price" satisfies ExpenseCategory,
-      amount_before_tax: payload.purchase_price,
-      tax_rate: OPENLANE_PURCHASE_TAX_RATE,
-      tax_amount: purchaseTaxAmount,
-      total_amount: roundMoney(payload.purchase_price + purchaseTaxAmount),
-      date: payload.purchase_date,
-      note: "Automatic 5% purchase tax",
-      created_by: user.id,
-    });
-    if (purchaseTaxError) throw purchaseTaxError;
-  }
-  if (defaultPlateCommissionAmount > 0) {
-    const { error: commissionError } = await client.from("vehicle_expenses").insert({
-      organization_id: organizationId,
-      vehicle_id: data.id,
-      category: "commission_plaque" satisfies ExpenseCategory,
-      amount_before_tax: defaultPlateCommissionAmount,
-      tax_rate: 0,
-      tax_amount: 0,
-      total_amount: defaultPlateCommissionAmount,
-      date: payload.purchase_date,
-      note: "Automatic non-taxable Commission Plaque fee",
-      created_by: user.id,
-    });
-    if (commissionError) throw commissionError;
-  }
-  await logActivity(client, organizationId, "vehicle_created", "vehicle", data.id, `${payload.make ?? "Vehicle"} ${payload.model ?? ""}`);
-  if (payload.purchase_price > 0) {
-    await logActivity(client, organizationId, "expense_added", "vehicle", data.id, "Automatic 5% purchase tax");
-  }
-  if (defaultPlateCommissionAmount > 0) {
-    await logActivity(client, organizationId, "expense_added", "vehicle", data.id, "Automatic Commission Plaque fee");
-  }
-  return String(data.id);
+  return String(data);
 }
 
 export async function updateVehicle(client: Client, vehicle: Vehicle, formData: FormData) {
@@ -322,78 +289,21 @@ export async function deleteExpense(client: Client, vehicle: Vehicle, expenseId:
   if (error) throw error;
 }
 
-export async function recordVehicleSale(client: Client, appData: AppData, vehicle: Vehicle, formData: FormData) {
-  const user = await requireUser(client);
-  const vehicleTotalCost = calculateVehicleTotalCost(vehicle, appData.expenses);
-  const taxableProfitAmount = numberValue(formData.get("taxableProfitAmount"));
-  const realClientPayment = numberValue(formData.get("realClientPayment"));
-  const breakdown = calculateSaleBreakdown({ vehicleTotalCost, taxableProfitAmount, realClientPayment });
-  if (breakdown.externalCommission < 0) {
-    throw new Error("Real client payment cannot be lower than the paper sale price.");
-  }
-  const saleDate = stringValue(formData.get("saleDate")) || today();
-  const buyerName = stringValue(formData.get("buyerName"));
-  let contactId: string | null = null;
-
-  if (buyerName) {
-    const { data: contact, error: contactError } = await client.from("contacts").insert({
-      organization_id: vehicle.organizationId,
-      type: "buyer" satisfies ContactType,
-      full_name: buyerName,
-      phone: stringValue(formData.get("phone")),
-      email: optionalString(formData.get("email")),
-      address: optionalString(formData.get("address")),
-      notes: optionalString(formData.get("notes")),
-      created_by: user.id,
-    }).select("id").single();
-    if (contactError) throw contactError;
-    contactId = String(contact.id);
-    await logActivity(client, vehicle.organizationId, "contact_created", "contact", contactId, buyerName);
-  }
-
-  const { data: sale, error: saleError } = await client.from("sales").insert({
-    organization_id: vehicle.organizationId,
-    vehicle_id: vehicle.id,
-    contact_id: contactId,
-    sale_date: saleDate,
-    vehicle_total_cost: vehicleTotalCost,
-    taxable_profit_amount: taxableProfitAmount,
-    profit_tax_due: breakdown.profitTaxDue,
-    paper_sale_price: breakdown.paperSalePrice,
-    real_client_payment: realClientPayment,
-    external_commission: breakdown.externalCommission,
-    notes: optionalString(formData.get("notes")),
-    created_by: user.id,
-  }).select("id").single();
-  if (saleError) throw saleError;
-
-  const { error: updateError } = await client.from("vehicles").update({
-    status: "sold",
-    updated_at: new Date().toISOString(),
-  }).eq("id", vehicle.id);
-  if (updateError) throw updateError;
-
-  await client.from("company_cash_transactions").insert({
-    organization_id: vehicle.organizationId,
-    type: "paper_sale_received",
-    amount: breakdown.paperSalePrice,
-    date: saleDate,
-    note: "Paper sale received",
-    source_vehicle_id: vehicle.id,
-    created_by: user.id,
+export async function recordVehicleSale(client: Client, _appData: AppData, vehicle: Vehicle, formData: FormData) {
+  const { data, error } = await client.rpc("record_vehicle_sale_atomic", {
+    p_organization_id: vehicle.organizationId,
+    p_vehicle_id: vehicle.id,
+    p_sale_date: stringValue(formData.get("saleDate")) || today(),
+    p_taxable_profit_amount: numberValue(formData.get("taxableProfitAmount")),
+    p_real_client_payment: numberValue(formData.get("realClientPayment")),
+    p_buyer_name: optionalString(formData.get("buyerName")),
+    p_phone: optionalString(formData.get("phone")),
+    p_email: optionalString(formData.get("email")),
+    p_address: optionalString(formData.get("address")),
+    p_notes: optionalString(formData.get("notes")),
   });
-  await client.from("external_cash_transactions").insert({
-    organization_id: vehicle.organizationId,
-    type: "external_commission_earned",
-    amount: breakdown.externalCommission,
-    date: saleDate,
-    note: "External commission earned",
-    source_vehicle_id: vehicle.id,
-    created_by: user.id,
-  });
-  await logActivity(client, vehicle.organizationId, "vehicle_sold", "vehicle", vehicle.id, `Sale recorded for ${buyerName || "buyer"}`);
-  await logActivity(client, vehicle.organizationId, "cash_transaction_created", "vehicle", vehicle.id, "Sale cash transactions generated");
-  return String(sale.id);
+  if (error) throw error;
+  return String(data);
 }
 
 export async function createCashTransaction(
@@ -536,7 +446,14 @@ export async function createAttachment(client: Client, organizationId: string, f
     created_by: user.id,
   });
   if (error) throw error;
-  await logActivity(client, organizationId, "document_uploaded", "attachment", undefined, title);
+  await logActivity(
+    client,
+    organizationId,
+    formData.get("isSensitive") === "on" ? "sensitive_document_uploaded" : "document_uploaded",
+    "attachment",
+    undefined,
+    formData.get("isSensitive") === "on" ? "Sensitive document uploaded" : title,
+  );
 }
 
 async function ensureProfile(client: Client, user: User) {
@@ -565,19 +482,6 @@ async function logActivity(client: Client, organizationId: string, action: strin
     created_by: user.id,
   });
   if (error) throw error;
-}
-
-async function getDefaultPlateCommissionAmount(client: Client, organizationId: string) {
-  const { data, error } = await client
-    .from("organizations")
-    .select("default_plate_commission_amount")
-    .eq("id", organizationId)
-    .single();
-  if (error) throw error;
-  if (data?.default_plate_commission_amount === null || data?.default_plate_commission_amount === undefined) {
-    return DEFAULT_PLATE_COMMISSION_AMOUNT;
-  }
-  return Math.max(0, numberValue(data.default_plate_commission_amount));
 }
 
 async function selectRows(client: Client, table: string, columns = "*") {
@@ -614,6 +518,10 @@ function formatCashMessage(transaction: { amount?: unknown; type?: unknown; date
   return `${String(transaction.type ?? "cash transaction")} for ${amount} on ${String(transaction.date ?? "")}${transaction.note ? ` (${String(transaction.note)})` : ""}`;
 }
 
+function normalizeEmail(email: string) {
+  return email.trim().toLowerCase();
+}
+
 function stringValue(value: FormDataEntryValue | null) {
   return String(value ?? "").trim();
 }
@@ -633,10 +541,6 @@ function optionalNumber(value: FormDataEntryValue | null) {
 function numberValue(value: FormDataEntryValue | null) {
   const number = Number(value);
   return Number.isFinite(number) ? number : 0;
-}
-
-function roundMoney(value: number) {
-  return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
 function today() {

@@ -16,6 +16,11 @@ export const metadata: Metadata = {
   title: "Dealer Flow",
   description: "Personal finance, inventory, tax-reporting, and contact management for Quebec vehicle dealers.",
   manifest: "/manifest.webmanifest",
+  applicationName: "Dealer Flow",
+  icons: {
+    icon: "/icon.svg",
+    apple: "/icon.svg",
+  },
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
@@ -24,7 +29,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#07100f",
+  themeColor: "#0b1120",
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
