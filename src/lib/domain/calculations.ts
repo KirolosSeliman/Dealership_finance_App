@@ -16,7 +16,24 @@ export function calculateExpenseTax(input: {
   category: string;
   amountBeforeTax: number;
   addFifteenPercentTax?: boolean;
+  taxBehavior?: "no_tax" | "add_15_percent" | "custom";
+  customTaxRate?: number;
 }) {
+  if (input.taxBehavior) {
+    const taxRate =
+      input.taxBehavior === "custom"
+        ? Math.max(0, Math.min(1, input.customTaxRate ?? 0))
+        : input.taxBehavior === "add_15_percent"
+          ? QUEBEC_EXPENSE_TAX_RATE
+          : 0;
+    const taxAmount = roundMoney(input.amountBeforeTax * taxRate);
+    return {
+      taxRate,
+      taxAmount,
+      totalAmount: roundMoney(input.amountBeforeTax + taxAmount),
+    };
+  }
+
   if (input.category === "commission_plaque") {
     return {
       taxRate: 0,
@@ -87,7 +104,8 @@ export function calculateExternalCashBalance(transactions: ExternalCashTransacti
     transactions.filter((transaction) => !transaction.deletedAt).reduce((sum, transaction) => {
       if (
         transaction.type === "external_cash_transferred_to_company" ||
-        transaction.type === "external_cash_personally_removed"
+        transaction.type === "external_cash_personally_removed" ||
+        transaction.type === "external_vehicle_expense_paid"
       ) {
         return sum - transaction.amount;
       }

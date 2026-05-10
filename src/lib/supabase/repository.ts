@@ -1,9 +1,11 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import {
+  calculateCompanyCashBalance,
   calculateExpenseTax,
+  calculateExternalCashBalance,
 } from "@/lib/domain/calculations";
 import { assertAllowedUpload, sanitizeStorageFileName } from "@/lib/security";
-import { emptyAppData, mapActivityLog, mapAttachment, mapCompanyCashTransaction, mapContact, mapExpense, mapExternalCashTransaction, mapMembership, mapOrganization, mapSale, mapVehicle } from "@/lib/supabase/mappers";
+import { dedupeOrganizationsByHighestRole, emptyAppData, mapActivityLog, mapAttachment, mapCompanyCashTransaction, mapContact, mapExpense, mapExternalCashTransaction, mapMembership, mapOrganization, mapRecurringExpenseTemplate, mapSale, mapVehicle } from "@/lib/supabase/mappers";
 import type {
   AppData,
   Attachment,
@@ -11,6 +13,8 @@ import type {
   CompanyCashTransaction,
   ContactType,
   ExpenseCategory,
+  ExpenseFundingSource,
+  ExpenseTaxBehavior,
   ExternalCashTransaction,
   PurchaseSource,
   Vehicle,
@@ -53,15 +57,15 @@ export async function signOut(client: Client) {
 
 export async function loadAppData(client: Client, user: User, activeOrganizationId?: string): Promise<AppData> {
   await ensureProfile(client, user);
-  const memberships = await selectRows(client, "organization_memberships", "organization_id, role, organizations(id, name, default_plate_commission_amount)");
+  const memberships = await selectRows(client, "organization_memberships", "organization_id, role, organizations(id, name)");
   const invitationRows = await selectRows(client, "organization_invitations", "organization_id, access_code");
-  const organizations = memberships.map((row) => {
+  const organizations = dedupeOrganizationsByHighestRole(memberships.map((row) => {
     const organization = mapOrganization(row);
     organization.inviteCode = String(
       invitationRows.find((invite) => invite.organization_id === organization.id)?.access_code ?? "",
     );
     return organization;
-  });
+  }));
 
   const preferences = await selectRows(client, "user_preferences", "active_organization_id, selected_language");
   const preferredOrgId = String(preferences[0]?.active_organization_id ?? "");
@@ -88,6 +92,7 @@ export async function loadAppData(client: Client, user: User, activeOrganization
     attachments,
     companyCashTransactions,
     externalCashTransactions,
+    recurringExpenseTemplates,
     activityLogs,
   ] = await Promise.all([
     selectOrgRows(client, "vehicles", organizationId),
@@ -97,6 +102,7 @@ export async function loadAppData(client: Client, user: User, activeOrganization
     selectOrgRows(client, "attachments", organizationId),
     selectOrgRows(client, "company_cash_transactions", organizationId),
     selectOrgRows(client, "external_cash_transactions", organizationId),
+    selectOrgRows(client, "recurring_vehicle_expense_templates", organizationId),
     selectOrgRows(client, "activity_logs", organizationId),
   ]);
 
@@ -136,6 +142,7 @@ export async function loadAppData(client: Client, user: User, activeOrganization
     userName: user.user_metadata?.full_name ?? user.email ?? "",
     vehicles: mappedVehicles,
     expenses: expenses.map(mapExpense),
+    recurringExpenseTemplates: recurringExpenseTemplates.map(mapRecurringExpenseTemplate),
     sales: sales.map(mapSale),
     contacts: contacts.map(mapContact),
     attachments: mappedAttachments,
@@ -173,15 +180,6 @@ export async function saveLanguagePreference(client: Client, language: "en" | "f
     active_organization_id: activeOrganizationId || null,
   }, { onConflict: "user_id" });
   if (error) throw error;
-}
-
-export async function updateDefaultPlateCommission(client: Client, organizationId: string, amount: number) {
-  const { error } = await client.from("organizations").update({
-    default_plate_commission_amount: amount,
-    updated_at: new Date().toISOString(),
-  }).eq("id", organizationId);
-  if (error) throw error;
-  await logActivity(client, organizationId, "organization_settings_updated", "organization", organizationId, `Commission Plaque set to ${amount}`);
 }
 
 export async function createVehicle(client: Client, organizationId: string, formData: FormData) {
@@ -235,7 +233,6 @@ export async function updateVehicleMainPhoto(client: Client, vehicle: Vehicle, a
 }
 
 export async function createExpense(client: Client, vehicle: Vehicle, formData: FormData) {
-  const user = await requireUser(client);
   const amountBeforeTax = numberValue(formData.get("amountBeforeTax"));
   const category = stringValue(formData.get("category")) as ExpenseCategory;
   const tax = calculateExpenseTax({
@@ -244,24 +241,28 @@ export async function createExpense(client: Client, vehicle: Vehicle, formData: 
     amountBeforeTax,
     addFifteenPercentTax: formData.get("addTax") === "on",
   });
-  const { data, error } = await client.from("vehicle_expenses").insert({
-    organization_id: vehicle.organizationId,
-    vehicle_id: vehicle.id,
+  return createExpenseWithCashImpact(client, vehicle, {
     category,
-    amount_before_tax: amountBeforeTax,
-    tax_rate: tax.taxRate,
-    tax_amount: tax.taxAmount,
-    total_amount: tax.totalAmount,
+    amountBeforeTax,
+    taxRate: tax.taxRate,
+    taxAmount: tax.taxAmount,
+    totalAmount: tax.totalAmount,
+    fundingSource: (stringValue(formData.get("fundingSource")) || "company_cash") as ExpenseFundingSource,
     date: stringValue(formData.get("date")) || today(),
     note: optionalString(formData.get("note")),
-    created_by: user.id,
-  }).select("*").single();
-  if (error) throw error;
-  await logActivity(client, vehicle.organizationId, "expense_added", "vehicle", vehicle.id, category);
-  return String(data.id);
+  });
 }
 
 export async function updateExpense(client: Client, vehicle: Vehicle, expenseId: string, formData: FormData) {
+  const { data: existing, error: readError } = await client
+    .from("vehicle_expenses")
+    .select("*")
+    .eq("id", expenseId)
+    .eq("vehicle_id", vehicle.id)
+    .eq("organization_id", vehicle.organizationId)
+    .single();
+  if (readError) throw readError;
+  const existingExpense = mapExpense(existing as Record<string, unknown>);
   const amountBeforeTax = numberValue(formData.get("amountBeforeTax"));
   const category = stringValue(formData.get("category")) as ExpenseCategory;
   const tax = calculateExpenseTax({
@@ -270,6 +271,8 @@ export async function updateExpense(client: Client, vehicle: Vehicle, expenseId:
     amountBeforeTax,
     addFifteenPercentTax: formData.get("addTax") === "on",
   });
+  const fundingSource = existingExpense.fundingSource ?? "company_cash";
+  await assertFundingSourceBalance(client, vehicle.organizationId, fundingSource, tax.totalAmount, expenseId);
   const { error } = await client.from("vehicle_expenses").update({
     category,
     amount_before_tax: amountBeforeTax,
@@ -281,10 +284,123 @@ export async function updateExpense(client: Client, vehicle: Vehicle, expenseId:
     updated_at: new Date().toISOString(),
   }).eq("id", expenseId).eq("vehicle_id", vehicle.id);
   if (error) throw error;
+  await updateExpenseCashImpact(client, vehicle, fundingSource, expenseId, tax.totalAmount, stringValue(formData.get("date")) || today(), optionalString(formData.get("note")));
   await logActivity(client, vehicle.organizationId, "expense_updated", "vehicle", vehicle.id, category);
 }
 
+export async function createRecurringExpenseTemplate(client: Client, organizationId: string, formData: FormData) {
+  const user = await requireUser(client);
+  const amountBeforeTax = numberValue(formData.get("amountBeforeTax"));
+  const taxBehavior = (stringValue(formData.get("taxBehavior")) || "no_tax") as ExpenseTaxBehavior;
+  const customTaxRate = optionalNumber(formData.get("customTaxRate")) ?? 0;
+  const tax = calculateExpenseTax({
+    category: stringValue(formData.get("category")) || "other",
+    amountBeforeTax,
+    taxBehavior,
+    customTaxRate,
+  });
+  const { error } = await client.from("recurring_vehicle_expense_templates").insert({
+    organization_id: organizationId,
+    name: stringValue(formData.get("name")),
+    description: optionalString(formData.get("description")),
+    category: stringValue(formData.get("category")) as ExpenseCategory,
+    amount_before_tax: amountBeforeTax,
+    tax_behavior: taxBehavior,
+    tax_rate: tax.taxRate,
+    tax_amount: tax.taxAmount,
+    total_amount: tax.totalAmount,
+    default_funding_source: (stringValue(formData.get("defaultFundingSource")) || "company_cash") as ExpenseFundingSource,
+    auto_apply_to_new_vehicles: formData.get("autoApplyToNewVehicles") === "on",
+    is_active: formData.get("isActive") !== "off",
+    created_by: user.id,
+  });
+  if (error) throw error;
+  await logActivity(client, organizationId, "recurring_expense_template_created", "recurring_vehicle_expense_template", undefined, stringValue(formData.get("name")));
+}
+
+export async function updateRecurringExpenseTemplate(client: Client, organizationId: string, formData: FormData) {
+  const templateId = stringValue(formData.get("templateId"));
+  const amountBeforeTax = numberValue(formData.get("amountBeforeTax"));
+  const taxBehavior = (stringValue(formData.get("taxBehavior")) || "no_tax") as ExpenseTaxBehavior;
+  const customTaxRate = optionalNumber(formData.get("customTaxRate")) ?? 0;
+  const tax = calculateExpenseTax({
+    category: stringValue(formData.get("category")) || "other",
+    amountBeforeTax,
+    taxBehavior,
+    customTaxRate,
+  });
+  const { error } = await client.from("recurring_vehicle_expense_templates").update({
+    name: stringValue(formData.get("name")),
+    description: optionalString(formData.get("description")),
+    category: stringValue(formData.get("category")) as ExpenseCategory,
+    amount_before_tax: amountBeforeTax,
+    tax_behavior: taxBehavior,
+    tax_rate: tax.taxRate,
+    tax_amount: tax.taxAmount,
+    total_amount: tax.totalAmount,
+    default_funding_source: (stringValue(formData.get("defaultFundingSource")) || "company_cash") as ExpenseFundingSource,
+    auto_apply_to_new_vehicles: formData.get("autoApplyToNewVehicles") === "on",
+    is_active: formData.get("isActive") === "on",
+    updated_at: new Date().toISOString(),
+  }).eq("id", templateId).eq("organization_id", organizationId);
+  if (error) throw error;
+  await logActivity(client, organizationId, "recurring_expense_template_updated", "recurring_vehicle_expense_template", templateId, stringValue(formData.get("name")));
+}
+
+export async function deleteRecurringExpenseTemplate(client: Client, organizationId: string, templateId: string) {
+  const user = await requireUser(client);
+  const { error } = await client.from("recurring_vehicle_expense_templates").update({
+    is_active: false,
+    deleted_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }).eq("id", templateId).eq("organization_id", organizationId);
+  if (error) throw error;
+  await logActivity(client, organizationId, "recurring_expense_template_deleted", "recurring_vehicle_expense_template", templateId, `Template deactivated by ${user.id}`);
+}
+
+export async function applyRecurringExpenseTemplate(client: Client, vehicle: Vehicle, templateId: string) {
+  const { data, error } = await client
+    .from("recurring_vehicle_expense_templates")
+    .select("*")
+    .eq("id", templateId)
+    .eq("organization_id", vehicle.organizationId)
+    .is("deleted_at", null)
+    .eq("is_active", true)
+    .single();
+  if (error) throw error;
+  const template = mapRecurringExpenseTemplate(data as Record<string, unknown>);
+  return createExpenseWithCashImpact(client, vehicle, {
+    category: template.category,
+    amountBeforeTax: template.amountBeforeTax,
+    taxRate: template.taxRate,
+    taxAmount: template.taxAmount,
+    totalAmount: template.totalAmount,
+    fundingSource: template.defaultFundingSource,
+    date: today(),
+    note: template.description || template.name,
+    recurringTemplateId: template.id,
+  });
+}
+
 export async function deleteExpense(client: Client, vehicle: Vehicle, expenseId: string) {
+  const user = await requireUser(client);
+  const deletedAt = new Date().toISOString();
+  const [companyResult, externalResult] = await Promise.all([
+    client.from("company_cash_transactions").update({
+      deleted_at: deletedAt,
+      deleted_by: user.id,
+      deletion_note: "Linked vehicle expense was deleted.",
+      updated_at: deletedAt,
+    }).eq("organization_id", vehicle.organizationId).eq("source_expense_id", expenseId).is("deleted_at", null),
+    client.from("external_cash_transactions").update({
+      deleted_at: deletedAt,
+      deleted_by: user.id,
+      deletion_note: "Linked vehicle expense was deleted.",
+      updated_at: deletedAt,
+    }).eq("organization_id", vehicle.organizationId).eq("source_expense_id", expenseId).is("deleted_at", null),
+  ]);
+  if (companyResult.error) throw companyResult.error;
+  if (externalResult.error) throw externalResult.error;
   const { error } = await client.rpc("delete_vehicle_expense", { expense_id: expenseId });
   if (error) throw error;
 }
@@ -454,6 +570,134 @@ export async function createAttachment(client: Client, organizationId: string, f
     undefined,
     formData.get("isSensitive") === "on" ? "Sensitive document uploaded" : title,
   );
+}
+
+async function createExpenseWithCashImpact(
+  client: Client,
+  vehicle: Vehicle,
+  input: {
+    category: ExpenseCategory;
+    amountBeforeTax: number;
+    taxRate: number;
+    taxAmount: number;
+    totalAmount: number;
+    fundingSource: ExpenseFundingSource;
+    date: string;
+    note?: string | null;
+    recurringTemplateId?: string;
+  },
+) {
+  const user = await requireUser(client);
+  if (!["company_cash", "external_cash"].includes(input.fundingSource)) {
+    throw new Error("Funding source is invalid.");
+  }
+  await assertFundingSourceBalance(client, vehicle.organizationId, input.fundingSource, input.totalAmount);
+  const { data, error } = await client.from("vehicle_expenses").insert({
+    organization_id: vehicle.organizationId,
+    vehicle_id: vehicle.id,
+    recurring_template_id: input.recurringTemplateId ?? null,
+    category: input.category,
+    amount_before_tax: input.amountBeforeTax,
+    tax_rate: input.taxRate,
+    tax_amount: input.taxAmount,
+    total_amount: input.totalAmount,
+    funding_source: input.fundingSource,
+    date: input.date,
+    note: input.note,
+    created_by: user.id,
+  }).select("*").single();
+  if (error) throw error;
+  const expenseId = String(data.id);
+  await insertExpenseCashImpact(client, vehicle, input.fundingSource, expenseId, input.totalAmount, input.date, input.note ?? input.category, user.id);
+  await logActivity(client, vehicle.organizationId, "expense_added", "vehicle", vehicle.id, input.category);
+  return expenseId;
+}
+
+async function insertExpenseCashImpact(
+  client: Client,
+  vehicle: Vehicle,
+  fundingSource: ExpenseFundingSource,
+  expenseId: string,
+  amount: number,
+  date: string,
+  note: string,
+  userId: string,
+) {
+  if (amount <= 0) return;
+  const isExternal = fundingSource === "external_cash";
+  const { error } = await client.from(isExternal ? "external_cash_transactions" : "company_cash_transactions").insert({
+    organization_id: vehicle.organizationId,
+    type: isExternal ? "external_vehicle_expense_paid" : "vehicle_cost_paid",
+    amount,
+    date,
+    note: `Vehicle expense: ${note}`,
+    source_vehicle_id: vehicle.id,
+    source_expense_id: expenseId,
+    created_by: userId,
+  });
+  if (error) throw error;
+}
+
+async function updateExpenseCashImpact(
+  client: Client,
+  vehicle: Vehicle,
+  fundingSource: ExpenseFundingSource,
+  expenseId: string,
+  amount: number,
+  date: string,
+  note?: string | null,
+) {
+  const table = fundingSource === "external_cash" ? "external_cash_transactions" : "company_cash_transactions";
+  const { data: existing, error: readError } = await client
+    .from(table)
+    .select("id")
+    .eq("organization_id", vehicle.organizationId)
+    .eq("source_expense_id", expenseId)
+    .is("deleted_at", null)
+    .limit(1)
+    .maybeSingle();
+  if (readError) throw readError;
+  if (existing?.id) {
+    const { error } = await client.from(table).update({
+      amount,
+      date,
+      note: `Vehicle expense: ${note || expenseId}`,
+      updated_at: new Date().toISOString(),
+    }).eq("id", String(existing.id)).eq("organization_id", vehicle.organizationId);
+    if (error) throw error;
+    return;
+  }
+  const user = await requireUser(client);
+  await insertExpenseCashImpact(client, vehicle, fundingSource, expenseId, amount, date, note || expenseId, user.id);
+}
+
+async function assertFundingSourceBalance(
+  client: Client,
+  organizationId: string,
+  fundingSource: ExpenseFundingSource,
+  nextAmount: number,
+  replacingExpenseId?: string,
+) {
+  if (nextAmount <= 0) return;
+  if (fundingSource === "company_cash") {
+    const rows = await selectOrgRows(client, "company_cash_transactions", organizationId);
+    const transactions = rows.map(mapCompanyCashTransaction);
+    const currentImpact = replacingExpenseId
+      ? transactions.find((transaction) => transaction.sourceExpenseId === replacingExpenseId && !transaction.deletedAt)?.amount ?? 0
+      : 0;
+    if (nextAmount > calculateCompanyCashBalance(transactions) + currentImpact) {
+      throw new Error("Company cash does not have enough available balance for this expense.");
+    }
+    return;
+  }
+  const rows = await selectOrgRows(client, "external_cash_transactions", organizationId);
+  const transactions = rows.map(mapExternalCashTransaction);
+  const currentImpact = replacingExpenseId
+    ? transactions.find((transaction) => transaction.sourceExpenseId === replacingExpenseId && !transaction.deletedAt)?.amount ?? 0
+    : 0;
+  if (nextAmount > calculateExternalCashBalance(transactions) + currentImpact) {
+    throw new Error("External cash does not have enough available balance for this expense.");
+  }
 }
 
 async function ensureProfile(client: Client, user: User) {

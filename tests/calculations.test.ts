@@ -14,8 +14,8 @@ import {
 import { generateBackupExport, generateTaxReportExport, restoreBackupDryRun, verifyBackupExport } from "../src/lib/backup/export";
 import { assertAllowedUpload, canExportTaxReports, canManageBackups, sanitizeCsvCell, sanitizeStorageFileName } from "../src/lib/security";
 import { assertSameOrigin, checkRateLimit, resetRateLimitForTests, RouteSecurityError } from "../src/lib/server/security";
-import { activityLogSchema, attachmentSchema, backupRequestSchema, regenerateInvitationSchema, taxExportSchema } from "../src/lib/validation";
-import { emptyAppData } from "../src/lib/supabase/mappers";
+import { activityLogSchema, attachmentSchema, backupRequestSchema, expenseSchema, recurringExpenseTemplateSchema, regenerateInvitationSchema, taxExportSchema } from "../src/lib/validation";
+import { dedupeOrganizationsByHighestRole, emptyAppData, mapExpense } from "../src/lib/supabase/mappers";
 import type {
   CompanyCashTransaction,
   ExternalCashTransaction,
@@ -77,6 +77,21 @@ test("optional 15 percent tax works for regular expenses", () => {
   );
 });
 
+test("recurring expense tax behavior supports no tax, 15 percent, and custom rates", () => {
+  assert.deepEqual(
+    calculateExpenseTax({ category: "other", amountBeforeTax: 250, taxBehavior: "no_tax" }),
+    { taxRate: 0, taxAmount: 0, totalAmount: 250 },
+  );
+  assert.deepEqual(
+    calculateExpenseTax({ category: "other", amountBeforeTax: 250, taxBehavior: "add_15_percent" }),
+    { taxRate: 0.15, taxAmount: 37.5, totalAmount: 287.5 },
+  );
+  assert.deepEqual(
+    calculateExpenseTax({ category: "other", amountBeforeTax: 250, taxBehavior: "custom", customTaxRate: 0.1 }),
+    { taxRate: 0.1, taxAmount: 25, totalAmount: 275 },
+  );
+});
+
 test("Commission Plaque is always non-taxable", () => {
   assert.deepEqual(
     calculateExpenseTax({
@@ -130,9 +145,79 @@ test("vehicle total cost and cash balances are calculated", () => {
   const external: ExternalCashTransaction[] = [
     { id: "1", organizationId: "org-1", type: "external_commission_earned", amount: 700, date: "2026-01-01", createdAt: "2026-01-01", createdBy: "user-1" },
     { id: "2", organizationId: "org-1", type: "external_cash_transferred_to_company", amount: 200, date: "2026-01-02", createdAt: "2026-01-02", createdBy: "user-1" },
+    { id: "3", organizationId: "org-1", type: "external_vehicle_expense_paid", amount: 50, date: "2026-01-03", createdAt: "2026-01-03", createdBy: "user-1" },
   ];
   assert.equal(calculateCompanyCashBalance(company), 4500);
-  assert.equal(calculateExternalCashBalance(external), 500);
+  assert.equal(calculateExternalCashBalance(external), 450);
+});
+
+test("expense validation and mapping support funding source defaults", () => {
+  assert.equal(expenseSchema.safeParse({
+    category: "repair",
+    amountBeforeTax: 100,
+    addTax: "on",
+    fundingSource: "external_cash",
+    date: "2026-05-09",
+  }).success, true);
+  assert.equal(expenseSchema.safeParse({
+    category: "repair",
+    amountBeforeTax: 100,
+    fundingSource: "personal_wallet",
+    date: "2026-05-09",
+  }).success, false);
+  assert.equal(mapExpense({
+    id: "expense-1",
+    organization_id: "org-1",
+    vehicle_id: "vehicle-1",
+    category: "repair",
+    amount_before_tax: 100,
+    tax_rate: 0,
+    tax_amount: 0,
+    total_amount: 100,
+    date: "2026-05-09",
+    created_at: "2026-05-09",
+    created_by: "user-1",
+  }).fundingSource, "company_cash");
+});
+
+test("recurring expense template validation is organization-safe input shape", () => {
+  assert.equal(recurringExpenseTemplateSchema.safeParse({
+    name: "Plate commission",
+    category: "commission_plaque",
+    amountBeforeTax: 250,
+    taxBehavior: "no_tax",
+    defaultFundingSource: "company_cash",
+    autoApplyToNewVehicles: "on",
+    isActive: "on",
+  }).success, true);
+  assert.equal(recurringExpenseTemplateSchema.safeParse({
+    name: "Bad template",
+    category: "other",
+    amountBeforeTax: 250,
+    taxBehavior: "custom",
+    customTaxRate: 2,
+    defaultFundingSource: "external_cash",
+  }).success, false);
+});
+
+test("duplicate organization rows resolve to the highest role", () => {
+  const organizations = dedupeOrganizationsByHighestRole([
+    { id: "org-1", name: "Lot", role: "viewer", inviteCode: "VIEWER" },
+    { id: "org-1", name: "Lot", role: "owner", inviteCode: "OWNER" },
+    { id: "org-2", name: "Other Lot", role: "viewer", inviteCode: "" },
+  ]);
+
+  assert.equal(organizations.length, 2);
+  assert.equal(organizations.find((organization) => organization.id === "org-1")?.role, "owner");
+});
+
+test("membership migration preserves existing roles and avoids unsafe duplicate cleanup", () => {
+  const sql = readFileSync(join(process.cwd(), "supabase/migrations/20260509_membership_role_resolution.sql"), "utf8");
+
+  assert.match(sql, /join_organization_by_access_code/i);
+  assert.match(sql, /set role = organization_memberships\.role/i);
+  assert.match(sql, /unique \(organization_id, user_id\)/i);
+  assert.match(sql, /Duplicate organization memberships exist/i);
 });
 
 test("deleted cash transactions are excluded from balances", () => {
@@ -421,6 +506,17 @@ test("P0 migration adds atomic vehicle and sale RPCs", () => {
   assert.match(sql, /for update/i);
   assert.match(sql, /return new_vehicle_id/i);
   assert.match(sql, /return sale_id/i);
+});
+
+test("recurring expense migration replaces hardcoded plate commission with templates", () => {
+  const sql = readFileSync(join(process.cwd(), "supabase/migrations/20260509_recurring_expenses_funding_source.sql"), "utf8");
+  const p0Sql = readFileSync(join(process.cwd(), "supabase/migrations/20260508_p0_atomic_security.sql"), "utf8");
+
+  assert.match(sql, /create table if not exists recurring_vehicle_expense_templates/i);
+  assert.match(sql, /funding_source text not null default 'company_cash'/i);
+  assert.match(sql, /external_vehicle_expense_paid/i);
+  assert.match(sql, /auto_apply_to_new_vehicles = true/i);
+  assert.doesNotMatch(p0Sql, /Automatic non-taxable Commission Plaque fee/i);
 });
 
 test("P0 migration protects sensitive files and final owner", () => {

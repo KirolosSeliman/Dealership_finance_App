@@ -35,6 +35,8 @@ export type ContactType =
   | "other";
 
 export type AttachmentType = "file" | "photo" | "link";
+export type ExpenseFundingSource = "company_cash" | "external_cash";
+export type ExpenseTaxBehavior = "no_tax" | "add_15_percent" | "custom";
 
 export type CompanyCashTransactionType =
   | "company_cash_added"
@@ -46,14 +48,14 @@ export type CompanyCashTransactionType =
 export type ExternalCashTransactionType =
   | "external_commission_earned"
   | "external_cash_transferred_to_company"
-  | "external_cash_personally_removed";
+  | "external_cash_personally_removed"
+  | "external_vehicle_expense_paid";
 
 export interface Organization {
   id: string;
   name: string;
   role: Role;
   inviteCode: string;
-  defaultPlateCommissionAmount: number;
 }
 
 export interface OrganizationMembership {
@@ -91,15 +93,37 @@ export interface VehicleExpense {
   id: string;
   organizationId: string;
   vehicleId: string;
+  recurringTemplateId?: string;
   category: ExpenseCategory;
   amountBeforeTax: number;
   taxRate: number;
   taxAmount: number;
   totalAmount: number;
+  fundingSource?: ExpenseFundingSource;
   date: string;
   note?: string;
   createdAt: string;
   createdBy: string;
+}
+
+export interface RecurringVehicleExpenseTemplate {
+  id: string;
+  organizationId: string;
+  name: string;
+  description?: string;
+  category: ExpenseCategory;
+  amountBeforeTax: number;
+  taxRate: number;
+  taxAmount: number;
+  totalAmount: number;
+  taxBehavior: ExpenseTaxBehavior;
+  defaultFundingSource: ExpenseFundingSource;
+  autoApplyToNewVehicles: boolean;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  createdBy: string;
+  deletedAt?: string;
 }
 
 export interface Sale {
@@ -171,6 +195,7 @@ export interface CompanyCashTransaction {
   date: string;
   note?: string;
   sourceVehicleId?: string;
+  sourceExpenseId?: string;
   createdAt: string;
   createdBy: string;
   updatedAt?: string;
@@ -187,6 +212,7 @@ export interface ExternalCashTransaction {
   date: string;
   note?: string;
   sourceVehicleId?: string;
+  sourceExpenseId?: string;
   createdAt: string;
   createdBy: string;
   updatedAt?: string;
@@ -215,6 +241,7 @@ export interface AppData {
   userEmail?: string;
   vehicles: Vehicle[];
   expenses: VehicleExpense[];
+  recurringExpenseTemplates: RecurringVehicleExpenseTemplate[];
   sales: Sale[];
   contacts: Contact[];
   attachments: Attachment[];

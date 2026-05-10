@@ -7,11 +7,11 @@ import type {
   ExternalCashTransaction,
   OrganizationMembership,
   Organization,
+  RecurringVehicleExpenseTemplate,
   Sale,
   Vehicle,
   VehicleExpense,
 } from "@/types/domain";
-import { DEFAULT_PLATE_COMMISSION_AMOUNT } from "@/lib/domain/constants";
 
 type Row = Record<string, unknown>;
 
@@ -22,6 +22,7 @@ export const emptyAppData: AppData = {
   userName: "",
   vehicles: [],
   expenses: [],
+  recurringExpenseTemplates: [],
   sales: [],
   contacts: [],
   attachments: [],
@@ -37,10 +38,25 @@ export function mapOrganization(row: Row): Organization {
     name: String(organization?.name ?? row.name ?? "Organization"),
     role: String(row.role ?? "viewer") as Organization["role"],
     inviteCode: String(row.access_code ?? row.invite_code ?? ""),
-    defaultPlateCommissionAmount: numberValue(
-      organization?.default_plate_commission_amount ?? row.default_plate_commission_amount ?? DEFAULT_PLATE_COMMISSION_AMOUNT,
-    ),
   };
+}
+
+export function dedupeOrganizationsByHighestRole(organizations: Organization[]) {
+  const byId = new Map<string, Organization>();
+  organizations.forEach((organization) => {
+    const existing = byId.get(organization.id);
+    if (!existing || rolePriority(organization.role) > rolePriority(existing.role)) {
+      byId.set(organization.id, {
+        ...organization,
+        inviteCode: organization.inviteCode || existing?.inviteCode || "",
+      });
+      return;
+    }
+    if (!existing.inviteCode && organization.inviteCode) {
+      byId.set(organization.id, { ...existing, inviteCode: organization.inviteCode });
+    }
+  });
+  return Array.from(byId.values());
 }
 
 export function mapMembership(row: Row): OrganizationMembership {
@@ -51,6 +67,16 @@ export function mapMembership(row: Row): OrganizationMembership {
     role: String(row.role ?? "viewer") as OrganizationMembership["role"],
     createdAt: dateTimeValue(row.created_at),
   };
+}
+
+function rolePriority(role: Organization["role"]) {
+  return {
+    viewer: 1,
+    accountant: 2,
+    member: 3,
+    admin: 4,
+    owner: 5,
+  }[role] ?? 0;
 }
 
 export function mapVehicle(row: Row): Vehicle {
@@ -83,15 +109,39 @@ export function mapExpense(row: Row): VehicleExpense {
     id: String(row.id),
     organizationId: String(row.organization_id),
     vehicleId: String(row.vehicle_id),
+    recurringTemplateId: optionalString(row.recurring_template_id),
     category: String(row.category) as VehicleExpense["category"],
     amountBeforeTax: numberValue(row.amount_before_tax),
     taxRate: numberValue(row.tax_rate),
     taxAmount: numberValue(row.tax_amount),
     totalAmount: numberValue(row.total_amount),
+    fundingSource: String(row.funding_source ?? "company_cash") as VehicleExpense["fundingSource"],
     date: dateValue(row.date),
     note: optionalString(row.note),
     createdAt: dateTimeValue(row.created_at),
     createdBy: String(row.created_by ?? ""),
+  };
+}
+
+export function mapRecurringExpenseTemplate(row: Row): RecurringVehicleExpenseTemplate {
+  return {
+    id: String(row.id),
+    organizationId: String(row.organization_id),
+    name: String(row.name ?? ""),
+    description: optionalString(row.description),
+    category: String(row.category ?? "other") as RecurringVehicleExpenseTemplate["category"],
+    amountBeforeTax: numberValue(row.amount_before_tax),
+    taxRate: numberValue(row.tax_rate),
+    taxAmount: numberValue(row.tax_amount),
+    totalAmount: numberValue(row.total_amount),
+    taxBehavior: String(row.tax_behavior ?? "no_tax") as RecurringVehicleExpenseTemplate["taxBehavior"],
+    defaultFundingSource: String(row.default_funding_source ?? "company_cash") as RecurringVehicleExpenseTemplate["defaultFundingSource"],
+    autoApplyToNewVehicles: Boolean(row.auto_apply_to_new_vehicles),
+    isActive: Boolean(row.is_active),
+    createdAt: dateTimeValue(row.created_at),
+    updatedAt: dateTimeValue(row.updated_at),
+    createdBy: String(row.created_by ?? ""),
+    deletedAt: optionalString(row.deleted_at),
   };
 }
 
@@ -171,6 +221,7 @@ export function mapCompanyCashTransaction(row: Row): CompanyCashTransaction {
     date: dateValue(row.date),
     note: optionalString(row.note),
     sourceVehicleId: optionalString(row.source_vehicle_id),
+    sourceExpenseId: optionalString(row.source_expense_id),
     createdAt: dateTimeValue(row.created_at),
     createdBy: String(row.created_by ?? ""),
     updatedAt: optionalString(row.updated_at),
@@ -189,6 +240,7 @@ export function mapExternalCashTransaction(row: Row): ExternalCashTransaction {
     date: dateValue(row.date),
     note: optionalString(row.note),
     sourceVehicleId: optionalString(row.source_vehicle_id),
+    sourceExpenseId: optionalString(row.source_expense_id),
     createdAt: dateTimeValue(row.created_at),
     createdBy: String(row.created_by ?? ""),
     updatedAt: optionalString(row.updated_at),

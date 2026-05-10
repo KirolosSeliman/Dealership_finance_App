@@ -69,17 +69,44 @@ create table vehicle_expenses (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references organizations(id) on delete cascade,
   vehicle_id uuid not null references vehicles(id) on delete cascade,
+  recurring_template_id uuid,
   category expense_category not null,
   amount_before_tax numeric(12,2) not null default 0,
   tax_rate numeric(6,4) not null default 0,
   tax_amount numeric(12,2) not null default 0,
   total_amount numeric(12,2) not null default 0,
+  funding_source text not null default 'company_cash' check (funding_source in ('company_cash', 'external_cash')),
   date date not null default current_date,
   note text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   created_by uuid references profiles(id)
 );
+
+create table recurring_vehicle_expense_templates (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references organizations(id) on delete cascade,
+  name text not null,
+  description text,
+  category expense_category not null default 'other',
+  amount_before_tax numeric(12,2) not null default 0,
+  tax_behavior text not null default 'no_tax' check (tax_behavior in ('no_tax', 'add_15_percent', 'custom')),
+  tax_rate numeric(6,4) not null default 0 check (tax_rate >= 0 and tax_rate <= 1),
+  tax_amount numeric(12,2) not null default 0,
+  total_amount numeric(12,2) not null default 0,
+  default_funding_source text not null default 'company_cash' check (default_funding_source in ('company_cash', 'external_cash')),
+  auto_apply_to_new_vehicles boolean not null default false,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz,
+  created_by uuid references profiles(id),
+  check (amount_before_tax >= 0 and tax_amount >= 0 and total_amount >= 0)
+);
+
+alter table vehicle_expenses
+  add constraint vehicle_expenses_recurring_template_fk
+  foreign key (recurring_template_id) references recurring_vehicle_expense_templates(id);
 
 create table contacts (
   id uuid primary key default gen_random_uuid(),
@@ -132,6 +159,7 @@ create table company_cash_transactions (
   date date not null default current_date,
   note text,
   source_vehicle_id uuid references vehicles(id),
+  source_expense_id uuid references vehicle_expenses(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   deleted_at timestamptz,
@@ -148,6 +176,7 @@ create table external_cash_transactions (
   date date not null default current_date,
   note text,
   source_vehicle_id uuid references vehicles(id),
+  source_expense_id uuid references vehicle_expenses(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   deleted_at timestamptz,
@@ -245,6 +274,7 @@ create trigger set_organizations_updated_at before update on organizations for e
 create trigger set_memberships_updated_at before update on organization_memberships for each row execute function set_updated_at();
 create trigger set_vehicles_updated_at before update on vehicles for each row execute function set_updated_at();
 create trigger set_expenses_updated_at before update on vehicle_expenses for each row execute function set_updated_at();
+create trigger set_recurring_vehicle_expense_templates_updated_at before update on recurring_vehicle_expense_templates for each row execute function set_updated_at();
 create trigger set_contacts_updated_at before update on contacts for each row execute function set_updated_at();
 create trigger set_sales_updated_at before update on sales for each row execute function set_updated_at();
 create trigger set_company_cash_updated_at before update on company_cash_transactions for each row execute function set_updated_at();
@@ -340,7 +370,9 @@ begin
 
   insert into organization_memberships (organization_id, user_id, role)
   values (invitation.organization_id, auth.uid(), 'viewer')
-  on conflict (organization_id, user_id) do nothing;
+  on conflict (organization_id, user_id) do update
+    set role = organization_memberships.role,
+        updated_at = now();
 
   insert into user_preferences (user_id, active_organization_id)
   values (auth.uid(), invitation.organization_id)
@@ -418,6 +450,7 @@ alter table organization_memberships enable row level security;
 alter table organization_invitations enable row level security;
 alter table vehicles enable row level security;
 alter table vehicle_expenses enable row level security;
+alter table recurring_vehicle_expense_templates enable row level security;
 alter table contacts enable row level security;
 alter table sales enable row level security;
 alter table company_cash_transactions enable row level security;
@@ -447,6 +480,9 @@ create policy "member update vehicles" on vehicles for update using (has_org_rol
 create policy "read expenses" on vehicle_expenses for select using (is_org_member(organization_id));
 create policy "write expenses" on vehicle_expenses for insert with check (has_org_role(organization_id, array['owner','admin','member']::app_role[]));
 create policy "update expenses" on vehicle_expenses for update using (has_org_role(organization_id, array['owner','admin','member']::app_role[]));
+create policy "read recurring vehicle expense templates" on recurring_vehicle_expense_templates for select using (is_org_member(organization_id));
+create policy "insert recurring vehicle expense templates" on recurring_vehicle_expense_templates for insert with check (has_org_role(organization_id, array['owner','admin']::app_role[]));
+create policy "update recurring vehicle expense templates" on recurring_vehicle_expense_templates for update using (has_org_role(organization_id, array['owner','admin']::app_role[])) with check (has_org_role(organization_id, array['owner','admin']::app_role[]));
 create policy "delete expenses" on vehicle_expenses for delete using (has_org_role(organization_id, array['owner','admin','member']::app_role[]));
 
 create policy "read contacts" on contacts for select using (is_org_member(organization_id));
@@ -458,10 +494,14 @@ create policy "write sales" on sales for insert with check (has_org_role(organiz
 
 create policy "read company cash" on company_cash_transactions for select using (is_org_member(organization_id));
 create policy "write company cash" on company_cash_transactions for insert with check (has_org_role(organization_id, array['owner','admin']::app_role[]));
+create policy "insert company expense cash impact" on company_cash_transactions for insert with check (type = 'vehicle_cost_paid' and source_expense_id is not null and source_vehicle_id is not null and has_org_role(organization_id, array['owner','admin','member']::app_role[]));
 create policy "update company cash" on company_cash_transactions for update using (has_org_role(organization_id, array['owner','admin']::app_role[]));
+create policy "update company expense cash impact" on company_cash_transactions for update using (type = 'vehicle_cost_paid' and source_expense_id is not null and source_vehicle_id is not null and has_org_role(organization_id, array['owner','admin','member']::app_role[])) with check (type = 'vehicle_cost_paid' and source_expense_id is not null and source_vehicle_id is not null and has_org_role(organization_id, array['owner','admin','member']::app_role[]));
 create policy "read external cash" on external_cash_transactions for select using (is_org_member(organization_id));
 create policy "write external cash" on external_cash_transactions for insert with check (has_org_role(organization_id, array['owner','admin']::app_role[]));
+create policy "insert external expense cash impact" on external_cash_transactions for insert with check (type = 'external_vehicle_expense_paid' and source_expense_id is not null and source_vehicle_id is not null and has_org_role(organization_id, array['owner','admin','member']::app_role[]));
 create policy "update external cash" on external_cash_transactions for update using (has_org_role(organization_id, array['owner','admin']::app_role[]));
+create policy "update external expense cash impact" on external_cash_transactions for update using (type = 'external_vehicle_expense_paid' and source_expense_id is not null and source_vehicle_id is not null and has_org_role(organization_id, array['owner','admin','member']::app_role[])) with check (type = 'external_vehicle_expense_paid' and source_expense_id is not null and source_vehicle_id is not null and has_org_role(organization_id, array['owner','admin','member']::app_role[]));
 
 create policy "read attachments" on attachments for select using (is_org_member(organization_id));
 create policy "write attachments" on attachments for insert with check (has_org_role(organization_id, array['owner','admin','member']::app_role[]));
@@ -479,11 +519,15 @@ create policy "own preferences" on user_preferences for all using (user_id = aut
 
 create index vehicles_org_status_idx on vehicles (organization_id, status);
 create index expenses_org_vehicle_idx on vehicle_expenses (organization_id, vehicle_id);
+create index recurring_vehicle_expense_templates_org_idx on recurring_vehicle_expense_templates (organization_id, is_active, deleted_at);
+create index vehicle_expenses_template_idx on vehicle_expenses (recurring_template_id);
 create index sales_org_vehicle_idx on sales (organization_id, vehicle_id);
 create index contacts_org_type_idx on contacts (organization_id, type);
 create index attachments_org_vehicle_idx on attachments (organization_id, vehicle_id);
 create index company_cash_org_date_idx on company_cash_transactions (organization_id, date);
 create index external_cash_org_date_idx on external_cash_transactions (organization_id, date);
+create index company_cash_source_expense_idx on company_cash_transactions (source_expense_id);
+create index external_cash_source_expense_idx on external_cash_transactions (source_expense_id);
 create index activity_org_date_idx on activity_logs (organization_id, created_at);
 
 insert into storage.buckets (id, name, public)

@@ -8,15 +8,18 @@ import {
   createContact,
   createExpense,
   createOrganization,
+  createRecurringExpenseTemplate,
   createVehicle,
   deleteCashTransaction,
   deleteExpense,
+  deleteRecurringExpenseTemplate,
   joinOrganization,
   loadAppData,
   recordVehicleSale,
+  applyRecurringExpenseTemplate,
   updateCashTransaction,
-  updateDefaultPlateCommission,
   updateExpense,
+  updateRecurringExpenseTemplate,
   updateVehicle,
   updateVehicleMainPhoto,
 } from "@/lib/supabase/repository";
@@ -24,7 +27,7 @@ import { mapAttachment, mapVehicle } from "@/lib/supabase/mappers";
 import {
   attachmentSchema,
   activityLogSchema,
-  backupSettingsSchema,
+  applyRecurringExpenseTemplateSchema,
   cashTransactionSchema,
   cashUpdateSchema,
   contactSchema,
@@ -34,6 +37,7 @@ import {
   invitationCodeSchema,
   organizationSchema,
   regenerateInvitationSchema,
+  recurringExpenseTemplateSchema,
   roleUpdateSchema,
   saleSchema,
   vehicleSchema,
@@ -50,6 +54,10 @@ type Operation =
   | "createExpense"
   | "updateExpense"
   | "deleteExpense"
+  | "createRecurringExpenseTemplate"
+  | "updateRecurringExpenseTemplate"
+  | "deleteRecurringExpenseTemplate"
+  | "applyRecurringExpenseTemplate"
   | "recordSale"
   | "createCashTransaction"
   | "updateCashTransaction"
@@ -57,7 +65,6 @@ type Operation =
   | "createContact"
   | "createAttachment"
   | "setVehicleMainPhoto"
-  | "updateDefaultPlateCommission"
   | "updateMemberRole"
   | "removeMember"
   | "logActivity"
@@ -148,6 +155,30 @@ export async function POST(request: Request) {
         await recordVehicleSale(supabase, appData, vehicle, formData);
         return ok();
       }
+      case "createRecurringExpenseTemplate": {
+        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin"]);
+        recurringExpenseTemplateSchema.parse(formDataToObject(formData));
+        await createRecurringExpenseTemplate(supabase, organizationId, formData);
+        return ok();
+      }
+      case "updateRecurringExpenseTemplate": {
+        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin"]);
+        recurringExpenseTemplateSchema.parse(formDataToObject(formData));
+        await updateRecurringExpenseTemplate(supabase, organizationId, formData);
+        return ok();
+      }
+      case "deleteRecurringExpenseTemplate": {
+        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin"]);
+        await deleteRecurringExpenseTemplate(supabase, organizationId, String(formData.get("templateId") || ""));
+        return ok();
+      }
+      case "applyRecurringExpenseTemplate": {
+        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin", "member"]);
+        applyRecurringExpenseTemplateSchema.parse(formDataToObject(formData));
+        const vehicle = await getVehicle(supabase, organizationId, String(formData.get("vehicleId") || ""));
+        const id = await applyRecurringExpenseTemplate(supabase, vehicle, String(formData.get("templateId") || ""));
+        return ok({ id });
+      }
       case "createCashTransaction": {
         await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin"]);
         cashTransactionSchema.parse(formDataToObject(formData));
@@ -229,12 +260,6 @@ export async function POST(request: Request) {
         const vehicle = await getVehicle(supabase, organizationId, String(formData.get("vehicleId") || ""));
         const attachment = await getAttachment(supabase, organizationId, String(formData.get("attachmentId") || ""));
         await updateVehicleMainPhoto(supabase, vehicle, attachment);
-        return ok();
-      }
-      case "updateDefaultPlateCommission": {
-        await requireRole(supabase, userData.user.id, organizationId, ["owner"]);
-        backupSettingsSchema.parse(formDataToObject(formData));
-        await updateDefaultPlateCommission(supabase, organizationId, Number(formData.get("defaultPlateCommissionAmount")));
         return ok();
       }
       case "updateMemberRole": {

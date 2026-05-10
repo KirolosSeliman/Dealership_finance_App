@@ -38,6 +38,8 @@ import {
 import { TAX_DISCLAIMER } from "@/lib/domain/constants";
 import {
   EXPENSE_CATEGORIES,
+  EXPENSE_FUNDING_SOURCES,
+  EXPENSE_TAX_BEHAVIORS,
   PURCHASE_SOURCES,
   ROLES,
   VEHICLE_STATUSES,
@@ -71,6 +73,7 @@ import type {
   Contact as ContactRecord,
   ExternalCashTransaction,
   Language,
+  RecurringVehicleExpenseTemplate,
   Sale,
   Vehicle,
   VehicleExpense,
@@ -319,20 +322,57 @@ export function DealerFlowApp() {
     }
   }
 
-  async function saveDefaultPlateCommission(formData: FormData) {
-    if (!supabase || !activeOrganization) return;
-    const amount = Number(formData.get("defaultPlateCommissionAmount"));
+  async function switchOrganization(organizationId: string) {
+    if (!supabase) return;
     setLoading(true);
     setErrorMessage("");
     try {
-      const payload = cloneFormData(formData, {
-        organizationId: activeOrganization.id,
-        defaultPlateCommissionAmount: String(Number.isFinite(amount) ? Math.max(0, amount) : 250),
-      });
-      await serverMutation("updateDefaultPlateCommission", payload);
+      await saveLanguagePreference(supabase, language, organizationId);
+      await refreshData(organizationId);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not switch organization.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function createRecurringExpenseTemplate(formData: FormData) {
+    if (!activeOrganization) return;
+    setLoading(true);
+    setErrorMessage("");
+    try {
+      await serverMutation("createRecurringExpenseTemplate", cloneFormData(formData, { organizationId: activeOrganization.id }));
       await refreshData(activeOrganization.id);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Could not update Commission Plaque.");
+      setErrorMessage(error instanceof Error ? error.message : "Could not create recurring expense template.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function updateRecurringExpenseTemplate(formData: FormData) {
+    if (!activeOrganization) return;
+    setLoading(true);
+    setErrorMessage("");
+    try {
+      await serverMutation("updateRecurringExpenseTemplate", cloneFormData(formData, { organizationId: activeOrganization.id }));
+      await refreshData(activeOrganization.id);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not update recurring expense template.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function deleteRecurringExpenseTemplate(templateId: string) {
+    if (!activeOrganization) return;
+    setLoading(true);
+    setErrorMessage("");
+    try {
+      await serverMutation("deleteRecurringExpenseTemplate", newMutationForm({ organizationId: activeOrganization.id, templateId }));
+      await refreshData(activeOrganization.id);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not deactivate recurring expense template.");
     } finally {
       setLoading(false);
     }
@@ -410,6 +450,25 @@ export function DealerFlowApp() {
       await refreshData(vehicleSnapshot.organizationId);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Could not add expense.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function applyRecurringExpenseTemplate(templateId: string) {
+    if (!supabase || !selectedVehicle) return;
+    const vehicleSnapshot = selectedVehicle;
+    setLoading(true);
+    setErrorMessage("");
+    try {
+      await serverMutation("applyRecurringExpenseTemplate", newMutationForm({
+        organizationId: vehicleSnapshot.organizationId,
+        vehicleId: vehicleSnapshot.id,
+        templateId,
+      }));
+      await refreshData(vehicleSnapshot.organizationId);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not apply recurring expense template.");
     } finally {
       setLoading(false);
     }
@@ -778,11 +837,7 @@ export function DealerFlowApp() {
               <select
                 className="control hidden max-w-52 md:block"
                 value={activeOrganization.id}
-                onChange={(event) => {
-                  const organizationId = event.target.value;
-                  setData((current) => ({ ...current, activeOrganizationId: organizationId }));
-                  refreshData(organizationId);
-                }}
+                onChange={(event) => switchOrganization(event.target.value)}
               >
                 {data.organizations.map((organization) => (
                   <option key={organization.id} value={organization.id}>
@@ -829,6 +884,7 @@ export function DealerFlowApp() {
               selectedVehicle={selectedVehicle}
               vehicles={filteredVehicles}
               expenses={scoped.expenses}
+              recurringExpenseTemplates={scoped.recurringExpenseTemplates}
               sales={scoped.sales}
               contacts={scoped.contacts}
               attachments={scoped.attachments}
@@ -843,6 +899,7 @@ export function DealerFlowApp() {
               addVehicle={addVehicle}
               editVehicle={editVehicle}
               addExpense={addExpense}
+              applyRecurringExpenseTemplate={applyRecurringExpenseTemplate}
               editExpense={editExpense}
               deleteExpense={removeExpense}
               recordSale={recordSale}
@@ -871,9 +928,13 @@ export function DealerFlowApp() {
               t={t}
               memberships={scoped.memberships}
               activeOrganization={activeOrganization}
+              currentUserId={data.userId}
               onCreate={createOrganization}
               onJoin={joinOrganization}
-              onSaveDefaultPlateCommission={saveDefaultPlateCommission}
+              recurringExpenseTemplates={scoped.recurringExpenseTemplates}
+              onCreateRecurringExpenseTemplate={createRecurringExpenseTemplate}
+              onUpdateRecurringExpenseTemplate={updateRecurringExpenseTemplate}
+              onDeleteRecurringExpenseTemplate={deleteRecurringExpenseTemplate}
               onUpdateMemberRole={updateMemberRole}
               onRemoveMember={removeMember}
               onRegenerateInvitation={regenerateInvitationCode}
@@ -1204,6 +1265,7 @@ function VehiclesSection(props: {
   selectedVehicle?: Vehicle;
   vehicles: Vehicle[];
   expenses: VehicleExpense[];
+  recurringExpenseTemplates: RecurringVehicleExpenseTemplate[];
   sales: Sale[];
   contacts: ContactRecord[];
   attachments: AppData["attachments"];
@@ -1218,6 +1280,7 @@ function VehiclesSection(props: {
   addVehicle: (formData: FormData) => void;
   editVehicle: (formData: FormData) => void;
   addExpense: (formData: FormData) => void;
+  applyRecurringExpenseTemplate: (templateId: string) => void;
   editExpense: (expenseId: string, formData: FormData) => void;
   deleteExpense: (expenseId: string) => void;
   recordSale: (formData: FormData) => void;
@@ -1341,6 +1404,7 @@ function VehicleDetailTabs({
   selectedTab,
   setSelectedTab,
   expenses,
+  recurringExpenseTemplates,
   sales,
   contacts,
   attachments,
@@ -1348,6 +1412,7 @@ function VehicleDetailTabs({
   navigate,
   editVehicle,
   addExpense,
+  applyRecurringExpenseTemplate,
   editExpense,
   deleteExpense,
   recordSale,
@@ -1411,7 +1476,7 @@ function VehicleDetailTabs({
         </div>
       )}
       {selectedTab === "details" && <VehicleDetailsTab t={t} vehicle={vehicle} onSubmit={editVehicle} permissions={permissions} />}
-      {selectedTab === "expenses" && <Expenses t={t} vehicle={vehicle} expenses={expenses} onSubmit={addExpense} onEdit={editExpense} onDelete={deleteExpense} permissions={permissions} />}
+      {selectedTab === "expenses" && <Expenses t={t} vehicle={vehicle} expenses={expenses} recurringExpenseTemplates={recurringExpenseTemplates} onSubmit={addExpense} onApplyTemplate={applyRecurringExpenseTemplate} onEdit={editExpense} onDelete={deleteExpense} permissions={permissions} />}
       {selectedTab === "documents" && <DocumentsTab t={t} vehicle={vehicle} attachments={vehicleAttachments} onSubmit={addAttachment} permissions={permissions} />}
       {selectedTab === "sale" && <SaleForm t={t} vehicle={vehicle} expenses={expenses} onSubmit={recordSale} sale={sale} permissions={permissions} />}
       {selectedTab === "timeline" && (
@@ -1578,7 +1643,9 @@ function Expenses({
   t,
   vehicle,
   expenses,
+  recurringExpenseTemplates,
   onSubmit,
+  onApplyTemplate,
   onEdit,
   onDelete,
   permissions,
@@ -1586,25 +1653,54 @@ function Expenses({
   t: ReturnType<typeof getDictionary>;
   vehicle: Vehicle;
   expenses: VehicleExpense[];
+  recurringExpenseTemplates: RecurringVehicleExpenseTemplate[];
   onSubmit: (formData: FormData) => void;
+  onApplyTemplate: (templateId: string) => void;
   onEdit: (expenseId: string, formData: FormData) => void;
   onDelete: (expenseId: string) => void;
   permissions: Permissions;
 }) {
   const vehicleExpenses = expenses.filter((expense) => expense.vehicleId === vehicle.id);
+  const activeTemplates = recurringExpenseTemplates.filter((template) => template.isActive && !template.deletedAt);
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
+  const [selectedTemplateId, setSelectedTemplateId] = useState(activeTemplates[0]?.id ?? "");
   return (
     <div className="grid gap-4 xl:grid-cols-[420px_1fr]">
-      {permissions.manageExpenses ? <form className="panel space-y-4" action={onSubmit}>
-        <h3 className="section-title">{t.actions.addExpense}</h3>
-        <Field label={t.fields.category}><select className="control w-full" name="category">{EXPENSE_CATEGORIES.map((category) => <option key={category} value={category}>{formatLabel(category)}</option>)}</select></Field>
-        <Field label={t.fields.amountBeforeTax}><input className="control w-full" name="amountBeforeTax" type="number" step="0.01" required /></Field>
-        <label className="flex items-center gap-2 text-sm text-slate-300"><input name="addTax" type="checkbox" />{t.fields.addFifteenTax}</label>
-        <Field label={t.fields.date}><input className="control w-full" name="date" type="date" defaultValue={today()} /></Field>
-        <Field label={t.fields.fileTitle}><input className="control w-full" placeholder="private://..." /></Field>
-        <Field label={t.fields.notes}><textarea className="control min-h-24 w-full" name="note" /></Field>
-        <button className="primary-button" type="submit">{t.actions.addExpense}</button>
-      </form> : <EmptyState title="Read-only expenses" copy="Your role can view expenses but cannot add or edit them." />}
+      {permissions.manageExpenses ? <div className="space-y-4">
+        {activeTemplates.length > 0 && (
+          <div className="panel space-y-3">
+            <h3 className="section-title">Apply recurring expense template</h3>
+            <Field label="Template">
+              <select className="control w-full" value={selectedTemplateId} onChange={(event) => setSelectedTemplateId(event.target.value)}>
+                {activeTemplates.map((template) => (
+                  <option key={template.id} value={template.id}>
+                    {template.name} - {money(template.totalAmount)} / {formatLabel(template.defaultFundingSource)}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <button className="secondary-button" type="button" onClick={() => selectedTemplateId && onApplyTemplate(selectedTemplateId)}>
+              Apply template
+            </button>
+          </div>
+        )}
+        <form className="panel space-y-4" action={onSubmit}>
+          <h3 className="section-title">{t.actions.addExpense}</h3>
+          <Field label={t.fields.category}><select className="control w-full" name="category">{EXPENSE_CATEGORIES.map((category) => <option key={category} value={category}>{formatLabel(category)}</option>)}</select></Field>
+          <Field label={t.fields.amountBeforeTax}><input className="control w-full" name="amountBeforeTax" type="number" step="0.01" required /></Field>
+          <Field label="Funding source">
+            <select className="control w-full" name="fundingSource" defaultValue="company_cash">
+              {EXPENSE_FUNDING_SOURCES.map((source) => <option key={source} value={source}>{formatLabel(source)}</option>)}
+            </select>
+          </Field>
+          <p className="text-xs text-slate-500">The expense total will reduce the selected cash ledger.</p>
+          <label className="flex items-center gap-2 text-sm text-slate-300"><input name="addTax" type="checkbox" />{t.fields.addFifteenTax}</label>
+          <Field label={t.fields.date}><input className="control w-full" name="date" type="date" defaultValue={today()} /></Field>
+          <Field label={t.fields.fileTitle}><input className="control w-full" placeholder="private://..." /></Field>
+          <Field label={t.fields.notes}><textarea className="control min-h-24 w-full" name="note" /></Field>
+          <button className="primary-button" type="submit">{t.actions.addExpense}</button>
+        </form>
+      </div> : <EmptyState title="Read-only expenses" copy="Your role can view expenses but cannot add or edit them." />}
       <Panel title={`${vehicle.year ?? ""} ${vehicle.make ?? ""} ${vehicle.model ?? ""}`}>
         <div className="space-y-3">
           {vehicleExpenses.length === 0 && (
@@ -1623,6 +1719,7 @@ function Expenses({
                     </select>
                   </Field>
                   <Field label={t.fields.amountBeforeTax}><input className="control w-full" name="amountBeforeTax" type="number" step="0.01" defaultValue={expense.amountBeforeTax} required /></Field>
+                  <Info label="Funding source" value={`${formatLabel(expense.fundingSource ?? "company_cash")} (locked after creation)`} />
                   <label className="flex items-center gap-2 text-sm text-slate-300"><input name="addTax" type="checkbox" defaultChecked={expense.taxRate === 0.15} />{t.fields.addFifteenTax}</label>
                   <Field label={t.fields.date}><input className="control w-full" name="date" type="date" defaultValue={expense.date} /></Field>
                   <Field label={t.fields.notes}><textarea className="control min-h-20 w-full" name="note" defaultValue={expense.note} /></Field>
@@ -1640,6 +1737,7 @@ function Expenses({
                     [t.fields.taxRate, `${Math.round(expense.taxRate * 100)}%`],
                     [t.fields.taxAmount, money(expense.taxAmount)],
                     [t.fields.totalAmount, money(expense.totalAmount)],
+                    ["Funding source", formatLabel(expense.fundingSource ?? "company_cash")],
                     [t.fields.notes, expense.note],
                   ]} />
                   {permissions.manageExpenses && <div className="flex gap-2">
@@ -2145,9 +2243,13 @@ function SettingsPage({
   t,
   memberships,
   activeOrganization,
+  currentUserId,
   onCreate,
   onJoin,
-  onSaveDefaultPlateCommission,
+  recurringExpenseTemplates,
+  onCreateRecurringExpenseTemplate,
+  onUpdateRecurringExpenseTemplate,
+  onDeleteRecurringExpenseTemplate,
   onUpdateMemberRole,
   onRemoveMember,
   onRegenerateInvitation,
@@ -2157,9 +2259,13 @@ function SettingsPage({
   t: ReturnType<typeof getDictionary>;
   memberships: AppData["memberships"];
   activeOrganization: AppData["organizations"][number];
+  currentUserId?: string;
   onCreate: (formData: FormData) => void;
   onJoin: (formData: FormData) => void;
-  onSaveDefaultPlateCommission: (formData: FormData) => void;
+  recurringExpenseTemplates: RecurringVehicleExpenseTemplate[];
+  onCreateRecurringExpenseTemplate: (formData: FormData) => void;
+  onUpdateRecurringExpenseTemplate: (formData: FormData) => void;
+  onDeleteRecurringExpenseTemplate: (templateId: string) => void;
   onUpdateMemberRole: (formData: FormData) => void;
   onRemoveMember: (membershipId: string) => void;
   onRegenerateInvitation: () => void;
@@ -2193,7 +2299,7 @@ function SettingsPage({
                   </select>
                 </Field>
                 {permissions.manageRoles && <button className="secondary-button" type="submit">Save role</button>}
-                {permissions.manageRoles && membership.userId !== activeOrganization.id && <button className="secondary-button" type="button" onClick={() => onRemoveMember(membership.id)}>Remove</button>}
+                {permissions.manageRoles && membership.userId !== currentUserId && <button className="secondary-button" type="button" onClick={() => onRemoveMember(membership.id)}>Remove</button>}
               </form>
             </div>
           ))}
@@ -2209,25 +2315,103 @@ function SettingsPage({
           )}
         </div>
       </Panel>
-      <Panel title={t.sections.vehicleDefaults}>
-        {permissions.manageSettings ? <form className="space-y-3" action={onSaveDefaultPlateCommission}>
-          <Field label={t.fields.defaultPlateCommission}>
-            <input
-              className="control w-full"
-              name="defaultPlateCommissionAmount"
-              type="number"
-              min="0"
-              step="0.01"
-              defaultValue={activeOrganization.defaultPlateCommissionAmount}
-            />
-          </Field>
-          <p className="text-sm text-slate-500">{t.settings.defaultPlateCommissionHelp}</p>
-          <button className="secondary-button" type="submit">{t.actions.saveSettings}</button>
-        </form> : <p className="text-sm text-slate-500">Only owners can update organization defaults.</p>}
+      <Panel title="Recurring Vehicle Expenses">
+        <RecurringExpenseTemplates
+          templates={recurringExpenseTemplates}
+          canManage={permissions.manageRecurringExpenses}
+          onCreate={onCreateRecurringExpenseTemplate}
+          onUpdate={onUpdateRecurringExpenseTemplate}
+          onDelete={onDeleteRecurringExpenseTemplate}
+        />
       </Panel>
       <Panel title={t.sections.privateStorage}><p className="flex items-center gap-2 text-slate-300"><Lock size={18} />{activeOrganization.name}</p><p className="mt-3 text-sm text-slate-500">{t.backup.r2Inactive}</p></Panel>
     </div>
   );
+}
+
+function RecurringExpenseTemplates({
+  templates,
+  canManage,
+  onCreate,
+  onUpdate,
+  onDelete,
+}: {
+  templates: RecurringVehicleExpenseTemplate[];
+  canManage: boolean;
+  onCreate: (formData: FormData) => void;
+  onUpdate: (formData: FormData) => void;
+  onDelete: (templateId: string) => void;
+}) {
+  const activeTemplates = templates.filter((template) => !template.deletedAt);
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-slate-500">
+        Templates marked auto-apply are added to every new vehicle. Historical Commission Plaque expenses stay as normal expenses.
+      </p>
+      {canManage ? (
+        <form className="grid gap-3 lg:grid-cols-2" action={onCreate}>
+          <Field label="Name"><input className="control w-full" name="name" placeholder="Plate commission" required /></Field>
+          <Field label="Category"><TemplateCategorySelect /></Field>
+          <Field label="Default amount before tax"><input className="control w-full" name="amountBeforeTax" type="number" min="0" step="0.01" required /></Field>
+          <Field label="Tax behavior"><TemplateTaxBehaviorSelect /></Field>
+          <Field label="Custom tax rate"><input className="control w-full" name="customTaxRate" type="number" min="0" max="1" step="0.0001" placeholder="0.14975" /></Field>
+          <Field label="Default funding source"><TemplateFundingSourceSelect /></Field>
+          <label className="flex items-center gap-2 text-sm text-slate-300"><input name="autoApplyToNewVehicles" type="checkbox" />Auto-apply to every new vehicle</label>
+          <label className="flex items-center gap-2 text-sm text-slate-300"><input name="isActive" type="checkbox" defaultChecked />Active</label>
+          <Field label="Description / note"><textarea className="control min-h-20 w-full" name="description" /></Field>
+          <div className="flex items-end"><button className="primary-button" type="submit">Create template</button></div>
+        </form>
+      ) : (
+        <p className="text-sm text-slate-500">Only owners and admins can create or edit recurring expense templates.</p>
+      )}
+      <div className="space-y-3">
+        {activeTemplates.length === 0 && <EmptyState title="No recurring expenses yet" copy="Create templates such as Plate commission, admin fee, inspection fee, or storage fee." />}
+        {activeTemplates.map((template) => (
+          <div key={template.id} className="rounded-lg border border-slate-800 bg-slate-950/35 p-3">
+            {canManage ? (
+              <form className="grid gap-3 lg:grid-cols-2" action={onUpdate}>
+                <input type="hidden" name="templateId" value={template.id} />
+                <Field label="Name"><input className="control w-full" name="name" defaultValue={template.name} required /></Field>
+                <Field label="Category"><TemplateCategorySelect defaultValue={template.category} /></Field>
+                <Field label="Default amount before tax"><input className="control w-full" name="amountBeforeTax" type="number" min="0" step="0.01" defaultValue={template.amountBeforeTax} required /></Field>
+                <Field label="Tax behavior"><TemplateTaxBehaviorSelect defaultValue={template.taxBehavior} /></Field>
+                <Field label="Custom tax rate"><input className="control w-full" name="customTaxRate" type="number" min="0" max="1" step="0.0001" defaultValue={template.taxBehavior === "custom" ? template.taxRate : ""} /></Field>
+                <Field label="Default funding source"><TemplateFundingSourceSelect defaultValue={template.defaultFundingSource} /></Field>
+                <label className="flex items-center gap-2 text-sm text-slate-300"><input name="autoApplyToNewVehicles" type="checkbox" defaultChecked={template.autoApplyToNewVehicles} />Auto-apply to every new vehicle</label>
+                <label className="flex items-center gap-2 text-sm text-slate-300"><input name="isActive" type="checkbox" defaultChecked={template.isActive} />Active</label>
+                <Field label="Description / note"><textarea className="control min-h-20 w-full" name="description" defaultValue={template.description} /></Field>
+                <div className="flex flex-wrap items-end gap-2">
+                  <button className="secondary-button" type="submit">Save template</button>
+                  <button className="secondary-button" type="button" onClick={() => onDelete(template.id)}>Deactivate</button>
+                </div>
+              </form>
+            ) : (
+              <InfoGrid rows={[
+                ["Name", template.name],
+                ["Category", formatLabel(template.category)],
+                ["Total", money(template.totalAmount)],
+                ["Funding source", formatLabel(template.defaultFundingSource)],
+                ["Auto-apply", template.autoApplyToNewVehicles ? "Yes" : "No"],
+                ["Status", template.isActive ? "Active" : "Inactive"],
+              ]} />
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TemplateCategorySelect({ defaultValue = "other" }: { defaultValue?: string }) {
+  return <select className="control w-full" name="category" defaultValue={defaultValue}>{EXPENSE_CATEGORIES.map((category) => <option key={category} value={category}>{formatLabel(category)}</option>)}</select>;
+}
+
+function TemplateTaxBehaviorSelect({ defaultValue = "no_tax" }: { defaultValue?: string }) {
+  return <select className="control w-full" name="taxBehavior" defaultValue={defaultValue}>{EXPENSE_TAX_BEHAVIORS.map((behavior) => <option key={behavior} value={behavior}>{formatLabel(behavior)}</option>)}</select>;
+}
+
+function TemplateFundingSourceSelect({ defaultValue = "company_cash" }: { defaultValue?: string }) {
+  return <select className="control w-full" name="defaultFundingSource" defaultValue={defaultValue}>{EXPENSE_FUNDING_SOURCES.map((source) => <option key={source} value={source}>{formatLabel(source)}</option>)}</select>;
 }
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {
@@ -2316,6 +2500,7 @@ function scopeData(data: AppData, organizationId: string): AppData {
     memberships: data.memberships.filter((row) => row.organizationId === organizationId),
     vehicles: data.vehicles.filter((row) => row.organizationId === organizationId),
     expenses: data.expenses.filter((row) => row.organizationId === organizationId),
+    recurringExpenseTemplates: data.recurringExpenseTemplates.filter((row) => row.organizationId === organizationId),
     sales: data.sales.filter((row) => row.organizationId === organizationId),
     contacts: data.contacts.filter((row) => row.organizationId === organizationId),
     attachments: data.attachments.filter((row) => row.organizationId === organizationId),
@@ -2415,6 +2600,7 @@ function getPermissions(role?: string) {
     manageReports: owner || admin || accountant,
     manageRoles: owner,
     manageSettings: owner,
+    manageRecurringExpenses: owner || admin,
   };
 }
 

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { EXPENSE_CATEGORIES, PURCHASE_SOURCES, ROLES, VEHICLE_STATUSES } from "@/lib/domain/constants";
+import { EXPENSE_CATEGORIES, EXPENSE_FUNDING_SOURCES, EXPENSE_TAX_BEHAVIORS, PURCHASE_SOURCES, ROLES, VEHICLE_STATUSES } from "@/lib/domain/constants";
 
 const optionalText = z.string().trim().optional().or(z.literal(""));
 const money = z.coerce.number().finite().min(0).max(999_999_999);
@@ -45,8 +45,26 @@ export const expenseSchema = z.object({
   category: z.enum(EXPENSE_CATEGORIES as [string, ...string[]]),
   amountBeforeTax: money,
   addTax: z.string().optional(),
+  fundingSource: z.enum(EXPENSE_FUNDING_SOURCES as [string, ...string[]]).optional(),
   date: dateString.optional().or(z.literal("")),
   note: optionalText,
+});
+
+export const recurringExpenseTemplateSchema = z.object({
+  templateId: z.string().uuid().optional().or(z.literal("")),
+  name: z.string().trim().min(1).max(120),
+  description: optionalText,
+  category: z.enum(EXPENSE_CATEGORIES as [string, ...string[]]),
+  amountBeforeTax: money,
+  taxBehavior: z.enum(EXPENSE_TAX_BEHAVIORS as [string, ...string[]]),
+  customTaxRate: z.coerce.number().finite().min(0).max(1).optional().or(z.literal("")),
+  defaultFundingSource: z.enum(EXPENSE_FUNDING_SOURCES as [string, ...string[]]),
+  autoApplyToNewVehicles: z.string().optional(),
+  isActive: z.string().optional(),
+});
+
+export const applyRecurringExpenseTemplateSchema = z.object({
+  templateId: z.string().uuid(),
 });
 
 export const saleSchema = z.object({
@@ -115,10 +133,6 @@ export const attachmentSchema = z.object({
 export const roleUpdateSchema = z.object({
   membershipId: z.string().uuid(),
   role: z.enum(ROLES as [string, ...string[]]),
-});
-
-export const backupSettingsSchema = z.object({
-  defaultPlateCommissionAmount: money,
 });
 
 export const backupRequestSchema = z.object({

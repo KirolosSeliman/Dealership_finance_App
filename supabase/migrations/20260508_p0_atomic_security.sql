@@ -81,7 +81,6 @@ set search_path = public
 as $$
 declare
   new_vehicle_id uuid;
-  commission_amount numeric(12,2);
   purchase_tax numeric(12,2);
 begin
   if auth.uid() is null then
@@ -92,12 +91,8 @@ begin
     raise exception 'not allowed';
   end if;
 
-  select coalesce(default_plate_commission_amount, 250)
-  into commission_amount
-  from organizations
-  where id = p_organization_id;
-
-  if commission_amount is null then
+  perform 1 from organizations where id = p_organization_id;
+  if not found then
     raise exception 'organization not found';
   end if;
 
@@ -165,32 +160,6 @@ begin
     );
   end if;
 
-  if coalesce(commission_amount, 0) > 0 then
-    insert into vehicle_expenses (
-      organization_id,
-      vehicle_id,
-      category,
-      amount_before_tax,
-      tax_rate,
-      tax_amount,
-      total_amount,
-      date,
-      note,
-      created_by
-    )
-    values (
-      p_organization_id,
-      new_vehicle_id,
-      'commission_plaque',
-      commission_amount,
-      0,
-      0,
-      commission_amount,
-      coalesce(p_purchase_date, current_date),
-      'Automatic non-taxable Commission Plaque fee',
-      auth.uid()
-    );
-  end if;
 
   insert into activity_logs (organization_id, action, entity_type, entity_id, message, created_by)
   values (p_organization_id, 'vehicle_created', 'vehicle', new_vehicle_id, 'Vehicle created', auth.uid());
@@ -200,10 +169,6 @@ begin
     values (p_organization_id, 'expense_added', 'vehicle', new_vehicle_id, 'Automatic 5% purchase tax', auth.uid());
   end if;
 
-  if coalesce(commission_amount, 0) > 0 then
-    insert into activity_logs (organization_id, action, entity_type, entity_id, message, created_by)
-    values (p_organization_id, 'expense_added', 'vehicle', new_vehicle_id, 'Automatic Commission Plaque fee', auth.uid());
-  end if;
 
   return new_vehicle_id;
 end;
@@ -394,4 +359,5 @@ begin
   return sale_id;
 end;
 $$;
+
 
