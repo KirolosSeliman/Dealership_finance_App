@@ -66,9 +66,15 @@ After the base schema, run the migrations in `supabase/migrations`:
 20260508_production_constraints.sql
 20260508_attachment_security.sql
 20260508_p0_atomic_security.sql
+20260509_membership_role_resolution.sql
+20260509_recurring_expenses_funding_source.sql
+20260510_delete_vehicle_cascade.sql
+20260510_delete_vehicle_cascade_hardening.sql
 ```
 
 The production constraints migrations add financial data checks, prevent duplicate sales for the same vehicle, validate organization matches for expenses/sales/attachments, enforce private attachment paths, protect final owners, restrict sensitive file reads, and add atomic vehicle/sale RPCs.
+
+Vehicle deletion depends on the `delete_vehicle_and_related_data(uuid, uuid)` RPC created by the 20260510 vehicle deletion migrations. Deploying code alone does not create this database function; run those SQL files in Supabase before using vehicle deletion in production.
 
 ## Backups
 

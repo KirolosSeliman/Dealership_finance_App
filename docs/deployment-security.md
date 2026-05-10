@@ -33,6 +33,12 @@ Required migrations:
 - `20260508_production_constraints.sql`
 - `20260508_attachment_security.sql`
 - `20260508_p0_atomic_security.sql`
+- `20260509_membership_role_resolution.sql`
+- `20260509_recurring_expenses_funding_source.sql`
+- `20260510_delete_vehicle_cascade.sql`
+- `20260510_delete_vehicle_cascade_hardening.sql`
+
+Vehicle deletion requires the `delete_vehicle_and_related_data(uuid, uuid)` RPC from the 20260510 migrations. If production shows a missing vehicle deletion migration error, run both 20260510 files in Supabase SQL editor, then retry the delete.
 
 ## Vercel Setup
 

@@ -432,7 +432,8 @@ function toClientErrorMessage(error: unknown, operation: Operation) {
       normalized.includes("could not find the function") ||
       normalized.includes("does not exist")
     ) {
-      return "Vehicle deletion service is unavailable. Please run the latest database migrations.";
+      console.error("[deleteVehicle] missing database RPC. Apply supabase/migrations/20260510_delete_vehicle_cascade.sql and supabase/migrations/20260510_delete_vehicle_cascade_hardening.sql.");
+      return "Vehicle deletion database migration is missing. Run the latest vehicle deletion migrations in Supabase, then try again.";
     }
     if (normalized === "invalid input." || normalized.includes("invalid input syntax")) {
       return "Type DELETE or the vehicle VIN to confirm deletion.";

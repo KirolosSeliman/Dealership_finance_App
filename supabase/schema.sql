@@ -418,6 +418,8 @@ begin
 end;
 $$;
 
+drop function if exists delete_vehicle_and_related_data(uuid, uuid);
+
 create or replace function delete_vehicle_and_related_data(
   p_organization_id uuid,
   p_vehicle_id uuid
@@ -430,8 +432,6 @@ as $$
 declare
   vehicle_record vehicles%rowtype;
   sale_ids uuid[] := '{}'::uuid[];
-  contact_ids uuid[] := '{}'::uuid[];
-  v_contact_id uuid;
 begin
   if auth.uid() is null then
     raise exception 'not authenticated';
@@ -458,24 +458,9 @@ begin
   where organization_id = p_organization_id
     and vehicle_id = p_vehicle_id;
 
-  select coalesce(array_agg(distinct contact_id), '{}'::uuid[])
-  into contact_ids
-  from sales
-  where organization_id = p_organization_id
-    and vehicle_id = p_vehicle_id
-    and contact_id is not null;
-
   delete from tax_reports
   where organization_id = p_organization_id
     and report_json::text ilike ('%' || p_vehicle_id::text || '%');
-
-  delete from activity_logs
-  where organization_id = p_organization_id
-    and (
-      (entity_type = 'vehicle' and entity_id = p_vehicle_id)
-      or (entity_type = 'sale' and entity_id = any(sale_ids))
-      or (entity_type = 'contact' and entity_id = any(contact_ids))
-    );
 
   delete from attachments
   where organization_id = p_organization_id
@@ -534,48 +519,21 @@ begin
   where organization_id = p_organization_id
     and vehicle_id = p_vehicle_id;
 
-  foreach v_contact_id in array contact_ids loop
-    if exists (
-      select 1
-      from sales
-      where organization_id = p_organization_id
-        and contact_id = v_contact_id
-        and vehicle_id <> p_vehicle_id
-    ) then
-      continue;
-    end if;
-
-    if exists (
-      select 1
-      from attachments
-      where organization_id = p_organization_id
-        and contact_id = v_contact_id
-        and (
-          vehicle_id is null
-          or vehicle_id <> p_vehicle_id
-        )
-        and (
-          sale_id is null
-          or sale_id <> all(sale_ids)
-        )
-    ) then
-      continue;
-    end if;
-
-    delete from attachments
-    where organization_id = p_organization_id
-      and contact_id = v_contact_id;
-
-    delete from contacts
-    where id = v_contact_id
-      and organization_id = p_organization_id;
-  end loop;
+  delete from activity_logs
+  where organization_id = p_organization_id
+    and (
+      (entity_type = 'vehicle' and entity_id = p_vehicle_id)
+      or (entity_type = 'sale' and entity_id = any(sale_ids))
+    );
 
   delete from vehicles
   where id = p_vehicle_id
     and organization_id = p_organization_id;
 end;
 $$;
+
+revoke all on function delete_vehicle_and_related_data(uuid, uuid) from public;
+grant execute on function delete_vehicle_and_related_data(uuid, uuid) to authenticated;
 
 create or replace function is_org_member(target_org uuid)
 returns boolean

@@ -16,6 +16,7 @@ import { assertAllowedUpload, canExportTaxReports, canManageBackups, sanitizeCsv
 import { assertSameOrigin, checkRateLimit, resetRateLimitForTests, RouteSecurityError } from "../src/lib/server/security";
 import { activityLogSchema, attachmentSchema, backupRequestSchema, expenseSchema, recurringExpenseTemplateSchema, regenerateInvitationSchema, taxExportSchema } from "../src/lib/validation";
 import { dedupeOrganizationsByHighestRole, emptyAppData, mapExpense } from "../src/lib/supabase/mappers";
+import { isValidVehicleDeleteConfirmation } from "../src/lib/vehicle-delete";
 import type {
   CompanyCashTransaction,
   ExternalCashTransaction,
@@ -496,6 +497,29 @@ test("invitation regeneration schema requires an organization id", () => {
     organizationId: "63c47786-fb41-40c1-a573-71346969b9e0",
   }).success, true);
   assert.equal(regenerateInvitationSchema.safeParse({ organizationId: "bad" }).success, false);
+});
+
+test("vehicle delete confirmation accepts DELETE or VIN case-insensitively", () => {
+  assert.equal(isValidVehicleDeleteConfirmation("DELETE", "KM8JUCAC7AU031562"), true);
+  assert.equal(isValidVehicleDeleteConfirmation(" delete ", "KM8JUCAC7AU031562"), true);
+  assert.equal(isValidVehicleDeleteConfirmation("KM8JUCAC7AU031562", "KM8JUCAC7AU031562"), true);
+  assert.equal(isValidVehicleDeleteConfirmation(" km8jucac7au031562 ", "KM8JUCAC7AU031562"), true);
+  assert.equal(isValidVehicleDeleteConfirmation("wrong", "KM8JUCAC7AU031562"), false);
+});
+
+test("vehicle cascade delete migration creates the exact RPC and preserves contacts", () => {
+  const baseSql = readFileSync(join(process.cwd(), "supabase/migrations/20260510_delete_vehicle_cascade.sql"), "utf8");
+  const hardeningSql = readFileSync(join(process.cwd(), "supabase/migrations/20260510_delete_vehicle_cascade_hardening.sql"), "utf8");
+
+  assert.match(baseSql, /create or replace function delete_vehicle_and_related_data\(\s*p_organization_id uuid,\s*p_vehicle_id uuid\s*\)/i);
+  assert.match(hardeningSql, /drop function if exists delete_vehicle_and_related_data\(uuid, uuid\)/i);
+  assert.match(hardeningSql, /grant execute on function delete_vehicle_and_related_data\(uuid, uuid\) to authenticated/i);
+  assert.match(hardeningSql, /delete from company_cash_transactions/i);
+  assert.match(hardeningSql, /delete from external_cash_transactions/i);
+  assert.match(hardeningSql, /delete from sales/i);
+  assert.match(hardeningSql, /delete from vehicle_expenses/i);
+  assert.match(hardeningSql, /delete from vehicles/i);
+  assert.doesNotMatch(hardeningSql, /delete from contacts/i);
 });
 
 test("P0 migration adds atomic vehicle and sale RPCs", () => {
