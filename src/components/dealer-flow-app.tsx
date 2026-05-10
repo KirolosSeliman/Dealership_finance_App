@@ -592,13 +592,13 @@ export function DealerFlowApp() {
     setErrorMessage("");
     setStatusMessage("");
     try {
-      await serverMutation("deleteVehicle", newMutationForm({
+      const result = await serverMutation("deleteVehicle", newMutationForm({
         organizationId: vehicleSnapshot.organizationId,
         vehicleId: vehicleSnapshot.id,
         confirmationText,
-      }));
+      })) as { warning?: string };
       navigate("vehicles", { mode: "list" });
-      setStatusMessage("Vehicle deleted successfully.");
+      setStatusMessage(result.warning || "Vehicle deleted successfully.");
       await refreshData(vehicleSnapshot.organizationId);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Could not delete vehicle.");

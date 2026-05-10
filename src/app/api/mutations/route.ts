@@ -135,8 +135,8 @@ export async function POST(request: Request) {
         const vehicle = await getVehicleOptional(supabase, organizationId, vehicleId);
         if (!vehicle) throw new ApiError(404, "Vehicle was not found or was already deleted.");
         assertVehicleDeleteConfirmation(vehicle, confirmationText);
-        await deleteVehicle(supabase, organizationId, vehicle.id);
-        return ok();
+        const { storageWarning } = await deleteVehicle(supabase, organizationId, vehicle.id);
+        return ok(storageWarning ? { warning: storageWarning } : undefined);
       }
       case "createExpense": {
         await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin", "member"]);

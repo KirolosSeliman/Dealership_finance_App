@@ -239,12 +239,14 @@ export async function deleteVehicle(client: Client, organizationId: string, vehi
     p_vehicle_id: vehicleId,
   });
   if (error) throw error;
+  let storageWarning: string | undefined;
   if (relatedStoragePaths.length > 0) {
     const { error: storageError } = await client.storage.from("dealer-flow-private").remove(relatedStoragePaths);
     if (storageError) {
-      throw new Error("Vehicle was deleted, but some linked private files could not be removed.");
+      storageWarning = "Vehicle records were deleted, but some linked private files could not be removed from storage.";
     }
   }
+  return { storageWarning };
 }
 
 export async function createExpense(client: Client, vehicle: Vehicle, formData: FormData) {

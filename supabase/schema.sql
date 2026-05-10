@@ -429,8 +429,9 @@ set search_path = public
 as $$
 declare
   vehicle_record vehicles%rowtype;
-  sale_record sales%rowtype;
-  should_delete_contact boolean := false;
+  sale_ids uuid[] := '{}'::uuid[];
+  contact_ids uuid[] := '{}'::uuid[];
+  v_contact_id uuid;
 begin
   if auth.uid() is null then
     raise exception 'not authenticated';
@@ -451,25 +452,18 @@ begin
     raise exception 'vehicle not found';
   end if;
 
-  select *
-  into sale_record
+  select coalesce(array_agg(id), '{}'::uuid[])
+  into sale_ids
   from sales
-  where vehicle_id = p_vehicle_id
-    and organization_id = p_organization_id
-  limit 1;
+  where organization_id = p_organization_id
+    and vehicle_id = p_vehicle_id;
 
-  if sale_record.contact_id is not null then
-    should_delete_contact := not exists (
-      select 1
-      from sales
-      where contact_id = sale_record.contact_id
-        and id <> sale_record.id
-    ) and not exists (
-      select 1
-      from attachments
-      where contact_id = sale_record.contact_id
-    );
-  end if;
+  select coalesce(array_agg(distinct contact_id), '{}'::uuid[])
+  into contact_ids
+  from sales
+  where organization_id = p_organization_id
+    and vehicle_id = p_vehicle_id
+    and contact_id is not null;
 
   delete from tax_reports
   where organization_id = p_organization_id
@@ -479,8 +473,8 @@ begin
   where organization_id = p_organization_id
     and (
       (entity_type = 'vehicle' and entity_id = p_vehicle_id)
-      or (sale_record.id is not null and entity_type = 'sale' and entity_id = sale_record.id)
-      or (sale_record.contact_id is not null and entity_type = 'contact' and entity_id = sale_record.contact_id)
+      or (entity_type = 'sale' and entity_id = any(sale_ids))
+      or (entity_type = 'contact' and entity_id = any(contact_ids))
     );
 
   delete from attachments
@@ -493,7 +487,7 @@ begin
         where organization_id = p_organization_id
           and vehicle_id = p_vehicle_id
       )
-      or (sale_record.id is not null and sale_id = sale_record.id)
+      or sale_id = any(sale_ids)
       or company_cash_transaction_id in (
         select id
         from company_cash_transactions
@@ -540,11 +534,42 @@ begin
   where organization_id = p_organization_id
     and vehicle_id = p_vehicle_id;
 
-  if should_delete_contact and sale_record.contact_id is not null then
+  foreach v_contact_id in array contact_ids loop
+    if exists (
+      select 1
+      from sales
+      where organization_id = p_organization_id
+        and contact_id = v_contact_id
+        and vehicle_id <> p_vehicle_id
+    ) then
+      continue;
+    end if;
+
+    if exists (
+      select 1
+      from attachments
+      where organization_id = p_organization_id
+        and contact_id = v_contact_id
+        and (
+          vehicle_id is null
+          or vehicle_id <> p_vehicle_id
+        )
+        and (
+          sale_id is null
+          or sale_id <> all(sale_ids)
+        )
+    ) then
+      continue;
+    end if;
+
+    delete from attachments
+    where organization_id = p_organization_id
+      and contact_id = v_contact_id;
+
     delete from contacts
-    where id = sale_record.contact_id
+    where id = v_contact_id
       and organization_id = p_organization_id;
-  end if;
+  end loop;
 
   delete from vehicles
   where id = p_vehicle_id
