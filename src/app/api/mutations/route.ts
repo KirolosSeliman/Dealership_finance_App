@@ -25,6 +25,7 @@ import {
   updateVehicleMainPhoto,
 } from "@/lib/supabase/repository";
 import { mapAttachment, mapVehicle } from "@/lib/supabase/mappers";
+import { isValidVehicleDeleteConfirmation } from "@/lib/vehicle-delete";
 import {
   attachmentSchema,
   activityLogSchema,
@@ -315,8 +316,9 @@ export async function POST(request: Request) {
         return NextResponse.json({ ok: false, message: "Unknown operation." }, { status: 400 });
     }
   } catch (error) {
+    console.error("[mutations] operation failed", { operation, error });
     const status = error instanceof ApiError ? error.status : 400;
-    return NextResponse.json({ ok: false, message: formatValidationError(error) }, { status });
+    return NextResponse.json({ ok: false, message: toClientErrorMessage(error, operation) }, { status });
   }
 }
 
@@ -414,12 +416,30 @@ function optionalId(value: FormDataEntryValue | null) {
 }
 
 function assertVehicleDeleteConfirmation(vehicle: { vin?: string; id: string }, confirmationText: string) {
-  const normalized = confirmationText.trim().toUpperCase();
-  const vin = String(vehicle.vin ?? "").trim().toUpperCase();
-  if (normalized === "DELETE") return;
-  if (vin && normalized === vin) return;
-  if (normalized === vehicle.id.toUpperCase()) return;
-  throw new ApiError(400, "Confirmation text did not match. Type DELETE or the vehicle VIN.");
+  if (isValidVehicleDeleteConfirmation(confirmationText, vehicle.vin)) return;
+  throw new ApiError(400, "Type DELETE or the vehicle VIN to confirm deletion.");
+}
+
+function toClientErrorMessage(error: unknown, operation: Operation) {
+  if (error instanceof ApiError) return error.message;
+  const message = formatValidationError(error);
+  if (operation === "deleteVehicle") {
+    const normalized = message.toLowerCase();
+    if (normalized.includes("not allowed")) return "You are not allowed to delete this vehicle.";
+    if (normalized.includes("vehicle not found")) return "Vehicle not found.";
+    if (
+      normalized.includes("delete_vehicle_and_related_data") ||
+      normalized.includes("could not find the function") ||
+      normalized.includes("does not exist")
+    ) {
+      return "Vehicle deletion service is unavailable. Please run the latest database migrations.";
+    }
+    if (normalized === "invalid input." || normalized.includes("invalid input syntax")) {
+      return "Type DELETE or the vehicle VIN to confirm deletion.";
+    }
+    return "Vehicle could not be deleted. Please try again.";
+  }
+  return message;
 }
 
 function assertCashUpdateKeepsBalance(appData: Awaited<ReturnType<typeof loadAppData>>, account: "company" | "external", transactionId: string, amount: number) {

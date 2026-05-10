@@ -174,5 +174,9 @@ export function formatValidationError(error: unknown) {
   if (error instanceof z.ZodError) {
     return error.issues.map((issue) => `${issue.path.join(".") || "field"}: ${issue.message}`).join(" ");
   }
+  if (typeof error === "object" && error !== null && "message" in error && typeof (error as { message?: unknown }).message === "string") {
+    const message = String((error as { message: string }).message).trim();
+    if (message) return message;
+  }
   return error instanceof Error ? error.message : "Invalid input.";
 }

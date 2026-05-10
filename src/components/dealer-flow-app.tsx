@@ -56,6 +56,7 @@ import {
 } from "@/lib/domain/calculations";
 import { verifyBackupExport } from "@/lib/backup/export";
 import { getDictionary } from "@/lib/i18n";
+import { isValidVehicleDeleteConfirmation } from "@/lib/vehicle-delete";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { emptyAppData } from "@/lib/supabase/mappers";
 import {
@@ -1455,12 +1456,7 @@ function VehicleDetailTabs({
   const totalCost = calculateVehicleTotalCost(vehicle, expenses);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [deleteConfirmationText, setDeleteConfirmationText] = useState("");
-  const deleteConfirmationTargets = [
-    "DELETE",
-    vehicle.vin?.trim().toUpperCase(),
-    vehicle.id.toUpperCase(),
-  ].filter(Boolean) as string[];
-  const canConfirmDelete = deleteConfirmationTargets.includes(deleteConfirmationText.trim().toUpperCase());
+  const canConfirmDelete = isValidVehicleDeleteConfirmation(deleteConfirmationText, vehicle.vin);
 
   return (
     <div className="space-y-4">
@@ -1514,7 +1510,7 @@ function VehicleDetailTabs({
           </div>
           <div className="mt-4 grid gap-2">
             <p className="text-xs uppercase tracking-wide text-rose-100/80">
-              Type <strong>DELETE</strong>{vehicle.vin ? ` or ${vehicle.vin.toUpperCase()}` : ""} to confirm
+              Type <strong>DELETE</strong>{vehicle.vin ? ` or the VIN (${vehicle.vin.toUpperCase()})` : ""} to confirm.
             </p>
             <input
               className="control w-full"
