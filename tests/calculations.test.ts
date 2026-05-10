@@ -14,7 +14,7 @@ import {
 import { generateBackupExport, generateTaxReportExport, restoreBackupDryRun, verifyBackupExport } from "../src/lib/backup/export";
 import { assertAllowedUpload, canExportTaxReports, canManageBackups, sanitizeCsvCell, sanitizeStorageFileName } from "../src/lib/security";
 import { assertSameOrigin, checkRateLimit, resetRateLimitForTests, RouteSecurityError } from "../src/lib/server/security";
-import { activityLogSchema, attachmentSchema, backupRequestSchema, expenseSchema, recurringExpenseTemplateSchema, regenerateInvitationSchema, taxExportSchema } from "../src/lib/validation";
+import { activityLogSchema, applyRecurringExpenseTemplateSchema, attachmentSchema, backupRequestSchema, expenseSchema, recurringExpenseTemplateSchema, regenerateInvitationSchema, taxExportSchema } from "../src/lib/validation";
 import { dedupeOrganizationsByHighestRole, emptyAppData, mapExpense } from "../src/lib/supabase/mappers";
 import { isValidVehicleDeleteConfirmation } from "../src/lib/vehicle-delete";
 import type {
@@ -201,6 +201,20 @@ test("recurring expense template validation is organization-safe input shape", (
   }).success, false);
 });
 
+
+test("applying a recurring expense template requires vehicle and template ids", () => {
+  assert.equal(applyRecurringExpenseTemplateSchema.safeParse({
+    vehicleId: "63c47786-fb41-40c1-a573-71346969b9e0",
+    templateId: "b7568098-9d05-4619-9b19-63d6ef6217b8",
+  }).success, true);
+  assert.equal(applyRecurringExpenseTemplateSchema.safeParse({
+    templateId: "b7568098-9d05-4619-9b19-63d6ef6217b8",
+  }).success, false);
+  assert.equal(applyRecurringExpenseTemplateSchema.safeParse({
+    vehicleId: "63c47786-fb41-40c1-a573-71346969b9e0",
+    templateId: "not-a-template-id",
+  }).success, false);
+});
 test("duplicate organization rows resolve to the highest role", () => {
   const organizations = dedupeOrganizationsByHighestRole([
     { id: "org-1", name: "Lot", role: "viewer", inviteCode: "VIEWER" },

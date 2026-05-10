@@ -423,6 +423,14 @@ function assertVehicleDeleteConfirmation(vehicle: { vin?: string; id: string }, 
 function toClientErrorMessage(error: unknown, operation: Operation) {
   if (error instanceof ApiError) return error.message;
   const message = formatValidationError(error);
+  if (operation === "applyRecurringExpenseTemplate") {
+    const normalized = message.toLowerCase();
+    if (normalized.includes("template not found") || normalized.includes("0 rows")) return "Template not found.";
+    if (normalized.includes("vehicle") && normalized.includes("required")) return "Vehicle not found.";
+    if (normalized.includes("permission")) return "You are not allowed to apply this template.";
+    if (normalized.includes("cash does not have enough")) return message;
+    return "Template could not be applied. Please try again.";
+  }
   if (operation === "deleteVehicle") {
     const normalized = message.toLowerCase();
     if (normalized.includes("not allowed")) return "You are not allowed to delete this vehicle.";

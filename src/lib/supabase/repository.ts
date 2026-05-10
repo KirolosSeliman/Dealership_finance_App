@@ -376,6 +376,7 @@ export async function deleteRecurringExpenseTemplate(client: Client, organizatio
 }
 
 export async function applyRecurringExpenseTemplate(client: Client, vehicle: Vehicle, templateId: string) {
+  if (!templateId) throw new Error("Template is required.");
   const { data, error } = await client
     .from("recurring_vehicle_expense_templates")
     .select("*")
@@ -383,8 +384,9 @@ export async function applyRecurringExpenseTemplate(client: Client, vehicle: Veh
     .eq("organization_id", vehicle.organizationId)
     .is("deleted_at", null)
     .eq("is_active", true)
-    .single();
+    .maybeSingle();
   if (error) throw error;
+  if (!data) throw new Error("Template not found.");
   const template = mapRecurringExpenseTemplate(data as Record<string, unknown>);
   return createExpenseWithCashImpact(client, vehicle, {
     category: template.category,

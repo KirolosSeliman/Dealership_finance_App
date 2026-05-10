@@ -462,13 +462,18 @@ export function DealerFlowApp() {
     const vehicleSnapshot = selectedVehicle;
     setLoading(true);
     setErrorMessage("");
+    setStatusMessage("");
     try {
+      if (!templateId) throw new Error("Select a template before applying it.");
       await serverMutation("applyRecurringExpenseTemplate", newMutationForm({
         organizationId: vehicleSnapshot.organizationId,
         vehicleId: vehicleSnapshot.id,
         templateId,
       }));
       await refreshData(vehicleSnapshot.organizationId);
+      setSelectedVehicleId(vehicleSnapshot.id);
+      setSelectedVehicleTab("expenses");
+      setStatusMessage("Template applied successfully.");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Could not apply recurring expense template.");
     } finally {
@@ -1567,7 +1572,7 @@ function VehicleDetailTabs({
         </div>
       )}
       {selectedTab === "details" && <VehicleDetailsTab t={t} vehicle={vehicle} onSubmit={editVehicle} permissions={permissions} />}
-      {selectedTab === "expenses" && <Expenses t={t} vehicle={vehicle} expenses={expenses} recurringExpenseTemplates={recurringExpenseTemplates} onSubmit={addExpense} onApplyTemplate={applyRecurringExpenseTemplate} onEdit={editExpense} onDelete={deleteExpense} permissions={permissions} />}
+      {selectedTab === "expenses" && <Expenses t={t} vehicle={vehicle} expenses={expenses} recurringExpenseTemplates={recurringExpenseTemplates} onSubmit={addExpense} onApplyTemplate={applyRecurringExpenseTemplate} onEdit={editExpense} onDelete={deleteExpense} permissions={permissions} loading={loading} />}
       {selectedTab === "documents" && <DocumentsTab t={t} vehicle={vehicle} attachments={vehicleAttachments} onSubmit={addAttachment} permissions={permissions} />}
       {selectedTab === "sale" && <SaleForm t={t} vehicle={vehicle} expenses={expenses} onSubmit={recordSale} sale={sale} permissions={permissions} />}
       {selectedTab === "timeline" && (
@@ -1740,6 +1745,7 @@ function Expenses({
   onEdit,
   onDelete,
   permissions,
+  loading,
 }: {
   t: ReturnType<typeof getDictionary>;
   vehicle: Vehicle;
@@ -1750,11 +1756,16 @@ function Expenses({
   onEdit: (expenseId: string, formData: FormData) => void;
   onDelete: (expenseId: string) => void;
   permissions: Permissions;
+  loading: boolean;
 }) {
   const vehicleExpenses = expenses.filter((expense) => expense.vehicleId === vehicle.id);
   const activeTemplates = recurringExpenseTemplates.filter((template) => template.isActive && !template.deletedAt);
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
-  const [selectedTemplateId, setSelectedTemplateId] = useState(activeTemplates[0]?.id ?? "");
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const effectiveSelectedTemplateId = activeTemplates.some((template) => template.id === selectedTemplateId)
+    ? selectedTemplateId
+    : activeTemplates[0]?.id ?? "";
+  const selectedTemplate = activeTemplates.find((template) => template.id === effectiveSelectedTemplateId);
   return (
     <div className="grid gap-4 xl:grid-cols-[420px_1fr]">
       {permissions.manageExpenses ? <div className="space-y-4">
@@ -1762,7 +1773,7 @@ function Expenses({
           <div className="panel space-y-3">
             <h3 className="section-title">Apply recurring expense template</h3>
             <Field label="Template">
-              <select className="control w-full" value={selectedTemplateId} onChange={(event) => setSelectedTemplateId(event.target.value)}>
+              <select className="control w-full" value={effectiveSelectedTemplateId} onChange={(event) => setSelectedTemplateId(event.target.value)}>
                 {activeTemplates.map((template) => (
                   <option key={template.id} value={template.id}>
                     {template.name} - {money(template.totalAmount)} / {formatLabel(template.defaultFundingSource)}
@@ -1770,8 +1781,13 @@ function Expenses({
                 ))}
               </select>
             </Field>
-            <button className="secondary-button" type="button" onClick={() => selectedTemplateId && onApplyTemplate(selectedTemplateId)}>
-              Apply template
+            {selectedTemplate && (
+              <p className="rounded-md border border-slate-800 bg-slate-950/45 p-3 text-xs text-slate-400">
+                {formatLabel(selectedTemplate.category)} / {money(selectedTemplate.amountBeforeTax)} before tax / {Math.round(selectedTemplate.taxRate * 100)}% tax / {formatLabel(selectedTemplate.defaultFundingSource)}
+              </p>
+            )}
+            <button className="secondary-button" type="button" disabled={loading || !effectiveSelectedTemplateId} onClick={() => effectiveSelectedTemplateId && onApplyTemplate(effectiveSelectedTemplateId)}>
+              {loading ? "Applying..." : "Apply template"}
             </button>
           </div>
         )}

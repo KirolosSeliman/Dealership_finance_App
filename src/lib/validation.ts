@@ -69,6 +69,7 @@ export const recurringExpenseTemplateSchema = z.object({
 });
 
 export const applyRecurringExpenseTemplateSchema = z.object({
+  vehicleId: z.string().uuid(),
   templateId: z.string().uuid(),
 });
 
