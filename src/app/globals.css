@@ -186,6 +186,7 @@ textarea {
 
   .primary-button,
   .secondary-button,
+  .danger-button,
   .icon-button,
   .nav-button {
     display: inline-flex;
@@ -223,6 +224,17 @@ textarea {
   .icon-button:hover {
     border-color: rgba(103, 183, 199, 0.42);
     background: rgba(103, 183, 199, 0.09);
+  }
+
+  .danger-button {
+    border: 1px solid rgba(244, 63, 94, 0.55);
+    background: rgba(127, 29, 29, 0.55);
+    color: #ffe4e6;
+  }
+
+  .danger-button:hover {
+    border-color: rgba(251, 113, 133, 0.9);
+    background: rgba(190, 24, 93, 0.45);
   }
 
   .nav-button {

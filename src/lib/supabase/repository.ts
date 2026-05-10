@@ -232,6 +232,21 @@ export async function updateVehicleMainPhoto(client: Client, vehicle: Vehicle, a
   await logActivity(client, vehicle.organizationId, "vehicle_main_photo_updated", "vehicle", vehicle.id, attachment.title);
 }
 
+export async function deleteVehicle(client: Client, organizationId: string, vehicleId: string) {
+  const relatedStoragePaths = await listVehicleRelatedStoragePaths(client, organizationId, vehicleId);
+  const { error } = await client.rpc("delete_vehicle_and_related_data", {
+    p_organization_id: organizationId,
+    p_vehicle_id: vehicleId,
+  });
+  if (error) throw error;
+  if (relatedStoragePaths.length > 0) {
+    const { error: storageError } = await client.storage.from("dealer-flow-private").remove(relatedStoragePaths);
+    if (storageError) {
+      throw new Error("Vehicle was deleted, but some linked private files could not be removed.");
+    }
+  }
+}
+
 export async function createExpense(client: Client, vehicle: Vehicle, formData: FormData) {
   const amountBeforeTax = numberValue(formData.get("amountBeforeTax"));
   const category = stringValue(formData.get("category")) as ExpenseCategory;
@@ -706,6 +721,99 @@ async function ensureProfile(client: Client, user: User) {
     full_name: user.user_metadata?.full_name ?? user.email,
   });
   if (error) throw error;
+}
+
+async function listVehicleRelatedStoragePaths(client: Client, organizationId: string, vehicleId: string) {
+  const attachmentPaths = new Set<string>();
+  const [vehicleAttachments, expenseRows, saleRow, companyRows, externalRows] = await Promise.all([
+    client
+      .from("attachments")
+      .select("url_or_path")
+      .eq("organization_id", organizationId)
+      .eq("vehicle_id", vehicleId),
+    client
+      .from("vehicle_expenses")
+      .select("id")
+      .eq("organization_id", organizationId)
+      .eq("vehicle_id", vehicleId),
+    client
+      .from("sales")
+      .select("id")
+      .eq("organization_id", organizationId)
+      .eq("vehicle_id", vehicleId)
+      .maybeSingle(),
+    client
+      .from("company_cash_transactions")
+      .select("id")
+      .eq("organization_id", organizationId)
+      .eq("source_vehicle_id", vehicleId),
+    client
+      .from("external_cash_transactions")
+      .select("id")
+      .eq("organization_id", organizationId)
+      .eq("source_vehicle_id", vehicleId),
+  ]);
+  if (vehicleAttachments.error) throw vehicleAttachments.error;
+  if (expenseRows.error) throw expenseRows.error;
+  if (saleRow.error) throw saleRow.error;
+  if (companyRows.error) throw companyRows.error;
+  if (externalRows.error) throw externalRows.error;
+
+  pushAttachmentPaths(attachmentPaths, vehicleAttachments.data);
+
+  const expenseIds = (expenseRows.data ?? []).map((row) => String(row.id));
+  if (expenseIds.length > 0) {
+    const expenseAttachments = await client
+      .from("attachments")
+      .select("url_or_path")
+      .eq("organization_id", organizationId)
+      .in("expense_id", expenseIds);
+    if (expenseAttachments.error) throw expenseAttachments.error;
+    pushAttachmentPaths(attachmentPaths, expenseAttachments.data);
+  }
+
+  const saleId = saleRow.data?.id ? String(saleRow.data.id) : "";
+  if (saleId) {
+    const saleAttachments = await client
+      .from("attachments")
+      .select("url_or_path")
+      .eq("organization_id", organizationId)
+      .eq("sale_id", saleId);
+    if (saleAttachments.error) throw saleAttachments.error;
+    pushAttachmentPaths(attachmentPaths, saleAttachments.data);
+  }
+
+  const companyIds = (companyRows.data ?? []).map((row) => String(row.id));
+  if (companyIds.length > 0) {
+    const companyAttachments = await client
+      .from("attachments")
+      .select("url_or_path")
+      .eq("organization_id", organizationId)
+      .in("company_cash_transaction_id", companyIds);
+    if (companyAttachments.error) throw companyAttachments.error;
+    pushAttachmentPaths(attachmentPaths, companyAttachments.data);
+  }
+
+  const externalIds = (externalRows.data ?? []).map((row) => String(row.id));
+  if (externalIds.length > 0) {
+    const externalAttachments = await client
+      .from("attachments")
+      .select("url_or_path")
+      .eq("organization_id", organizationId)
+      .in("external_cash_transaction_id", externalIds);
+    if (externalAttachments.error) throw externalAttachments.error;
+    pushAttachmentPaths(attachmentPaths, externalAttachments.data);
+  }
+
+  return Array.from(attachmentPaths);
+}
+
+function pushAttachmentPaths(target: Set<string>, rows: Array<{ url_or_path?: unknown }> | null) {
+  for (const row of rows ?? []) {
+    const path = String(row.url_or_path ?? "").trim();
+    if (!path || path.startsWith("http://") || path.startsWith("https://")) continue;
+    target.add(path);
+  }
 }
 
 async function requireUser(client: Client) {

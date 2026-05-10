@@ -10,6 +10,7 @@ import {
   createOrganization,
   createRecurringExpenseTemplate,
   createVehicle,
+  deleteVehicle,
   deleteCashTransaction,
   deleteExpense,
   deleteRecurringExpenseTemplate,
@@ -40,6 +41,7 @@ import {
   recurringExpenseTemplateSchema,
   roleUpdateSchema,
   saleSchema,
+  deleteVehicleSchema,
   vehicleSchema,
   vehicleUpdateSchema,
 } from "@/lib/validation";
@@ -51,6 +53,7 @@ type Operation =
   | "joinOrganization"
   | "createVehicle"
   | "updateVehicle"
+  | "deleteVehicle"
   | "createExpense"
   | "updateExpense"
   | "deleteExpense"
@@ -122,6 +125,17 @@ export async function POST(request: Request) {
         vehicleUpdateSchema.parse(formDataToObject(formData));
         const vehicle = await getVehicle(supabase, organizationId, String(formData.get("vehicleId") || ""));
         await updateVehicle(supabase, vehicle, formData);
+        return ok();
+      }
+      case "deleteVehicle": {
+        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin"]);
+        deleteVehicleSchema.parse(formDataToObject(formData));
+        const vehicleId = String(formData.get("vehicleId") || "");
+        const confirmationText = String(formData.get("confirmationText") || "").trim();
+        const vehicle = await getVehicleOptional(supabase, organizationId, vehicleId);
+        if (!vehicle) throw new ApiError(404, "Vehicle was not found or was already deleted.");
+        assertVehicleDeleteConfirmation(vehicle, confirmationText);
+        await deleteVehicle(supabase, organizationId, vehicle.id);
         return ok();
       }
       case "createExpense": {
@@ -369,6 +383,19 @@ async function getVehicle(client: Awaited<ReturnType<typeof createSupabaseServer
   return mapVehicle(data as Record<string, unknown>);
 }
 
+async function getVehicleOptional(client: Awaited<ReturnType<typeof createSupabaseServerClient>>, organizationId: string, vehicleId: string) {
+  if (!client || !vehicleId) throw new ApiError(400, "Vehicle is required.");
+  const { data, error } = await client
+    .from("vehicles")
+    .select("*")
+    .eq("id", vehicleId)
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return undefined;
+  return mapVehicle(data as Record<string, unknown>);
+}
+
 async function getAttachment(client: Awaited<ReturnType<typeof createSupabaseServerClient>>, organizationId: string, attachmentId: string) {
   if (!client || !attachmentId) throw new Error("Attachment is required.");
   const { data, error } = await client
@@ -384,6 +411,15 @@ async function getAttachment(client: Awaited<ReturnType<typeof createSupabaseSer
 function optionalId(value: FormDataEntryValue | null) {
   const text = String(value ?? "").trim();
   return text || undefined;
+}
+
+function assertVehicleDeleteConfirmation(vehicle: { vin?: string; id: string }, confirmationText: string) {
+  const normalized = confirmationText.trim().toUpperCase();
+  const vin = String(vehicle.vin ?? "").trim().toUpperCase();
+  if (normalized === "DELETE") return;
+  if (vin && normalized === vin) return;
+  if (normalized === vehicle.id.toUpperCase()) return;
+  throw new ApiError(400, "Confirmation text did not match. Type DELETE or the vehicle VIN.");
 }
 
 function assertCashUpdateKeepsBalance(appData: Awaited<ReturnType<typeof loadAppData>>, account: "company" | "external", transactionId: string, amount: number) {

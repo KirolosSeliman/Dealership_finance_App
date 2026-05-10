@@ -41,6 +41,11 @@ export const vehicleUpdateSchema = vehicleSchema.pick({
   notes: true,
 });
 
+export const deleteVehicleSchema = z.object({
+  vehicleId: z.string().uuid(),
+  confirmationText: z.string().trim().min(1).max(100),
+});
+
 export const expenseSchema = z.object({
   category: z.enum(EXPENSE_CATEGORIES as [string, ...string[]]),
   amountBeforeTax: money,

@@ -22,6 +22,7 @@ import {
   ShieldCheck,
   Upload,
   Users,
+  Trash2,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -584,6 +585,28 @@ export function DealerFlowApp() {
     }
   }
 
+  async function removeVehicle(confirmationText: string) {
+    if (!supabase || !selectedVehicle) return;
+    const vehicleSnapshot = selectedVehicle;
+    setLoading(true);
+    setErrorMessage("");
+    setStatusMessage("");
+    try {
+      await serverMutation("deleteVehicle", newMutationForm({
+        organizationId: vehicleSnapshot.organizationId,
+        vehicleId: vehicleSnapshot.id,
+        confirmationText,
+      }));
+      navigate("vehicles", { mode: "list" });
+      setStatusMessage("Vehicle deleted successfully.");
+      await refreshData(vehicleSnapshot.organizationId);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not delete vehicle.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function addContact(formData: FormData) {
     if (!supabase || !activeOrganization) return;
     setLoading(true);
@@ -898,6 +921,7 @@ export function DealerFlowApp() {
               navigate={navigate}
               addVehicle={addVehicle}
               editVehicle={editVehicle}
+              deleteVehicle={removeVehicle}
               addExpense={addExpense}
               applyRecurringExpenseTemplate={applyRecurringExpenseTemplate}
               editExpense={editExpense}
@@ -906,6 +930,7 @@ export function DealerFlowApp() {
               addAttachment={addAttachment}
               setMainPhoto={setVehicleMainPhoto}
               permissions={permissions}
+              loading={loading}
             />
           )}
           {view === "cash" && (
@@ -1279,6 +1304,7 @@ function VehiclesSection(props: {
   navigate: (view: View, options?: { mode?: VehicleMode; vehicleId?: string; tab?: VehicleTab }) => void;
   addVehicle: (formData: FormData) => void;
   editVehicle: (formData: FormData) => void;
+  deleteVehicle: (confirmationText: string) => void;
   addExpense: (formData: FormData) => void;
   applyRecurringExpenseTemplate: (templateId: string) => void;
   editExpense: (expenseId: string, formData: FormData) => void;
@@ -1287,6 +1313,7 @@ function VehiclesSection(props: {
   addAttachment: (formData: FormData, relation: Record<string, string | undefined>) => void;
   setMainPhoto: (attachment: Attachment) => void;
   permissions: Permissions;
+  loading: boolean;
 }) {
   if (props.mode === "new") {
     return (
@@ -1415,15 +1442,26 @@ function VehicleDetailTabs({
   applyRecurringExpenseTemplate,
   editExpense,
   deleteExpense,
+  deleteVehicle,
   recordSale,
   addAttachment,
   setMainPhoto,
   permissions,
+  loading,
 }: Parameters<typeof VehiclesSection>[0] & { vehicle: Vehicle }) {
   const sale = sales.find((item) => item.vehicleId === vehicle.id);
   const vehicleAttachments = attachments.filter((attachment) => attachment.vehicleId === vehicle.id || attachment.saleId === sale?.id);
   const vehiclePhotos = attachments.filter((attachment) => attachment.vehicleId === vehicle.id && attachment.type === "photo");
   const totalCost = calculateVehicleTotalCost(vehicle, expenses);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [deleteConfirmationText, setDeleteConfirmationText] = useState("");
+  const deleteConfirmationTargets = [
+    "DELETE",
+    vehicle.vin?.trim().toUpperCase(),
+    vehicle.id.toUpperCase(),
+  ].filter(Boolean) as string[];
+  const canConfirmDelete = deleteConfirmationTargets.includes(deleteConfirmationText.trim().toUpperCase());
+
   return (
     <div className="space-y-4">
       <button className="secondary-button" onClick={() => navigate("vehicles")}>
@@ -1445,8 +1483,65 @@ function VehicleDetailTabs({
         <div className="flex flex-col gap-2 lg:items-end">
           {permissions.manageExpenses && <button className="secondary-button" onClick={() => setSelectedTab("expenses")}><Receipt size={18} />{t.actions.addExpense}</button>}
           {permissions.manageSales && <button className="primary-button" onClick={() => setSelectedTab("sale")}><Banknote size={18} />{t.actions.recordSale}</button>}
+          {permissions.deleteVehicles && (
+            <button
+              className="danger-button"
+              type="button"
+              onClick={() => {
+                setDeleteConfirmationText("");
+                setConfirmDeleteOpen(true);
+              }}
+              disabled={loading}
+            >
+              <Trash2 size={18} />
+              Delete vehicle
+            </button>
+          )}
         </div>
       </div>
+      {confirmDeleteOpen && permissions.deleteVehicles && (
+        <div className="panel border-rose-400/40 bg-rose-900/10">
+          <h3 className="section-title text-rose-100">Permanently delete vehicle</h3>
+          <p className="text-sm text-rose-100/90">
+            This permanently removes the vehicle and all linked financial records (expenses, sale, cash impacts, and linked reports).
+            This action cannot be undone.
+          </p>
+          <div className="mt-3 grid gap-2 text-sm text-slate-200 sm:grid-cols-2">
+            <Info label="Vehicle" value={`${vehicle.year ?? ""} ${vehicle.make ?? ""} ${vehicle.model ?? ""}`.trim() || vehicle.id} />
+            <Info label="VIN" value={vehicle.vin || "N/A"} />
+            <Info label="Reference" value={vehicle.id} />
+            <Info label="Sale status" value={sale ? "Sold" : "Not sold"} />
+          </div>
+          <div className="mt-4 grid gap-2">
+            <p className="text-xs uppercase tracking-wide text-rose-100/80">
+              Type <strong>DELETE</strong>{vehicle.vin ? ` or ${vehicle.vin.toUpperCase()}` : ""} to confirm
+            </p>
+            <input
+              className="control w-full"
+              placeholder="Type confirmation text"
+              value={deleteConfirmationText}
+              onChange={(event) => setDeleteConfirmationText(event.target.value)}
+              disabled={loading}
+            />
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              className="danger-button"
+              type="button"
+              disabled={loading || !canConfirmDelete}
+              onClick={() => {
+                deleteVehicle(deleteConfirmationText.trim());
+                setConfirmDeleteOpen(false);
+              }}
+            >
+              {loading ? "Deleting..." : "Permanently delete vehicle"}
+            </button>
+            <button className="secondary-button" type="button" onClick={() => setConfirmDeleteOpen(false)} disabled={loading}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
       <div className="tabs-strip">
         {vehicleTabs.map(([tab, key]) => (
           <button key={tab} className={selectedTab === tab ? "tab-active" : ""} onClick={() => setSelectedTab(tab)}>
@@ -2590,6 +2685,7 @@ function getPermissions(role?: string) {
   const accountant = role === "accountant";
   return {
     manageVehicles: owner || admin || member,
+    deleteVehicles: owner || admin,
     manageExpenses: owner || admin || member,
     manageSales: owner || admin || member,
     manageAttachments: owner || admin || member,
