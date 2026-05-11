@@ -4,7 +4,16 @@ import { assertSameOrigin, checkRateLimit, requireOrganizationRole, routeErrorRe
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { mapExpense, mapVehicle } from "@/lib/supabase/mappers";
 import { runComparableEstimator, shouldRefreshVehicle } from "@/lib/market-snap/engine";
-import { fetchMarketComparables, insertMarketListings, saveMarketListing, saveVehicleValuation } from "@/lib/market-snap/repository";
+import {
+  convertDealRadarListingToInventory,
+  fetchMarketComparables,
+  getDealRadarListings,
+  insertMarketListings,
+  removeDealRadarListing,
+  saveListingToDealRadar,
+  saveVehicleValuation,
+  upsertMarketListingFromAnalysis,
+} from "@/lib/market-snap/repository";
 import { dealRadarQuerySchema, importPayloadSchema, marketListingPayloadSchema, saveListingSchema, valuationRequestSchema } from "@/lib/market-snap/validation";
 import type { MarketListingInput } from "@/types/market-snap";
 import type { Vehicle, VehicleExpense } from "@/types/domain";
@@ -38,7 +47,8 @@ export async function analyzeListing(request: Request) {
     await requireOrganizationRole(client, userId, listing.organizationId, ["owner", "admin", "member"]);
     const comparables = await fetchMarketComparables(client, listing.organizationId, listing);
     const valuation = runComparableEstimator({ organizationId: listing.organizationId, listing, comparables });
-    return NextResponse.json({ ok: true, valuation });
+    const marketListingId = await upsertMarketListingFromAnalysis(client, listing, valuation);
+    return NextResponse.json({ ok: true, marketListingId, valuation });
   });
 }
 
@@ -49,8 +59,9 @@ export async function saveListing(request: Request) {
     const listing: MarketListingInput = { ...payload.listing, organizationId: payload.organizationId };
     const comparables = await fetchMarketComparables(client, payload.organizationId, listing);
     const valuation = runComparableEstimator({ organizationId: payload.organizationId, listing, comparables });
-    const id = await saveMarketListing(client, listing, valuation);
-    return NextResponse.json({ ok: true, id, valuation });
+    const marketListingId = await upsertMarketListingFromAnalysis(client, listing, valuation);
+    const id = await saveListingToDealRadar(client, listing, valuation);
+    return NextResponse.json({ ok: true, id, marketListingId, valuation });
   });
 }
 
@@ -65,16 +76,8 @@ export async function listDealRadar(request: Request) {
     await requireOrganizationRole(client, userData.user.id, query.organizationId, ["owner", "admin", "member", "accountant", "viewer"]);
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 25;
-    const from = (page - 1) * pageSize;
-    const to = from + pageSize - 1;
-    const { data, error, count } = await client
-      .from("deal_radar_saved_listings")
-      .select("*", { count: "exact" })
-      .eq("organization_id", query.organizationId)
-      .order("created_at", { ascending: false })
-      .range(from, to);
-    if (error) throw error;
-    return NextResponse.json({ ok: true, items: data ?? [], count: count ?? 0, page, pageSize });
+    const { items, count } = await getDealRadarListings(client, query.organizationId, page, pageSize);
+    return NextResponse.json({ ok: true, items, count, page, pageSize });
   } catch (error) {
     const response = routeErrorResponse(error);
     return NextResponse.json(response.body, { status: response.status });
@@ -85,12 +88,7 @@ export async function deleteDealRadarListing(request: Request, id: string) {
   return withMarketSnapAuth(request, "market-snap-delete-listing", async ({ client, userId, body }) => {
     const payload = dealRadarQuerySchema.pick({ organizationId: true }).parse(body);
     await requireOrganizationRole(client, userId, payload.organizationId, ["owner", "admin", "member"]);
-    const { error } = await client
-      .from("deal_radar_saved_listings")
-      .delete()
-      .eq("id", id)
-      .eq("organization_id", payload.organizationId);
-    if (error) throw error;
+    await removeDealRadarListing(client, payload.organizationId, id);
     return NextResponse.json({ ok: true });
   });
 }
@@ -106,16 +104,7 @@ export async function convertDealRadarToInventory(request: Request, id: string) 
       .eq("organization_id", payload.organizationId)
       .single();
     if (error) throw error;
-    const prefill = {
-      year: data.year ?? undefined,
-      make: cleanText(data.make),
-      model: cleanText(data.model),
-      trim: cleanText(data.trim),
-      mileage: data.mileage_km ?? undefined,
-      purchasePrice: data.listed_price ?? undefined,
-      purchaseSource: sourceToPurchaseSource(String(data.source_name ?? "")),
-      notes: `Imported from Deal Radar. Review all fields before creating inventory. Source: ${data.listing_url ?? data.source_name ?? "unknown"}`,
-    };
+    const prefill = convertDealRadarListingToInventory(data as Record<string, unknown>);
     return NextResponse.json({ ok: true, prefill });
   });
 }
@@ -395,21 +384,6 @@ async function readVehicleExpenses(client: Client, organizationId: string, vehic
   const { data, error } = await client.from("vehicle_expenses").select("*").eq("organization_id", organizationId).eq("vehicle_id", vehicleId);
   if (error) throw error;
   return (data ?? []).map((row) => mapExpense(row as Record<string, unknown>));
-}
-
-function cleanText(value: unknown) {
-  const text = String(value ?? "").trim();
-  return text || undefined;
-}
-
-function sourceToPurchaseSource(sourceName: string) {
-  const source = sourceName.toLowerCase();
-  if (source.includes("openlane")) return "OpenLane";
-  if (source.includes("iaa")) return "IAA";
-  if (source.includes("copart")) return "Copart";
-  if (source.includes("facebook")) return "FacebookMarketplace";
-  if (source.includes("auction")) return "dealerAuction";
-  return "other";
 }
 
 function buildLastTwelveMonths() {

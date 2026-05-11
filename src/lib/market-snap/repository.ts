@@ -43,7 +43,65 @@ export async function fetchMarketComparables(client: Client, organizationId: str
   }));
 }
 
-export async function saveMarketListing(client: Client, input: MarketListingInput, valuation?: VehicleValuation) {
+export async function upsertMarketListingFromAnalysis(client: Client, input: MarketListingInput, valuation?: VehicleValuation) {
+  const normalized = normalizeListing(input);
+  const expiresAt = new Date(Date.now() + 90 * 86_400_000).toISOString();
+  const { data, error } = await client
+    .from("market_listings")
+    .insert({
+      organization_id: normalized.organizationId,
+      source_name: normalized.sourceName,
+      source_type: normalized.sourceType ?? "extension",
+      listing_url: normalized.listingUrl || null,
+      title: normalized.title || normalized.normalizedTitle,
+      description: normalized.description || null,
+      condition_report_text: normalized.conditionReportText || null,
+      year: normalized.year ?? null,
+      make: normalized.make || null,
+      model: normalized.model || null,
+      trim: normalized.trim || null,
+      mileage_km: normalized.mileageKm ?? null,
+      listed_price: normalized.listedPrice ?? normalized.auctionHammerPrice ?? null,
+      auction_hammer_price: normalized.auctionHammerPrice ?? null,
+      location: normalized.location || null,
+      province: normalized.province || null,
+      seller_type: normalized.sellerType || null,
+      title_status: normalized.titleStatus,
+      market_type: normalized.marketType,
+      data_quality_score: normalized.dataQualityScore,
+      source_reliability_score: normalized.sourceReliabilityScore,
+      time_decay_weight: normalized.timeDecayWeight,
+      sample_weight: normalized.sampleWeight,
+      normalized_payload: {
+        ...normalized,
+        valuation: valuation ? {
+          estimatedRetailMarketValue: valuation.estimatedRetailMarketValue,
+          confidenceScore: valuation.confidenceScore,
+          estimatorType: valuation.estimatorType,
+          modelVersion: valuation.modelVersion,
+        } : undefined,
+      },
+      sanitized_raw_payload: {
+        title: normalized.title,
+        description: normalized.description,
+        price: normalized.listedPrice ?? normalized.auctionHammerPrice,
+        mileageKm: normalized.mileageKm,
+        location: normalized.location,
+      },
+      condition_features: normalized.conditionFeatures ?? {},
+      image_features: normalized.imageFeatures ?? {},
+      diagnostic_features: normalized.diagnosticFeatures ?? {},
+      expires_at: expiresAt,
+      retention_policy: "temporary_capture",
+      captured_at: normalized.capturedAt ?? new Date().toISOString(),
+    })
+    .select("id")
+    .single();
+  if (error) throw error;
+  return String(data.id);
+}
+
+export async function saveListingToDealRadar(client: Client, input: MarketListingInput, valuation?: VehicleValuation) {
   const { data, error } = await client
     .from("deal_radar_saved_listings")
     .insert({
@@ -74,6 +132,43 @@ export async function saveMarketListing(client: Client, input: MarketListingInpu
     .single();
   if (error) throw error;
   return String(data.id);
+}
+
+export const saveMarketListing = saveListingToDealRadar;
+
+export async function getDealRadarListings(client: Client, organizationId: string, page = 1, pageSize = 25) {
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+  const { data, error, count } = await client
+    .from("deal_radar_saved_listings")
+    .select("*", { count: "exact" })
+    .eq("organization_id", organizationId)
+    .order("created_at", { ascending: false })
+    .range(from, to);
+  if (error) throw error;
+  return { items: data ?? [], count: count ?? 0 };
+}
+
+export async function removeDealRadarListing(client: Client, organizationId: string, id: string) {
+  const { error } = await client
+    .from("deal_radar_saved_listings")
+    .delete()
+    .eq("id", id)
+    .eq("organization_id", organizationId);
+  if (error) throw error;
+}
+
+export function convertDealRadarListingToInventory(data: Record<string, unknown>) {
+  return {
+    year: data.year ?? undefined,
+    make: stringOrUndefined(data.make),
+    model: stringOrUndefined(data.model),
+    trim: stringOrUndefined(data.trim),
+    mileage: numberOrUndefined(data.mileage_km),
+    purchasePrice: numberOrUndefined(data.listed_price),
+    purchaseSource: sourceToPurchaseSource(String(data.source_name ?? "")),
+    notes: `Imported from Deal Radar. Review all fields before creating inventory. Source: ${data.listing_url ?? data.source_name ?? "unknown"}`,
+  };
 }
 
 export async function saveVehicleValuation(client: Client, valuation: VehicleValuation) {
@@ -182,6 +277,23 @@ export async function runVehicleValuation(client: Client, organizationId: string
   return runComparableEstimator({ organizationId, vehicle, comparables, expenses });
 }
 
+export async function getLatestVehicleValuation(client: Client, organizationId: string, vehicleId: string) {
+  const history = await getVehicleValuationHistory(client, organizationId, vehicleId, 1);
+  return history[0];
+}
+
+export async function getVehicleValuationHistory(client: Client, organizationId: string, vehicleId: string, limit = 25) {
+  const { data, error } = await client
+    .from("vehicle_valuations")
+    .select("*")
+    .eq("organization_id", organizationId)
+    .eq("vehicle_id", vehicleId)
+    .order("valuation_date", { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data ?? [];
+}
+
 function stringOrUndefined(value: unknown) {
   const text = String(value ?? "").trim();
   return text || undefined;
@@ -196,4 +308,14 @@ function numberOrUndefined(value: unknown) {
 function objectOrUndefined(value: unknown) {
   if (!value || typeof value !== "object") return undefined;
   return value;
+}
+
+function sourceToPurchaseSource(sourceName: string) {
+  const source = sourceName.toLowerCase();
+  if (source.includes("openlane")) return "OpenLane";
+  if (source.includes("iaa")) return "IAA";
+  if (source.includes("copart")) return "Copart";
+  if (source.includes("facebook")) return "FacebookMarketplace";
+  if (source.includes("auction")) return "dealerAuction";
+  return "other";
 }

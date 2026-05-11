@@ -78,13 +78,14 @@ After the base schema, run the migrations in `supabase/migrations`:
 20260510_delete_vehicle_cascade_hardening.sql
 20260510_market_snap_foundation.sql
 20260511_market_snap_hardening.sql
+20260512_market_snap_production_hardening.sql
 ```
 
 The production constraints migrations add financial data checks, prevent duplicate sales for the same vehicle, validate organization matches for expenses/sales/attachments, enforce private attachment paths, protect final owners, restrict sensitive file reads, and add atomic vehicle/sale RPCs.
 
 Vehicle deletion depends on the `delete_vehicle_and_related_data(uuid, uuid)` RPC created by the 20260510 vehicle deletion migrations. Deploying code alone does not create this database function; run those SQL files in Supabase before using vehicle deletion in production.
 
-Market Snap depends on the two Market Snap migrations. The foundation migration creates sources, market listings, Deal Radar, valuation history, ML run/version tables, data settings, and RLS. The hardening migration adds condition/image/diagnostic features, retention cleanup, import quality fields, sold-vehicle prediction-error columns, and indexes.
+Market Snap depends on the Market Snap migrations. The foundation migration creates sources, market listings, Deal Radar, valuation history, ML run/version tables, data settings, and RLS. The hardening migrations add condition/image/diagnostic features, retention cleanup, import quality fields, sold-vehicle prediction-error columns, indexes, cron job observability, and stricter maintenance-function/model-version access.
 
 ## Market Snap
 

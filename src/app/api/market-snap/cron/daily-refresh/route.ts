@@ -20,40 +20,87 @@ export async function GET(request: Request) {
     if (missing.length > 0) return NextResponse.json({ ok: false, message: "Supabase service credentials are not configured.", missing }, { status: 503 });
 
     const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false } });
-    const { data: vehicles, error } = await supabase
-      .from("vehicles")
-      .select("*")
-      .in("status", ["purchased", "in_repair", "listed_for_sale"])
-      .limit(500);
-    if (error) throw error;
+    const { data: job, error: jobError } = await supabase.from("market_data_jobs").insert({
+      job_type: "daily_valuation_refresh",
+      status: "running",
+      started_at: new Date().toISOString(),
+      metrics: { active_statuses: ["purchased", "in_repair", "listed_for_sale"] },
+    }).select("id").single();
+    if (jobError) throw jobError;
 
     let refreshed = 0;
     let skippedDuplicateSnapshots = 0;
-    for (const row of vehicles ?? []) {
-      const vehicle = mapVehicle(row as Record<string, unknown>);
-      const { data: expenses, error: expenseError } = await supabase
-        .from("vehicle_expenses")
-        .select("*")
-        .eq("organization_id", vehicle.organizationId)
-        .eq("vehicle_id", vehicle.id);
-      if (expenseError) throw expenseError;
-      const comparables = await fetchMarketComparables(supabase, vehicle.organizationId, vehicle);
-      const valuation = runComparableEstimator({
-        organizationId: vehicle.organizationId,
-        vehicle,
-        expenses: (expenses ?? []).map((expense) => mapExpense(expense as Record<string, unknown>)),
-        comparables,
-      });
-      const previous = await latestValuation(supabase, vehicle.organizationId, vehicle.id);
-      if (!shouldStoreValuationSnapshot(previous, valuation)) {
-        skippedDuplicateSnapshots += 1;
-        continue;
-      }
-      await saveVehicleValuation(supabase, valuation);
-      refreshed += 1;
-    }
+    let processed = 0;
+    const failedVehicles: Array<{ vehicleId: string; message: string }> = [];
+    try {
+      for (let from = 0; ; from += 200) {
+        const to = from + 199;
+        const { data: vehicles, error } = await supabase
+          .from("vehicles")
+          .select("*")
+          .in("status", ["purchased", "in_repair", "listed_for_sale"])
+          .order("created_at", { ascending: true })
+          .range(from, to);
+        if (error) throw error;
+        if (!vehicles || vehicles.length === 0) break;
 
-    return NextResponse.json({ ok: true, refreshed, skippedSoldVehicles: true, skippedDuplicateSnapshots });
+        for (const row of vehicles) {
+          const vehicle = mapVehicle(row as Record<string, unknown>);
+          processed += 1;
+          try {
+            const { data: expenses, error: expenseError } = await supabase
+              .from("vehicle_expenses")
+              .select("*")
+              .eq("organization_id", vehicle.organizationId)
+              .eq("vehicle_id", vehicle.id);
+            if (expenseError) throw expenseError;
+            const comparables = await fetchMarketComparables(supabase, vehicle.organizationId, vehicle);
+            const valuation = runComparableEstimator({
+              organizationId: vehicle.organizationId,
+              vehicle,
+              expenses: (expenses ?? []).map((expense) => mapExpense(expense as Record<string, unknown>)),
+              comparables,
+            });
+            const previous = await latestValuation(supabase, vehicle.organizationId, vehicle.id);
+            if (!shouldStoreValuationSnapshot(previous, valuation)) {
+              skippedDuplicateSnapshots += 1;
+              continue;
+            }
+            await saveVehicleValuation(supabase, valuation);
+            refreshed += 1;
+          } catch (error) {
+            failedVehicles.push({ vehicleId: vehicle.id, message: error instanceof Error ? error.message : "Vehicle valuation failed." });
+          }
+        }
+
+        if (vehicles.length < 200) break;
+      }
+
+      const { data: retention, error: retentionError } = await supabase.rpc("cleanup_market_snap_retention");
+      if (retentionError) throw retentionError;
+      await supabase.from("market_data_jobs").update({
+        status: failedVehicles.length > 0 ? "failed" : "succeeded",
+        completed_at: new Date().toISOString(),
+        error_message: failedVehicles.length > 0 ? `${failedVehicles.length} vehicle valuations failed.` : null,
+        metrics: {
+          processed,
+          refreshed,
+          skippedDuplicateSnapshots,
+          skippedSoldVehicles: true,
+          failedVehicles: failedVehicles.slice(0, 50),
+          retention,
+        },
+      }).eq("id", job.id);
+      return NextResponse.json({ ok: failedVehicles.length === 0, processed, refreshed, skippedSoldVehicles: true, skippedDuplicateSnapshots, failedVehicles, retention });
+    } catch (error) {
+      await supabase.from("market_data_jobs").update({
+        status: "failed",
+        completed_at: new Date().toISOString(),
+        error_message: error instanceof Error ? error.message : "Market Snap daily refresh failed.",
+        metrics: { processed, refreshed, skippedDuplicateSnapshots, failedVehicles: failedVehicles.slice(0, 50) },
+      }).eq("id", job.id);
+      throw error;
+    }
   } catch (error) {
     const response = routeErrorResponse(error);
     return NextResponse.json(response.body, { status: response.status });

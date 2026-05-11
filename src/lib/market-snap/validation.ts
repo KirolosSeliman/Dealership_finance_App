@@ -82,6 +82,7 @@ export const imageFeaturesSchema = z.object({
   mileageMismatchWarning: z.boolean().optional(),
   imageProcessedAt: z.string().datetime().optional(),
   photoAnalysisStatus: z.enum(["not_started", "pending", "processed", "failed", "unknown"]).optional(),
+  imageProcessingErrors: z.array(z.string().trim().min(1).max(240)).max(50).optional(),
 }).strict().optional();
 
 export const diagnosticFeaturesSchema = z.object({

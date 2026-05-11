@@ -102,6 +102,7 @@ export interface ImageFeatures {
   mileageMismatchWarning?: boolean;
   imageProcessedAt?: string;
   photoAnalysisStatus?: PhotoAnalysisStatus;
+  imageProcessingErrors?: string[];
 }
 
 export interface ConditionFeatures {

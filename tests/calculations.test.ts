@@ -14,6 +14,7 @@ import {
 import { generateBackupExport, generateTaxReportExport, restoreBackupDryRun, verifyBackupExport } from "../src/lib/backup/export";
 import { calculateTimeDecayWeight, extractConditionFeaturesFromText, inferMarketType, normalizeListing, runComparableEstimator, shouldRefreshVehicle, shouldStoreValuationSnapshot } from "../src/lib/market-snap/engine";
 import { processTemporaryListingImages } from "../src/lib/market-snap/image-features";
+import { convertDealRadarListingToInventory } from "../src/lib/market-snap/repository";
 import { importPayloadSchema, marketListingPayloadSchema } from "../src/lib/market-snap/validation";
 import { assertAllowedUpload, canExportTaxReports, canManageBackups, sanitizeCsvCell, sanitizeStorageFileName } from "../src/lib/security";
 import { assertSameOrigin, checkRateLimit, resetRateLimitForTests, RouteSecurityError } from "../src/lib/server/security";
@@ -229,6 +230,41 @@ test("Market Snap image pipeline stores features and releases temporary buffers"
   assert.equal(features.imageCount, 2);
   assert.equal(features.photoAnalysisStatus, "processed");
   assert.equal(Boolean(features.imageProcessedAt), true);
+});
+
+test("Market Snap image pipeline records per-image failures without inventing visual condition", async () => {
+  const features = await processTemporaryListingImages({
+    imageUrls: ["https://example.test/good.jpg", "https://example.test/bad.jpg"],
+    fetchImage: async (url) => {
+      if (url.includes("bad")) throw new Error("blocked");
+      return new ArrayBuffer(8);
+    },
+  });
+
+  assert.equal(features.imageCount, 1);
+  assert.equal(features.photoAnalysisStatus, "processed");
+  assert.equal(features.rustVisibleScore, undefined);
+  assert.equal(features.damageVisibleScore, undefined);
+  assert.equal(features.imageProcessingErrors?.length, 1);
+});
+
+test("Deal Radar conversion prefills only known listing fields", () => {
+  const prefill = convertDealRadarListingToInventory({
+    source_name: "Facebook Marketplace",
+    listing_url: "https://example.test/listing",
+    year: 2021,
+    make: "Honda",
+    model: "Civic",
+    mileage_km: 60000,
+    listed_price: 16000,
+    color: "Red",
+    vin: "SHOULD_NOT_COPY",
+  });
+
+  assert.deepEqual(Object.keys(prefill).sort(), ["make", "mileage", "model", "notes", "purchasePrice", "purchaseSource", "trim", "year"].sort());
+  assert.equal(prefill.make, "Honda");
+  assert.equal(prefill.purchaseSource, "FacebookMarketplace");
+  assert.equal("vin" in prefill, false);
 });
 
 test("optional 15 percent tax works for regular expenses", () => {
@@ -740,4 +776,13 @@ test("P0 migration protects sensitive files and final owner", () => {
   assert.match(sql, /is_sensitive = false/i);
   assert.match(sql, /operational roles read private organization files/i);
   assert.match(sql, /array\['owner','admin','member'\]::app_role\[\]/i);
+});
+
+test("Market Snap production hardening restricts retention cleanup and model version writes", () => {
+  const sql = readFileSync(join(process.cwd(), "supabase/migrations/20260512_market_snap_production_hardening.sql"), "utf8");
+
+  assert.match(sql, /revoke execute on function cleanup_market_snap_retention\(\) from authenticated/i);
+  assert.match(sql, /grant execute on function cleanup_market_snap_retention\(\) to service_role/i);
+  assert.match(sql, /drop policy if exists "admins manage model versions"/i);
+  assert.match(sql, /auth\.role\(\) = 'service_role'/i);
 });
