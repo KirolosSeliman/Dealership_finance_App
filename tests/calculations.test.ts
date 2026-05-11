@@ -12,6 +12,8 @@ import {
   calculateVehicleTotalCost,
 } from "../src/lib/domain/calculations";
 import { generateBackupExport, generateTaxReportExport, restoreBackupDryRun, verifyBackupExport } from "../src/lib/backup/export";
+import { calculateTimeDecayWeight, inferMarketType, normalizeListing, runComparableEstimator, shouldRefreshVehicle, shouldStoreValuationSnapshot } from "../src/lib/market-snap/engine";
+import { marketListingPayloadSchema } from "../src/lib/market-snap/validation";
 import { assertAllowedUpload, canExportTaxReports, canManageBackups, sanitizeCsvCell, sanitizeStorageFileName } from "../src/lib/security";
 import { assertSameOrigin, checkRateLimit, resetRateLimitForTests, RouteSecurityError } from "../src/lib/server/security";
 import { activityLogSchema, applyRecurringExpenseTemplateSchema, attachmentSchema, backupRequestSchema, expenseSchema, recurringExpenseTemplateSchema, regenerateInvitationSchema, taxExportSchema } from "../src/lib/validation";
@@ -24,6 +26,7 @@ import type {
   Vehicle,
   VehicleExpense,
 } from "../src/types/domain";
+import type { VehicleValuation } from "../src/types/market-snap";
 
 const vehicle: Vehicle = {
   id: "vehicle-1",
@@ -55,6 +58,99 @@ test("OpenLane tax rules are applied", () => {
     }),
     { taxRate: 0.15, taxAmount: 150, totalAmount: 1150 },
   );
+});
+
+test("Market Snap normalizes listings and separates salvage from clean markets", () => {
+  const clean = normalizeListing({
+    organizationId: "63c47786-fb41-40c1-a573-71346969b9e0",
+    sourceName: "AutoTrader/AutoHebdo",
+    sourceType: "retail",
+    title: "2020 Toyota Corolla LE",
+    year: 2020,
+    make: "Toyota",
+    model: "Corolla",
+    mileageKm: 80000,
+    listedPrice: 17995,
+    capturedAt: new Date().toISOString(),
+  });
+  const salvage = normalizeListing({
+    organizationId: "63c47786-fb41-40c1-a573-71346969b9e0",
+    sourceName: "Copart",
+    sourceType: "salvage",
+    title: "2020 Toyota Corolla salvage",
+    description: "front damage, non-repairable, parts only",
+    listedPrice: 3500,
+  });
+
+  assert.equal(clean.marketType, "clean_retail_market");
+  assert.equal(salvage.marketType, "salvage_auction_market");
+  assert.ok(salvage.warnings.some((warning) => warning.includes("separated")));
+});
+
+test("Market Snap time decay lowers old listing weight", () => {
+  const recent = calculateTimeDecayWeight(new Date().toISOString());
+  const old = calculateTimeDecayWeight("2025-01-01T00:00:00.000Z");
+
+  assert.ok(recent > old);
+  assert.ok(old >= 0.08);
+});
+
+test("Market Snap comparable estimator scores deals, risk, cost basis, and recommendation", () => {
+  const valuation = runComparableEstimator({
+    organizationId: "org-1",
+    vehicle: { ...vehicle, status: "listed_for_sale", purchaseSource: "other", year: 2020, make: "Toyota", model: "Corolla", mileage: 80000, listedPrice: 18000, purchasePrice: 12000 },
+    expenses: [],
+    comparables: [
+      { sourceName: "AutoTrader/AutoHebdo", marketType: "clean_retail_market", year: 2020, make: "Toyota", model: "Corolla", mileageKm: 82000, listedPrice: 18500, capturedAt: new Date().toISOString() },
+      { sourceName: "AutoTrader/AutoHebdo", marketType: "clean_retail_market", year: 2021, make: "Toyota", model: "Corolla", mileageKm: 76000, listedPrice: 19900, capturedAt: new Date().toISOString() },
+    ],
+  });
+
+  assert.equal(valuation.estimatorType, "comparable_estimator");
+  assert.equal(valuation.marketType, "clean_retail_market");
+  assert.ok(valuation.estimatedRetailMarketValue > 0);
+  assert.ok(valuation.estimatedWholesaleBuyValue < valuation.estimatedRetailMarketValue);
+  assert.ok(valuation.maxRecommendedBid >= 0);
+  assert.ok(valuation.confidenceScore > 0);
+  assert.ok(["Strong Buy", "Negotiate", "Avoid", "High Risk"].includes(valuation.recommendationBadge));
+});
+
+test("Market Snap refresh excludes sold vehicles and stores only useful snapshots", () => {
+  const soldVehicle: Vehicle = { ...vehicle, status: "sold" };
+  const activeVehicle: Vehicle = { ...vehicle, status: "listed_for_sale" };
+  const valuationBase: VehicleValuation = runComparableEstimator({
+    organizationId: "org-1",
+    vehicle: activeVehicle,
+    comparables: [],
+  });
+  const unchanged = { ...valuationBase, valuationDate: new Date().toISOString() };
+  const changed = { ...valuationBase, estimatedRetailMarketValue: valuationBase.estimatedRetailMarketValue + 1000 };
+
+  assert.equal(shouldRefreshVehicle(soldVehicle), false);
+  assert.equal(shouldRefreshVehicle(activeVehicle), true);
+  assert.equal(shouldStoreValuationSnapshot(valuationBase, unchanged), false);
+  assert.equal(shouldStoreValuationSnapshot(valuationBase, changed), true);
+});
+
+test("Market Snap extension/API payload validation accepts visible listing data only", () => {
+  assert.equal(marketListingPayloadSchema.safeParse({
+    organizationId: "63c47786-fb41-40c1-a573-71346969b9e0",
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    listingUrl: "https://example.com/listing/1",
+    title: "2021 Honda Civic",
+    year: 2021,
+    make: "Honda",
+    model: "Civic",
+    mileageKm: 60000,
+    listedPrice: 16000,
+  }).success, true);
+  assert.equal(inferMarketType("IAA", "salvage", "salvage", "airbag deployed"), "salvage_auction_market");
+  assert.equal(marketListingPayloadSchema.safeParse({
+    organizationId: "not-an-org",
+    sourceName: "",
+    listingUrl: "javascript:alert(1)",
+  }).success, false);
 });
 
 test("optional 15 percent tax works for regular expenses", () => {

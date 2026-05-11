@@ -56,6 +56,7 @@ import {
 } from "@/lib/domain/calculations";
 import { verifyBackupExport } from "@/lib/backup/export";
 import { getDictionary } from "@/lib/i18n";
+import { runComparableEstimator, shouldRefreshVehicle } from "@/lib/market-snap/engine";
 import { isValidVehicleDeleteConfirmation } from "@/lib/vehicle-delete";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { emptyAppData } from "@/lib/supabase/mappers";
@@ -82,7 +83,7 @@ import type {
   VehicleStatus,
 } from "@/types/domain";
 
-type View = "dashboard" | "vehicles" | "cash" | "contacts" | "taxes" | "backups" | "settings";
+type View = "dashboard" | "vehicles" | "marketSnap" | "dealRadar" | "marketData" | "cash" | "contacts" | "taxes" | "backups" | "settings";
 type VehicleMode = "list" | "new" | "detail";
 type VehicleTab = "overview" | "details" | "expenses" | "documents" | "sale" | "timeline";
 type CashAccount = "company" | "external";
@@ -94,6 +95,9 @@ const languageKey = "dealer-flow-language";
 const mainNav: Array<[View, React.ReactNode]> = [
   ["dashboard", <BarChart3 key="dashboard" size={18} />],
   ["vehicles", <Car key="vehicles" size={18} />],
+  ["marketSnap", <Activity key="marketSnap" size={18} />],
+  ["dealRadar", <Search key="dealRadar" size={18} />],
+  ["marketData", <FolderLock key="marketData" size={18} />],
   ["cash", <LineChart key="cash" size={18} />],
   ["contacts", <Contact key="contacts" size={18} />],
   ["taxes", <Archive key="taxes" size={18} />],
@@ -126,10 +130,29 @@ function getRouteState(pathname: string, searchParams: string) {
     }
     return { view: "vehicles" as View, mode: "list" as VehicleMode };
   }
-  if (root && ["dashboard", "cash", "contacts", "taxes", "backups", "settings"].includes(root)) {
-    return { view: root, mode: "list" as VehicleMode };
+  const routeMap: Record<string, View> = {
+    dashboard: "dashboard",
+    cash: "cash",
+    contacts: "contacts",
+    taxes: "taxes",
+    backups: "backups",
+    settings: "settings",
+    "market-snap": "marketSnap",
+    "deal-radar": "dealRadar",
+    "market-data": "marketData",
+  };
+  if (root && routeMap[root]) {
+    return { view: routeMap[root], mode: "list" as VehicleMode };
   }
   return { view: "dashboard" as View, mode: "list" as VehicleMode };
+}
+
+function pathForView(view: View) {
+  if (view === "dashboard") return "/dashboard";
+  if (view === "marketSnap") return "/market-snap";
+  if (view === "dealRadar") return "/deal-radar";
+  if (view === "marketData") return "/market-data";
+  return `/${view}`;
 }
 
 export function DealerFlowApp() {
@@ -266,7 +289,7 @@ export function DealerFlowApp() {
       return;
     }
     setVehicleMode("list");
-    window.history.pushState(null, "", nextView === "dashboard" ? "/dashboard" : `/${nextView}`);
+    window.history.pushState(null, "", pathForView(nextView));
   }
 
   async function handleAuth(formData: FormData) {
@@ -937,6 +960,31 @@ export function DealerFlowApp() {
               setMainPhoto={setVehicleMainPhoto}
               permissions={permissions}
               loading={loading}
+            />
+          )}
+          {view === "marketSnap" && (
+            <MarketSnapDashboard
+              t={t}
+              scoped={scoped}
+              dateRange={dateRange}
+              setDateRange={setDateRange}
+              navigate={navigate}
+              permissions={permissions}
+            />
+          )}
+          {view === "dealRadar" && (
+            <DealRadarPage
+              t={t}
+              organizationId={activeOrganization.id}
+              navigate={navigate}
+              permissions={permissions}
+            />
+          )}
+          {view === "marketData" && (
+            <MarketDataAdminPage
+              t={t}
+              organizationId={activeOrganization.id}
+              permissions={permissions}
             />
           )}
           {view === "cash" && (
@@ -2431,9 +2479,316 @@ function SettingsPage({
           onDelete={onDeleteRecurringExpenseTemplate}
         />
       </Panel>
+      <Panel title={t.marketSnap.dataAiSettings}>
+        <div className="space-y-3 text-sm text-slate-400">
+          <p>{t.marketSnap.dataAiPurpose}</p>
+          <InfoGrid rows={[
+            [t.marketSnap.modelImprovement, t.marketSnap.enabledByTerms],
+            [t.marketSnap.dataUsed, t.marketSnap.anonymizedDataUsed],
+            [t.marketSnap.dataExcluded, t.marketSnap.personalDataExcluded],
+            [t.marketSnap.retention, t.marketSnap.retentionSummary],
+          ]} />
+        </div>
+      </Panel>
       <Panel title={t.sections.privateStorage}><p className="flex items-center gap-2 text-slate-300"><Lock size={18} />{activeOrganization.name}</p><p className="mt-3 text-sm text-slate-500">{t.backup.r2Inactive}</p></Panel>
     </div>
   );
+}
+
+function MarketSnapDashboard({
+  t,
+  scoped,
+  dateRange,
+  setDateRange,
+  navigate,
+  permissions,
+}: {
+  t: ReturnType<typeof getDictionary>;
+  scoped: AppData;
+  dateRange: { start: string; end: string };
+  setDateRange: (range: { start: string; end: string }) => void;
+  navigate: (view: View, options?: { mode?: VehicleMode; vehicleId?: string; tab?: VehicleTab }) => void;
+  permissions: Permissions;
+}) {
+  const activeVehicles = scoped.vehicles.filter(shouldRefreshVehicle);
+  const valuations = activeVehicles.map((vehicle) => runComparableEstimator({
+    organizationId: vehicle.organizationId,
+    vehicle,
+    expenses: scoped.expenses,
+    comparables: [],
+  }));
+  const totalRetail = valuations.reduce((sum, valuation) => sum + valuation.estimatedRetailMarketValue, 0);
+  const totalCostBasis = valuations.reduce((sum, valuation) => sum + valuation.currentCostBasis, 0);
+  const potentialGrossProfit = valuations.reduce((sum, valuation) => sum + valuation.potentialGrossProfit, 0);
+  const averageDealScore = averageScore(valuations.map((valuation) => valuation.dealScore));
+  const averageProfitScore = averageScore(valuations.map((valuation) => valuation.profitScore));
+  const averageRiskScore = averageScore(valuations.map((valuation) => valuation.riskScore));
+  const lowConfidence = valuations.filter((valuation) => valuation.confidenceScore < 45).length;
+  const highRisk = valuations.filter((valuation) => valuation.riskScore >= 70).length;
+  const chartData = buildMonthlyBuySellSeries(scoped, dateRange);
+
+  return (
+    <div className="space-y-6">
+      <div className="surface-muted flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <p className="text-sm text-slate-400">{t.marketSnap.subtitle}</p>
+          <p className="text-base font-medium text-slate-100">{dateRange.start} - {dateRange.end}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <input className="control compact-control" type="date" value={dateRange.start} onChange={(event) => setDateRange({ ...dateRange, start: event.target.value })} />
+          <input className="control compact-control" type="date" value={dateRange.end} onChange={(event) => setDateRange({ ...dateRange, end: event.target.value })} />
+          {permissions.manageVehicles && (
+            <button className="primary-button" onClick={() => navigate("dealRadar")}>
+              <Search size={18} />
+              {t.nav.dealRadar}
+            </button>
+          )}
+        </div>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard label={t.marketSnap.totalRetailValue} value={money(totalRetail)} icon={<BarChart3 size={18} />} />
+        <MetricCard label={t.marketSnap.totalCostBasis} value={money(totalCostBasis)} icon={<Receipt size={18} />} />
+        <MetricCard label={t.marketSnap.potentialGrossProfit} value={money(potentialGrossProfit)} icon={<LineChart size={18} />} />
+        <MetricCard label={t.marketSnap.averageDealScore} value={String(averageDealScore)} icon={<Activity size={18} />} />
+        <MetricCard label={t.marketSnap.averageProfitScore} value={String(averageProfitScore)} icon={<Banknote size={18} />} />
+        <MetricCard label={t.marketSnap.averageRiskScore} value={String(averageRiskScore)} icon={<ShieldCheck size={18} />} />
+        <MetricCard label={t.marketSnap.lowConfidenceValuations} value={String(lowConfidence)} icon={<Search size={18} />} />
+        <MetricCard label={t.marketSnap.highRiskVehicles} value={String(highRisk)} icon={<Archive size={18} />} />
+      </div>
+      <Panel title={t.marketSnap.buySellChart}>
+        <ChartPanel title={t.marketSnap.buySellChart} data={chartData.map((row) => ({ label: row.label, value: row.averageSellPrice - row.averageBuyPrice }))} type="area" summary={t.marketSnap.averageSpread} />
+      </Panel>
+      <Panel title={t.marketSnap.inventoryValuations}>
+        <div className="overflow-x-auto">
+          <table className="data-table">
+            <thead>
+              <tr>
+                {[
+                  t.marketSnap.vehicle,
+                  t.fields.status,
+                  t.marketSnap.costBasis,
+                  t.fields.listedPrice,
+                  t.marketSnap.retailValue,
+                  t.marketSnap.wholesaleBuyValue,
+                  t.marketSnap.wholesaleSellValue,
+                  t.marketSnap.suggestedListingPrice,
+                  t.marketSnap.quickSalePrice,
+                  t.marketSnap.maxPurchasePrice,
+                  t.marketSnap.potentialGrossProfit,
+                  t.marketSnap.potentialNetProfit,
+                  t.marketSnap.dealScore,
+                  t.marketSnap.profitScore,
+                  t.marketSnap.riskScore,
+                  t.marketSnap.confidence,
+                  t.marketSnap.recommendation,
+                ].map((header) => <th key={header}>{header}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {valuations.length === 0 && (
+                <tr><td colSpan={17}><EmptyState title={t.marketSnap.noValuations} copy={t.marketSnap.noValuationsCopy} /></td></tr>
+              )}
+              {valuations.map((valuation) => {
+                const vehicle = activeVehicles.find((item) => item.id === valuation.vehicleId);
+                return (
+                  <tr key={vehicle?.id ?? valuation.valuationDate} onClick={() => vehicle && navigate("vehicles", { mode: "detail", vehicleId: vehicle.id, tab: "overview" })}>
+                    <td>{vehicleLabel(vehicle)}</td>
+                    <td>{vehicle ? <Badge>{t.status[vehicle.status]}</Badge> : "-"}</td>
+                    <td>{money(valuation.currentCostBasis)}</td>
+                    <td>{money(vehicle?.listedPrice ?? 0)}</td>
+                    <td>{money(valuation.estimatedRetailMarketValue)}</td>
+                    <td>{money(valuation.estimatedWholesaleBuyValue)}</td>
+                    <td>{money(valuation.estimatedWholesaleSellValue)}</td>
+                    <td>{money(valuation.suggestedListingPrice)}</td>
+                    <td>{money(valuation.quickSalePrice)}</td>
+                    <td>{money(valuation.maxRecommendedPurchasePrice)}</td>
+                    <td>{money(valuation.potentialGrossProfit)}</td>
+                    <td>{money(valuation.potentialNetProfit)}</td>
+                    <td>{valuation.dealScore}</td>
+                    <td>{valuation.profitScore}</td>
+                    <td>{valuation.riskScore}</td>
+                    <td>{valuation.confidenceScore}</td>
+                    <td><RecommendationBadgeView badge={valuation.recommendationBadge} /></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+function DealRadarPage({
+  t,
+  organizationId,
+  navigate,
+  permissions,
+}: {
+  t: ReturnType<typeof getDictionary>;
+  organizationId: string;
+  navigate: (view: View, options?: { mode?: VehicleMode; vehicleId?: string; tab?: VehicleTab }) => void;
+  permissions: Permissions;
+}) {
+  const [mode, setMode] = useState<"cards" | "table">("table");
+  const [items, setItems] = useState<Array<Record<string, unknown>>>([]);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/market-snap/deal-radar?organizationId=${encodeURIComponent(organizationId)}&pageSize=50`)
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error("Deal Radar is waiting for the Market Snap migration.")))
+      .then((payload: { items?: Array<Record<string, unknown>> }) => {
+        if (!cancelled) setItems(payload.items ?? []);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setMessage(error instanceof Error ? error.message : "Deal Radar data is not available yet.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [organizationId]);
+
+  return (
+    <div className="space-y-4">
+      {message && <div className="message-banner border border-amber-300/20 bg-amber-300/10 text-amber-100">{message}</div>}
+      <div className="surface-muted flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <p className="text-sm text-slate-400">{t.marketSnap.dealRadarSubtitle}</p>
+          <p className="text-base font-medium text-slate-100">{t.marketSnap.savedOpportunities}: {items.length}</p>
+        </div>
+        <div className="segmented">
+          <button className={mode === "table" ? "segmented-active" : ""} onClick={() => setMode("table")}>{t.inventory.tableView}</button>
+          <button className={mode === "cards" ? "segmented-active" : ""} onClick={() => setMode("cards")}>{t.inventory.cardView}</button>
+        </div>
+      </div>
+      {items.length === 0 ? (
+        <EmptyState title={t.marketSnap.noSavedListings} copy={t.marketSnap.noSavedListingsCopy} />
+      ) : mode === "cards" ? (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {items.map((item) => <DealRadarCard key={String(item.id)} t={t} item={item} canManage={permissions.manageVehicles} navigate={navigate} />)}
+        </div>
+      ) : (
+        <Panel title={t.nav.dealRadar}>
+          <DealRadarTable t={t} items={items} canManage={permissions.manageVehicles} navigate={navigate} />
+        </Panel>
+      )}
+    </div>
+  );
+}
+
+function MarketDataAdminPage({ t, organizationId, permissions }: { t: ReturnType<typeof getDictionary>; organizationId: string; permissions: Permissions }) {
+  const [metrics, setMetrics] = useState<Record<string, number>>({});
+  const [message, setMessage] = useState("");
+  useEffect(() => {
+    if (!permissions.manageBackups) return;
+    let cancelled = false;
+    fetch(`/api/market-snap/admin/data-quality?organizationId=${encodeURIComponent(organizationId)}`)
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error("Market Data tables are waiting for the migration.")))
+      .then((payload: { metrics?: Record<string, number> }) => {
+        if (!cancelled) setMetrics(payload.metrics ?? {});
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setMessage(error instanceof Error ? error.message : "Market Data is not available yet.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [organizationId, permissions.manageBackups]);
+
+  if (!permissions.manageBackups) {
+    return <EmptyState title={t.marketSnap.adminOnly} copy={t.marketSnap.adminOnlyCopy} />;
+  }
+
+  return (
+    <div className="space-y-4">
+      {message && <div className="message-banner border border-amber-300/20 bg-amber-300/10 text-amber-100">{message}</div>}
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard label={t.marketSnap.totalListings} value={String(metrics.totalListings ?? 0)} icon={<DatabaseIcon />} />
+        <MetricCard label={t.marketSnap.missingMileage} value={String(metrics.missingMileageCount ?? 0)} icon={<Search size={18} />} />
+        <MetricCard label={t.marketSnap.missingPrice} value={String(metrics.missingPriceCount ?? 0)} icon={<Receipt size={18} />} />
+        <MetricCard label={t.marketSnap.averageDataQuality} value={String(metrics.averageDataQuality ?? 0)} icon={<Activity size={18} />} />
+      </div>
+      <div className="grid gap-4 xl:grid-cols-2">
+        <Panel title={t.marketSnap.sources}><p className="text-sm text-slate-400">{t.marketSnap.sourcesCopy}</p></Panel>
+        <Panel title={t.marketSnap.jobs}><p className="text-sm text-slate-400">{t.marketSnap.jobsCopy}</p></Panel>
+        <Panel title={t.marketSnap.retention}><p className="text-sm text-slate-400">{t.marketSnap.retentionSummary}</p></Panel>
+        <Panel title={t.marketSnap.imports}><p className="text-sm text-slate-400">{t.marketSnap.importsCopy}</p></Panel>
+      </div>
+    </div>
+  );
+}
+
+function DealRadarTable({ t, items, canManage, navigate }: { t: ReturnType<typeof getDictionary>; items: Array<Record<string, unknown>>; canManage: boolean; navigate: (view: View, options?: { mode?: VehicleMode; vehicleId?: string; tab?: VehicleTab }) => void }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="data-table">
+        <thead>
+          <tr>
+            {[t.marketSnap.vehicle, t.marketSnap.source, t.fields.listedPrice, t.marketSnap.retailValue, t.marketSnap.maxBid, t.marketSnap.potentialProfit, t.marketSnap.confidence, t.marketSnap.recommendation, t.marketSnap.actions].map((header) => <th key={header}>{header}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item) => (
+            <tr key={String(item.id)}>
+              <td>{dealRadarLabel(item)}</td>
+              <td>{String(item.source_name ?? "-")}</td>
+              <td>{money(Number(item.listed_price ?? 0))}</td>
+              <td>{money(Number((item.valuation_snapshot as Record<string, unknown> | undefined)?.estimatedRetailMarketValue ?? 0))}</td>
+              <td>{money(Number((item.valuation_snapshot as Record<string, unknown> | undefined)?.maxRecommendedBid ?? 0))}</td>
+              <td>{money(Number(item.potential_profit ?? 0))}</td>
+              <td>{String(item.confidence_score ?? 0)}</td>
+              <td><RecommendationBadgeView badge={String(item.recommendation_badge ?? "Negotiate")} /></td>
+              <td>{canManage ? <button className="secondary-button" onClick={() => navigate("vehicles", { mode: "new" })}>{t.marketSnap.convertToInventory}</button> : "-"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function DealRadarCard({ t, item, canManage, navigate }: { t: ReturnType<typeof getDictionary>; item: Record<string, unknown>; canManage: boolean; navigate: (view: View, options?: { mode?: VehicleMode; vehicleId?: string; tab?: VehicleTab }) => void }) {
+  return (
+    <div className="vehicle-card">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="font-semibold text-white">{dealRadarLabel(item)}</p>
+          <p className="mt-1 text-sm text-slate-500">{String(item.source_name ?? "-")}</p>
+        </div>
+        <RecommendationBadgeView badge={String(item.recommendation_badge ?? "Negotiate")} />
+      </div>
+      <InfoGrid rows={[
+        [t.fields.listedPrice, money(Number(item.listed_price ?? 0))],
+        [t.marketSnap.potentialProfit, money(Number(item.potential_profit ?? 0))],
+        [t.marketSnap.dealScore, String(item.deal_score ?? 0)],
+        [t.marketSnap.riskScore, String(item.risk_score ?? 0)],
+      ]} />
+      {canManage && <button className="secondary-button mt-4" onClick={() => navigate("vehicles", { mode: "new" })}>{t.marketSnap.convertToInventory}</button>}
+    </div>
+  );
+}
+
+function MetricCard({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
+  return (
+    <div className="metric-card">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{label}</span>
+        <span className="text-slate-500">{icon}</span>
+      </div>
+      <p className="mt-4 text-2xl font-semibold tracking-tight text-white">{value}</p>
+    </div>
+  );
+}
+
+function RecommendationBadgeView({ badge }: { badge: string }) {
+  const tone = badge === "Strong Buy" ? "border-emerald-300/20 bg-emerald-300/10 text-emerald-100" : badge === "High Risk" || badge === "Avoid" ? "border-rose-300/20 bg-rose-300/10 text-rose-100" : "border-amber-300/20 bg-amber-300/10 text-amber-100";
+  return <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-semibold ${tone}`}>{badge}</span>;
+}
+
+function DatabaseIcon() {
+  return <FolderLock size={18} />;
 }
 
 function RecurringExpenseTemplates({
@@ -2654,6 +3009,39 @@ function buildBalanceSeries<T extends CashTransaction>(
     label: date.slice(5),
     value: calculator(active.filter((transaction) => transaction.date <= date)),
   }));
+}
+
+function buildMonthlyBuySellSeries(scoped: AppData, range: { start: string; end: string }) {
+  const months = new Map<string, { label: string; buyTotal: number; sellTotal: number; count: number }>();
+  scoped.sales.filter((sale) => isInDateRange(sale.saleDate, range)).forEach((sale) => {
+    const key = sale.saleDate.slice(0, 7);
+    const current = months.get(key) ?? { label: key.slice(5), buyTotal: 0, sellTotal: 0, count: 0 };
+    current.buyTotal += sale.vehicleTotalCost;
+    current.sellTotal += sale.paperSalePrice;
+    current.count += 1;
+    months.set(key, current);
+  });
+  return Array.from(months.entries())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([, row]) => ({
+      label: row.label,
+      averageBuyPrice: row.count ? roundDisplayNumber(row.buyTotal / row.count) : 0,
+      averageSellPrice: row.count ? roundDisplayNumber(row.sellTotal / row.count) : 0,
+    }));
+}
+
+function averageScore(values: number[]) {
+  if (values.length === 0) return 0;
+  return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
+}
+
+function vehicleLabel(vehicle?: Vehicle) {
+  if (!vehicle) return "Unknown vehicle";
+  return [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ") || vehicle.vin || "Unknown vehicle";
+}
+
+function dealRadarLabel(item: Record<string, unknown>) {
+  return [item.year, item.make, item.model, item.trim].filter(Boolean).join(" ") || String(item.title ?? "Unknown listing");
 }
 
 function normalizedExpenseAmount(expense: VehicleExpense) {

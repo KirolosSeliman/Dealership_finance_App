@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Dealer Flow Market Snap Extension",
+  "version": "0.1.0",
+  "description": "Analyze visible vehicle listings with Dealer Flow Market Snap.",
+  "permissions": ["activeTab", "storage", "scripting"],
+  "host_permissions": ["http://localhost:3000/*", "https://*.vercel.app/*"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Market Snap"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.facebook.com/marketplace/*", "https://www.autotrader.ca/*", "https://www.autohebdo.net/*", "https://*.openlane.com/*"],
+      "js": ["src/connectors.js", "src/content-script.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
