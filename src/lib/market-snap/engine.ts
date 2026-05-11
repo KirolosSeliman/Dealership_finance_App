@@ -2,6 +2,9 @@ import { calculateVehicleTotalCost, roundMoney } from "@/lib/domain/calculations
 import type { Vehicle, VehicleExpense } from "@/types/domain";
 import type {
   ComparableListing,
+  ConditionFeatures,
+  DiagnosticFeatures,
+  ImageFeatures,
   MarketListingInput,
   MarketType,
   NormalizedMarketListing,
@@ -14,16 +17,25 @@ const MODEL_VERSION = "market-snap-foundation-v1";
 const CLEAN_TITLE_STATUSES = new Set(["", "clean", "normal", "clear", "unknown"]);
 const SALVAGE_TERMS = ["salvage", "non repairable", "non-repairable", "parts only", "parts-only", "flood", "fire"];
 const REBUILT_TERMS = ["rebuilt", "reconstructed"];
+const HIGH_RISK_CODES = new Set(["P0700"]);
+const CRITICAL_CODE_PREFIXES = ["P0A", "B1"];
 
 export function normalizeListing(input: MarketListingInput): NormalizedMarketListing {
   const text = [input.title, input.description, input.conditionReportText, input.titleStatus].join(" ").toLowerCase();
   const titleStatus = normalizeTitleStatus(input.titleStatus || text);
   const marketType = input.marketType ?? inferMarketType(input.sourceName, input.sourceType, titleStatus, text);
+  const conditionFeatures = mergeConditionFeatures(extractConditionFeaturesFromText(text, titleStatus), input.conditionFeatures);
+  const imageFeatures = normalizeImageFeatures(input.imageFeatures, input.imageCount);
+  const diagnosticFeatures = normalizeDiagnosticFeatures(input.diagnosticFeatures);
   const missingData = requiredListingFields(input);
   const warnings: string[] = [];
   if (marketType === "salvage_auction_market") warnings.push("Salvage or non-repairable context is separated from clean retail data.");
   if (missingData.length > 0) warnings.push("Some important listing fields are missing, lowering confidence.");
-  const dataQualityScore = clamp(100 - missingData.length * 12 - (input.imageCount ? 0 : 8), 20, 100);
+  const conditionMissing = importantConditionGaps(conditionFeatures, imageFeatures, diagnosticFeatures);
+  if (conditionMissing.length > 0) missingData.push(...conditionMissing);
+  const riskWarnings = conditionWarnings(conditionFeatures, diagnosticFeatures);
+  warnings.push(...riskWarnings);
+  const dataQualityScore = clamp(100 - missingData.length * 8 - (imageFeatures.imageCount ? 0 : 8), 20, 100);
   const sourceReliabilityScore = sourceQuality(input.sourceName, input.sourceType);
   const timeDecayWeight = calculateTimeDecayWeight(input.capturedAt);
   const marketTypeWeight = marketType === "clean_retail_market" || marketType === "clean_wholesale_market" ? 1 : 0.86;
@@ -34,6 +46,9 @@ export function normalizeListing(input: MarketListingInput): NormalizedMarketLis
     normalizedTitle: [input.year, input.make, input.model, input.trim].filter(Boolean).join(" ").trim() || input.title || "Unknown vehicle",
     titleStatus,
     marketType,
+    conditionFeatures,
+    imageFeatures,
+    diagnosticFeatures,
     dataQualityScore,
     sourceReliabilityScore,
     timeDecayWeight,
@@ -109,7 +124,8 @@ export function runComparableEstimator(input: ValuationInput & { expenses?: Vehi
   const potentialNetProfit = roundMoney(estimatedRetailMarketValue - estimatedTotalAcquisitionCost);
   const riskScore = scoreRisk(normalized);
   const profitScore = clamp(Math.round((potentialNetProfit / Math.max(estimatedRetailMarketValue, 1)) * 180), 0, 100);
-  const confidenceScore = clamp(Math.round((scored.length >= 6 ? 80 : 48 + scored.length * 6) * (normalized.dataQualityScore / 100)), 10, 95);
+  const confidencePenalty = conditionConfidencePenalty(normalized.conditionFeatures, normalized.imageFeatures, normalized.diagnosticFeatures);
+  const confidenceScore = clamp(Math.round((scored.length >= 6 ? 80 : 48 + scored.length * 6) * (normalized.dataQualityScore / 100) - confidencePenalty), 10, 95);
   const dealScore = clamp(Math.round(profitScore * 0.45 + confidenceScore * 0.3 + (100 - riskScore) * 0.25), 0, 100);
   const recommendationBadge = recommend({ dealScore, profitScore, riskScore, confidenceScore });
 
@@ -134,6 +150,9 @@ export function runComparableEstimator(input: ValuationInput & { expenses?: Vehi
     estimatedTransportCost,
     estimatedAuctionFees: auctionFees,
     estimatedInspectionCost,
+    conditionFeatures: normalized.conditionFeatures,
+    imageFeatures: normalized.imageFeatures,
+    diagnosticFeatures: normalized.diagnosticFeatures,
     comparableCount: scored.length,
     dataFreshnessDays: dataFreshnessDays(scored.map((item) => item.comparable.capturedAt).filter(Boolean) as string[]),
     confidenceScore,
@@ -147,6 +166,13 @@ export function runComparableEstimator(input: ValuationInput & { expenses?: Vehi
       : "Comparable estimator used fallback pricing because no close comparables were available.",
     warnings: normalized.warnings,
     missingData: normalized.missingData,
+    valuationExplanation: {
+      comparable_count: scored.length,
+      market_type: normalized.marketType,
+      sample_weight: normalized.sampleWeight,
+      confidence_penalty: confidencePenalty,
+      condition_risk: conditionRiskImpact(normalized.conditionFeatures, normalized.diagnosticFeatures),
+    },
     modelVersion: MODEL_VERSION,
     estimatorType: "comparable_estimator",
     valuationDate: new Date().toISOString(),
@@ -262,6 +288,7 @@ function estimateReconditioningCost(listing: NormalizedMarketListing) {
   if (text.includes("rust")) cost += 1200;
   if (text.includes("airbag") || text.includes("srs")) cost += 1400;
   if (listing.marketType === "salvage_auction_market") cost += 3000;
+  cost += conditionRepairCost(listing.conditionFeatures, listing.diagnosticFeatures);
   return cost;
 }
 
@@ -271,6 +298,7 @@ function scoreRisk(listing: NormalizedMarketListing) {
   if (listing.marketType === "rebuilt_market") risk += 24;
   if (listing.marketType === "parts_or_non_running_market") risk += 45;
   if (!CLEAN_TITLE_STATUSES.has(listing.titleStatus)) risk += 14;
+  risk += conditionRiskImpact(listing.conditionFeatures, listing.diagnosticFeatures);
   return clamp(Math.round(risk), 0, 100);
 }
 
@@ -301,4 +329,161 @@ function roundScore(value: number) {
 
 function formatMarketType(value: MarketType) {
   return value.replaceAll("_", " ");
+}
+
+export function extractConditionFeaturesFromText(text: string, titleStatus = ""): ConditionFeatures {
+  const source = `${text} ${titleStatus}`.toLowerCase();
+  const rustDetected = source.includes("rust") || source.includes("corrosion");
+  const engineIssue = source.includes("engine") || source.includes("motor issue");
+  const transmissionIssue = source.includes("transmission");
+  const airbagIssue = source.includes("airbag") || source.includes("srs");
+  return {
+    rust: rustDetected ? {
+      rustDetected: true,
+      rustSeverity: source.includes("structural") || source.includes("frame rust") ? "structural" : source.includes("severe rust") ? "severe" : "unknown",
+      rustLocations: rustLocationsFromText(source),
+      rustConfidenceScore: 45,
+    } : undefined,
+    cosmetic: source.includes("dent") || source.includes("scratch") || source.includes("hail") || source.includes("cracked bumper") ? {
+      cosmeticDamageDetected: true,
+      cosmeticDamageSeverity: source.includes("severe") ? "severe" : "unknown",
+      damageTypes: ["scratch", "dent", "hail", "cracked bumper"].filter((term) => source.includes(term)),
+    } : undefined,
+    mechanical: engineIssue || transmissionIssue || airbagIssue ? {
+      mechanicalIssueDetected: true,
+      mechanicalIssueSeverity: transmissionIssue || engineIssue ? "severe" : "moderate",
+      engineIssue,
+      transmissionIssue,
+      electricalIssue: airbagIssue,
+    } : undefined,
+    title: {
+      cleanTitle: source.includes("clean title") || source.includes("clear title"),
+      rebuiltTitle: REBUILT_TERMS.some((term) => source.includes(term)),
+      salvageTitle: source.includes("salvage"),
+      partsOnly: source.includes("parts only") || source.includes("parts-only"),
+      nonRepairable: source.includes("non repairable") || source.includes("non-repairable"),
+      theftRecovery: source.includes("theft recovery"),
+      floodDamage: source.includes("flood"),
+      fireDamage: source.includes("fire damage"),
+      hailDamage: source.includes("hail"),
+    },
+  };
+}
+
+function mergeConditionFeatures(extracted: ConditionFeatures, provided?: ConditionFeatures): ConditionFeatures {
+  return {
+    rust: { ...extracted.rust, ...provided?.rust },
+    cosmetic: { ...extracted.cosmetic, ...provided?.cosmetic },
+    mechanical: { ...extracted.mechanical, ...provided?.mechanical },
+    title: { ...extracted.title, ...provided?.title },
+  };
+}
+
+function normalizeImageFeatures(features?: ImageFeatures, imageCount?: number): ImageFeatures {
+  const count = features?.imageCount ?? imageCount;
+  return {
+    photoAnalysisStatus: count ? "not_started" : "unknown",
+    ...features,
+    imageCount: count,
+  };
+}
+
+function normalizeDiagnosticFeatures(features?: DiagnosticFeatures): DiagnosticFeatures {
+  const codes = features?.obdCodes ?? [];
+  const highestCodeSeverity = features?.highestCodeSeverity ?? highestSeverity(codes.map((code) => code.severity).filter(Boolean) as Array<"low" | "medium" | "high" | "critical">);
+  return {
+    ...features,
+    diagnosticCodesAvailable: features?.diagnosticCodesAvailable ?? (codes.length > 0 ? true : undefined),
+    codeCount: features?.codeCount ?? codes.length,
+    highestCodeSeverity,
+  };
+}
+
+function importantConditionGaps(condition: ConditionFeatures, images: ImageFeatures, diagnostics: DiagnosticFeatures) {
+  const missing: string[] = [];
+  if (!condition.rust?.rustDetected && condition.rust?.rustSeverity === undefined) missing.push("rust_condition_unknown");
+  if (!condition.mechanical?.mechanicalIssueDetected && condition.mechanical?.mechanicalIssueSeverity === undefined) missing.push("mechanical_condition_unknown");
+  if (!diagnostics.diagnosticCodesAvailable && !diagnostics.codeCount) missing.push("diagnostic_codes_unknown");
+  if (!images.imageCount) missing.push("photos_unknown");
+  if (images.imageCount && !images.hasOdometerPhoto && images.odometerDetected === undefined) missing.push("odometer_photo_unknown");
+  return missing;
+}
+
+function conditionWarnings(condition: ConditionFeatures, diagnostics: DiagnosticFeatures) {
+  const warnings: string[] = [];
+  if (condition.rust?.rustSeverity === "structural" || condition.rust?.rustSeverity === "severe") warnings.push("Severe rust evidence materially increases risk and reconditioning cost.");
+  if (condition.title?.salvageTitle || condition.title?.nonRepairable || condition.title?.partsOnly) warnings.push("Title or auction status indicates high-risk non-clean market context.");
+  if (condition.title?.floodDamage || condition.title?.fireDamage) warnings.push("Flood or fire indicators require high caution and should not be mixed with clean retail comparables.");
+  if (diagnostics.highestCodeSeverity === "critical" || diagnostics.highestCodeSeverity === "high") warnings.push("High-severity diagnostic evidence materially increases risk.");
+  return warnings;
+}
+
+function conditionRepairCost(condition?: ConditionFeatures, diagnostics?: DiagnosticFeatures) {
+  let cost = 0;
+  if (condition?.rust?.rustSeverity === "light") cost += 600;
+  if (condition?.rust?.rustSeverity === "moderate") cost += 1600;
+  if (condition?.rust?.rustSeverity === "severe") cost += 3200;
+  if (condition?.rust?.rustSeverity === "structural") cost += 6000;
+  if (condition?.cosmetic?.cosmeticDamageSeverity === "moderate") cost += 900;
+  if (condition?.cosmetic?.cosmeticDamageSeverity === "severe") cost += 2200;
+  if (condition?.mechanical?.engineIssue) cost += 2800;
+  if (condition?.mechanical?.transmissionIssue) cost += 3200;
+  if (condition?.mechanical?.hybridBatteryIssue) cost += 4500;
+  if (condition?.mechanical?.brakeIssue) cost += 700;
+  if (condition?.mechanical?.suspensionIssue) cost += 1100;
+  cost += diagnostics?.estimatedRepairCostFromCodes ?? averageCodeRepairCost(diagnostics);
+  return cost;
+}
+
+function conditionRiskImpact(condition?: ConditionFeatures, diagnostics?: DiagnosticFeatures) {
+  let risk = 0;
+  if (condition?.rust?.rustSeverity === "moderate") risk += 10;
+  if (condition?.rust?.rustSeverity === "severe") risk += 22;
+  if (condition?.rust?.rustSeverity === "structural") risk += 34;
+  if (condition?.cosmetic?.cosmeticDamageSeverity === "severe") risk += 8;
+  if (condition?.mechanical?.engineIssue) risk += 18;
+  if (condition?.mechanical?.transmissionIssue) risk += 22;
+  if (condition?.mechanical?.hybridBatteryIssue) risk += 28;
+  if (condition?.title?.salvageTitle) risk += 26;
+  if (condition?.title?.rebuiltTitle) risk += 16;
+  if (condition?.title?.partsOnly || condition?.title?.nonRepairable) risk += 36;
+  if (condition?.title?.floodDamage || condition?.title?.fireDamage) risk += 24;
+  if (diagnostics?.highestCodeSeverity === "medium") risk += 8;
+  if (diagnostics?.highestCodeSeverity === "high") risk += 18;
+  if (diagnostics?.highestCodeSeverity === "critical") risk += 32;
+  for (const code of diagnostics?.obdCodes ?? []) {
+    risk += code.riskImpact ?? (HIGH_RISK_CODES.has(code.code.toUpperCase()) ? 18 : CRITICAL_CODE_PREFIXES.some((prefix) => code.code.toUpperCase().startsWith(prefix)) ? 26 : 0);
+  }
+  return risk;
+}
+
+function conditionConfidencePenalty(condition?: ConditionFeatures, images?: ImageFeatures, diagnostics?: DiagnosticFeatures) {
+  let penalty = 0;
+  if (!condition?.rust?.rustSeverity) penalty += 4;
+  if (!condition?.mechanical?.mechanicalIssueSeverity && !diagnostics?.diagnosticCodesAvailable) penalty += 6;
+  if (!images?.imageCount) penalty += 6;
+  if (images?.mileageMismatchWarning) penalty += 14;
+  if (condition?.title?.salvageTitle || condition?.title?.nonRepairable || condition?.title?.partsOnly) penalty += 5;
+  return penalty;
+}
+
+function rustLocationsFromText(text: string) {
+  return ["rocker panels", "wheel arches", "underbody", "doors", "hood", "trunk", "frame", "suspension mounts", "floor", "roof"].filter((location) => text.includes(location));
+}
+
+function averageCodeRepairCost(diagnostics?: DiagnosticFeatures) {
+  return (diagnostics?.obdCodes ?? []).reduce((sum, code) => {
+    if (code.estimatedRepairCostHigh || code.estimatedRepairCostLow) {
+      return sum + ((code.estimatedRepairCostLow ?? code.estimatedRepairCostHigh ?? 0) + (code.estimatedRepairCostHigh ?? code.estimatedRepairCostLow ?? 0)) / 2;
+    }
+    return sum;
+  }, 0);
+}
+
+function highestSeverity(values: Array<"low" | "medium" | "high" | "critical">) {
+  if (values.includes("critical")) return "critical";
+  if (values.includes("high")) return "high";
+  if (values.includes("medium")) return "medium";
+  if (values.includes("low")) return "low";
+  return undefined;
 }

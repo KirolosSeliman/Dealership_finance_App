@@ -13,6 +13,103 @@ export type MarketTrend = "rising" | "stable" | "softening" | "unknown";
 export type EstimatorType = "comparable_estimator" | "catboost" | "fallback_estimator";
 
 export type MarketSourceType = "retail" | "wholesale" | "auction" | "salvage" | "import" | "extension";
+export type ConditionSeverity = "none" | "light" | "moderate" | "severe" | "unknown";
+export type RustSeverity = ConditionSeverity | "structural";
+export type DiagnosticSeverity = "low" | "medium" | "high" | "critical";
+export type PhotoAnalysisStatus = "not_started" | "pending" | "processed" | "failed" | "unknown";
+
+export interface RustFeatures {
+  rustDetected?: boolean;
+  rustSeverity?: RustSeverity;
+  rustLocations?: string[];
+  rustConfidenceScore?: number;
+}
+
+export interface CosmeticDamageFeatures {
+  cosmeticDamageDetected?: boolean;
+  cosmeticDamageSeverity?: ConditionSeverity;
+  damageTypes?: string[];
+}
+
+export interface MechanicalFeatures {
+  mechanicalIssueDetected?: boolean;
+  mechanicalIssueSeverity?: ConditionSeverity;
+  engineIssue?: boolean;
+  transmissionIssue?: boolean;
+  brakeIssue?: boolean;
+  suspensionIssue?: boolean;
+  steeringIssue?: boolean;
+  electricalIssue?: boolean;
+  coolingSystemIssue?: boolean;
+  exhaustIssue?: boolean;
+  batteryIssue?: boolean;
+  hybridBatteryIssue?: boolean;
+}
+
+export interface DiagnosticCodeFeature {
+  code: string;
+  systemCategory?: string;
+  description?: string;
+  severity?: DiagnosticSeverity;
+  possibleCauses?: string[];
+  estimatedRepairCostLow?: number;
+  estimatedRepairCostHigh?: number;
+  valuationImpact?: number;
+  riskImpact?: number;
+}
+
+export interface DiagnosticFeatures {
+  diagnosticCodesAvailable?: boolean;
+  obdCodes?: DiagnosticCodeFeature[];
+  codeCount?: number;
+  codeSeverityScore?: number;
+  highestCodeSeverity?: DiagnosticSeverity;
+  estimatedRepairCostFromCodes?: number;
+}
+
+export interface TitleStatusFeatures {
+  cleanTitle?: boolean;
+  rebuiltTitle?: boolean;
+  salvageTitle?: boolean;
+  partsOnly?: boolean;
+  nonRepairable?: boolean;
+  theftRecovery?: boolean;
+  floodDamage?: boolean;
+  fireDamage?: boolean;
+  hailDamage?: boolean;
+}
+
+export interface ImageFeatures {
+  imageCount?: number;
+  photoQualityScore?: number;
+  missingAngleScore?: number;
+  hasFrontPhoto?: boolean;
+  hasRearPhoto?: boolean;
+  hasLeftSidePhoto?: boolean;
+  hasRightSidePhoto?: boolean;
+  hasInteriorPhoto?: boolean;
+  hasDashboardPhoto?: boolean;
+  hasOdometerPhoto?: boolean;
+  hasEngineBayPhoto?: boolean;
+  hasUnderbodyPhoto?: boolean;
+  visualConditionScore?: number;
+  rustVisibleScore?: number;
+  damageVisibleScore?: number;
+  odometerDetected?: boolean;
+  odometerPhotoDetected?: boolean;
+  odometerReadingExtracted?: number;
+  mileageConsistencyScore?: number;
+  mileageMismatchWarning?: boolean;
+  imageProcessedAt?: string;
+  photoAnalysisStatus?: PhotoAnalysisStatus;
+}
+
+export interface ConditionFeatures {
+  rust?: RustFeatures;
+  cosmetic?: CosmeticDamageFeatures;
+  mechanical?: MechanicalFeatures;
+  title?: TitleStatusFeatures;
+}
 
 export interface MarketSource {
   id: string;
@@ -46,6 +143,9 @@ export interface MarketListingInput {
   titleStatus?: string;
   conditionReportText?: string;
   imageCount?: number;
+  conditionFeatures?: ConditionFeatures;
+  imageFeatures?: ImageFeatures;
+  diagnosticFeatures?: DiagnosticFeatures;
   capturedAt?: string;
   marketType?: MarketType;
 }
@@ -81,6 +181,9 @@ export interface ComparableListing {
   capturedAt?: string;
   dataQualityScore?: number;
   sourceReliabilityScore?: number;
+  conditionFeatures?: ConditionFeatures;
+  imageFeatures?: ImageFeatures;
+  diagnosticFeatures?: DiagnosticFeatures;
 }
 
 export interface ValuationInput {
@@ -121,6 +224,9 @@ export interface VehicleValuation {
   estimatedTransportCost: number;
   estimatedAuctionFees: number;
   estimatedInspectionCost: number;
+  conditionFeatures?: ConditionFeatures;
+  imageFeatures?: ImageFeatures;
+  diagnosticFeatures?: DiagnosticFeatures;
   comparableCount: number;
   dataFreshnessDays: number;
   confidenceScore: number;
@@ -132,7 +238,9 @@ export interface VehicleValuation {
   explanation: string;
   warnings: string[];
   missingData: string[];
+  valuationExplanation?: Record<string, unknown>;
   modelVersion: string;
+  modelVersionId?: string;
   estimatorType: EstimatorType;
   valuationDate: string;
 }

@@ -3,6 +3,7 @@ from typing import Any
 
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
+from train_candidate import build_candidate_report
 from scrapling_connector import ExtractionPolicy, extract_visible_vehicle_fields, fallback_strategies
 
 app = FastAPI(title="Dealer Flow Market Snap ML Service", version="0.1.0")
@@ -48,11 +49,12 @@ def predict(request: PredictionRequest):
 
 @app.post("/train-candidate")
 def train_candidate(request: TrainCandidateRequest):
+    report = build_candidate_report(request.rows)
     return {
         "status": "queued",
         "model": "CatBoostRegressor",
         "market_type": request.market_type,
-        "row_count": len(request.rows),
+        **report,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "promotion": "manual_admin_promotion_required",
     }
@@ -65,6 +67,8 @@ def model_status():
         "candidate_model": None,
         "fallback": "comparable_estimator",
         "catboost_enabled": False,
+        "feature_schema": "market-snap-catboost-v1",
+        "market_types_are_separate_targets": True,
     }
 
 
@@ -116,4 +120,13 @@ def metrics():
         "mape": None,
         "median_absolute_error": None,
         "segments": {},
+        "required_segments": [
+            "make_model_year",
+            "mileage_bucket",
+            "price_range",
+            "market_type",
+            "source",
+            "title_status",
+            "sold_vehicle_outcomes",
+        ],
     }

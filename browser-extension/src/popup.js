@@ -1,8 +1,11 @@
 const statusEl = document.getElementById("status");
 const resultEl = document.getElementById("result");
 const saveButton = document.getElementById("save");
+const settingsButton = document.getElementById("settings");
 let lastListing;
 let lastValuation;
+
+settingsButton.addEventListener("click", () => chrome.runtime.openOptionsPage());
 
 document.getElementById("analyze").addEventListener("click", async () => {
   try {
@@ -14,7 +17,7 @@ document.getElementById("analyze").addEventListener("click", async () => {
     const settings = await chrome.storage.sync.get(["dealerFlowBaseUrl", "organizationId"]);
     if (!settings.dealerFlowBaseUrl || !settings.organizationId) {
       renderResult({ recommendationBadge: "Negotiate", dealScore: 0, profitScore: 0, riskScore: 0, confidenceScore: 0, explanation: "Set dealerFlowBaseUrl and organizationId in extension storage before calling Dealer Flow." });
-      statusEl.textContent = "Listing extracted locally. API settings are not configured.";
+      statusEl.textContent = "Listing extracted locally. Open Settings to connect Dealer Flow.";
       return;
     }
     const apiResponse = await fetch(`${settings.dealerFlowBaseUrl}/api/market-snap/analyze-listing`, {
@@ -37,6 +40,7 @@ saveButton.addEventListener("click", async () => {
   try {
     if (!lastListing) throw new Error("Analyze a listing first.");
     const settings = await chrome.storage.sync.get(["dealerFlowBaseUrl", "organizationId"]);
+    if (!settings.dealerFlowBaseUrl || !settings.organizationId) throw new Error("Open Settings and connect Dealer Flow first.");
     const response = await fetch(`${settings.dealerFlowBaseUrl}/api/market-snap/save-listing`, {
       method: "POST",
       headers: { "content-type": "application/json" },

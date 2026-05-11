@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { runComparableEstimator } from "@/lib/market-snap/engine";
+import { normalizeListing, runComparableEstimator } from "@/lib/market-snap/engine";
 import type { MarketListingInput, VehicleValuation } from "@/types/market-snap";
 import type { Vehicle } from "@/types/domain";
 
@@ -10,7 +10,7 @@ export async function fetchMarketComparables(client: Client, organizationId: str
   const model = "model" in vehicle ? vehicle.model : undefined;
   let query = client
     .from("market_listings")
-    .select("id, source_name, source_type, market_type, title, year, make, model, trim, mileage_km, listed_price, location, province, title_status, captured_at, data_quality_score, source_reliability_score")
+    .select("id, source_name, source_type, market_type, title, year, make, model, trim, mileage_km, listed_price, location, province, title_status, condition_features, image_features, diagnostic_features, captured_at, data_quality_score, source_reliability_score")
     .or(`organization_id.eq.${organizationId},organization_id.is.null`)
     .not("listed_price", "is", null)
     .order("captured_at", { ascending: false })
@@ -34,6 +34,9 @@ export async function fetchMarketComparables(client: Client, organizationId: str
     location: stringOrUndefined(row.location),
     province: stringOrUndefined(row.province),
     titleStatus: stringOrUndefined(row.title_status),
+    conditionFeatures: objectOrUndefined(row.condition_features) as never,
+    imageFeatures: objectOrUndefined(row.image_features) as never,
+    diagnosticFeatures: objectOrUndefined(row.diagnostic_features) as never,
     capturedAt: stringOrUndefined(row.captured_at),
     dataQualityScore: numberOrUndefined(row.data_quality_score),
     sourceReliabilityScore: numberOrUndefined(row.source_reliability_score),
@@ -56,6 +59,9 @@ export async function saveMarketListing(client: Client, input: MarketListingInpu
       listed_price: input.listedPrice ?? input.auctionHammerPrice ?? null,
       market_type: valuation?.marketType ?? input.marketType ?? "clean_retail_market",
       normalized_payload: input,
+      condition_features: input.conditionFeatures ?? {},
+      image_features: input.imageFeatures ?? { imageCount: input.imageCount, photoAnalysisStatus: input.imageCount ? "not_started" : "unknown" },
+      diagnostic_features: input.diagnosticFeatures ?? {},
       valuation_snapshot: valuation ?? null,
       recommendation_badge: valuation?.recommendationBadge ?? "Negotiate",
       deal_score: valuation?.dealScore ?? 0,
@@ -95,6 +101,10 @@ export async function saveVehicleValuation(client: Client, valuation: VehicleVal
       estimated_transport_cost: valuation.estimatedTransportCost,
       estimated_auction_fees: valuation.estimatedAuctionFees,
       estimated_inspection_cost: valuation.estimatedInspectionCost,
+      condition_features: valuation.conditionFeatures ?? {},
+      image_features: valuation.imageFeatures ?? {},
+      diagnostic_features: valuation.diagnosticFeatures ?? {},
+      valuation_explanation: valuation.valuationExplanation ?? {},
       comparable_count: valuation.comparableCount,
       data_freshness_days: valuation.dataFreshnessDays,
       confidence_score: valuation.confidenceScore,
@@ -107,6 +117,7 @@ export async function saveVehicleValuation(client: Client, valuation: VehicleVal
       warnings: valuation.warnings,
       missing_data: valuation.missingData,
       model_version: valuation.modelVersion,
+      model_version_id: valuation.modelVersionId ?? null,
       estimator_type: valuation.estimatorType,
       valuation_date: valuation.valuationDate,
     })
@@ -114,6 +125,56 @@ export async function saveVehicleValuation(client: Client, valuation: VehicleVal
     .single();
   if (error) throw error;
   return String(data.id);
+}
+
+export async function insertMarketListings(client: Client, rows: MarketListingInput[]) {
+  if (rows.length === 0) return { inserted: 0 };
+  const records = rows.map((row) => {
+    const normalized = normalizeListing(row);
+    const expiresAt = new Date(Date.now() + 180 * 86_400_000).toISOString();
+    return {
+      organization_id: normalized.organizationId,
+      source_name: normalized.sourceName,
+      source_type: normalized.sourceType ?? "import",
+      listing_url: normalized.listingUrl || null,
+      title: normalized.title || normalized.normalizedTitle,
+      description: normalized.description || null,
+      condition_report_text: normalized.conditionReportText || null,
+      year: normalized.year ?? null,
+      make: normalized.make || null,
+      model: normalized.model || null,
+      trim: normalized.trim || null,
+      mileage_km: normalized.mileageKm ?? null,
+      listed_price: normalized.listedPrice ?? normalized.auctionHammerPrice ?? null,
+      auction_hammer_price: normalized.auctionHammerPrice ?? null,
+      location: normalized.location || null,
+      province: normalized.province || null,
+      seller_type: normalized.sellerType || null,
+      title_status: normalized.titleStatus,
+      market_type: normalized.marketType,
+      data_quality_score: normalized.dataQualityScore,
+      source_reliability_score: normalized.sourceReliabilityScore,
+      time_decay_weight: normalized.timeDecayWeight,
+      sample_weight: normalized.sampleWeight,
+      normalized_payload: normalized,
+      sanitized_raw_payload: {
+        title: normalized.title,
+        description: normalized.description,
+        price: normalized.listedPrice ?? normalized.auctionHammerPrice,
+        mileageKm: normalized.mileageKm,
+        location: normalized.location,
+      },
+      condition_features: normalized.conditionFeatures ?? {},
+      image_features: normalized.imageFeatures ?? {},
+      diagnostic_features: normalized.diagnosticFeatures ?? {},
+      expires_at: expiresAt,
+      retention_policy: "unsaved_market_listing",
+      captured_at: normalized.capturedAt ?? new Date().toISOString(),
+    };
+  });
+  const { error } = await client.from("market_listings").insert(records);
+  if (error) throw error;
+  return { inserted: records.length };
 }
 
 export async function runVehicleValuation(client: Client, organizationId: string, vehicle: Vehicle, expenses = []) {
@@ -130,4 +191,9 @@ function numberOrUndefined(value: unknown) {
   if (value === null || value === undefined || value === "") return undefined;
   const number = Number(value);
   return Number.isFinite(number) ? number : undefined;
+}
+
+function objectOrUndefined(value: unknown) {
+  if (!value || typeof value !== "object") return undefined;
+  return value;
 }

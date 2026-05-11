@@ -89,6 +89,7 @@ type VehicleTab = "overview" | "details" | "expenses" | "documents" | "sale" | "
 type CashAccount = "company" | "external";
 type CashTransaction = CompanyCashTransaction | ExternalCashTransaction;
 type Permissions = ReturnType<typeof getPermissions>;
+type VehiclePrefill = Partial<Pick<Vehicle, "year" | "make" | "model" | "trim" | "mileage" | "purchasePrice" | "purchaseSource" | "notes">>;
 
 const languageKey = "dealer-flow-language";
 
@@ -172,6 +173,7 @@ export function DealerFlowApp() {
   const [statusFilter, setStatusFilter] = useState<VehicleStatus | "all">("all");
   const [dateRange, setDateRange] = useState({ start: "2026-01-01", end: "2026-12-31" });
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [vehiclePrefill, setVehiclePrefill] = useState<VehiclePrefill | undefined>();
   const t = getDictionary(language);
   const supabase = useMemo(() => createSupabaseBrowserClient(), []);
 
@@ -454,6 +456,7 @@ export function DealerFlowApp() {
     try {
       const response = await serverMutation("createVehicle", cloneFormData(formData, { organizationId: activeOrganization.id }));
       const id = String(response.id ?? "");
+      setVehiclePrefill(undefined);
       await refreshData(activeOrganization.id);
       setSelectedVehicleId(id);
       setSelectedVehicleTab("overview");
@@ -960,6 +963,7 @@ export function DealerFlowApp() {
               setMainPhoto={setVehicleMainPhoto}
               permissions={permissions}
               loading={loading}
+              vehiclePrefill={vehiclePrefill}
             />
           )}
           {view === "marketSnap" && (
@@ -978,6 +982,7 @@ export function DealerFlowApp() {
               organizationId={activeOrganization.id}
               navigate={navigate}
               permissions={permissions}
+              onVehiclePrefill={setVehiclePrefill}
             />
           )}
           {view === "marketData" && (
@@ -1368,6 +1373,7 @@ function VehiclesSection(props: {
   setMainPhoto: (attachment: Attachment) => void;
   permissions: Permissions;
   loading: boolean;
+  vehiclePrefill?: VehiclePrefill;
 }) {
   if (props.mode === "new") {
     return (
@@ -1376,7 +1382,7 @@ function VehiclesSection(props: {
           <ChevronLeft size={18} />
           {props.t.nav.inventory}
         </button>
-        {props.permissions.manageVehicles ? <AddVehicle t={props.t} onSubmit={props.addVehicle} /> : <EmptyState title="Read-only access" copy="Your role cannot add vehicles." />}
+        {props.permissions.manageVehicles ? <AddVehicle t={props.t} onSubmit={props.addVehicle} prefill={props.vehiclePrefill} /> : <EmptyState title="Read-only access" copy="Your role cannot add vehicles." />}
       </div>
     );
   }
@@ -1731,7 +1737,7 @@ function PhotoManager({
   );
 }
 
-function AddVehicle({ t, onSubmit }: { t: ReturnType<typeof getDictionary>; onSubmit: (formData: FormData) => void }) {
+function AddVehicle({ t, onSubmit, prefill }: { t: ReturnType<typeof getDictionary>; onSubmit: (formData: FormData) => void; prefill?: VehiclePrefill }) {
   const [decoded, setDecoded] = useState<Partial<Vehicle>>({});
   const [vin, setVin] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1748,18 +1754,19 @@ function AddVehicle({ t, onSubmit }: { t: ReturnType<typeof getDictionary>; onSu
     <form className="panel grid gap-4 lg:grid-cols-2" action={onSubmit}>
       <Field label={t.fields.vin}><input className="control w-full" name="vin" value={vin} onChange={(event) => setVin(event.target.value)} /></Field>
       <div className="flex items-end"><button className="secondary-button" type="button" onClick={decode} disabled={loading}>{t.actions.decodeVin}</button></div>
-      <Field label={t.fields.year}><input className="control w-full" name="year" defaultValue={decoded.year} /></Field>
-      <Field label={t.fields.make}><input className="control w-full" name="make" defaultValue={decoded.make} /></Field>
-      <Field label={t.fields.model}><input className="control w-full" name="model" defaultValue={decoded.model} /></Field>
-      <Field label={t.fields.trim}><input className="control w-full" name="trim" defaultValue={decoded.trim} /></Field>
+      {prefill && <div className="lg:col-span-2 rounded-md border border-cyan-300/20 bg-cyan-300/8 p-3 text-sm text-cyan-100">Deal Radar prefill loaded. Review every field before saving inventory.</div>}
+      <Field label={t.fields.year}><input className="control w-full" name="year" defaultValue={decoded.year ?? prefill?.year} /></Field>
+      <Field label={t.fields.make}><input className="control w-full" name="make" defaultValue={decoded.make ?? prefill?.make} /></Field>
+      <Field label={t.fields.model}><input className="control w-full" name="model" defaultValue={decoded.model ?? prefill?.model} /></Field>
+      <Field label={t.fields.trim}><input className="control w-full" name="trim" defaultValue={decoded.trim ?? prefill?.trim} /></Field>
       <Field label={t.fields.color}><input className="control w-full" name="color" defaultValue={decoded.color} /></Field>
-      <Field label={t.fields.mileage}><input className="control w-full" name="mileage" type="number" /></Field>
-      <Field label={t.fields.purchasePrice}><input className="control w-full" name="purchasePrice" type="number" step="0.01" required /></Field>
+      <Field label={t.fields.mileage}><input className="control w-full" name="mileage" type="number" defaultValue={prefill?.mileage} /></Field>
+      <Field label={t.fields.purchasePrice}><input className="control w-full" name="purchasePrice" type="number" step="0.01" defaultValue={prefill?.purchasePrice} required /></Field>
       <Field label={t.fields.purchaseDate}><input className="control w-full" name="purchaseDate" type="date" defaultValue={today()} required /></Field>
-      <Field label={t.fields.purchaseSource}><select className="control w-full" name="purchaseSource">{PURCHASE_SOURCES.map((source) => <option key={source} value={source}>{formatLabel(source)}</option>)}</select></Field>
+      <Field label={t.fields.purchaseSource}><select className="control w-full" name="purchaseSource" defaultValue={prefill?.purchaseSource}>{PURCHASE_SOURCES.map((source) => <option key={source} value={source}>{formatLabel(source)}</option>)}</select></Field>
       <Field label={t.fields.status}><select className="control w-full" name="status" defaultValue="purchased">{VEHICLE_STATUSES.map((status) => <option key={status} value={status}>{t.status[status]}</option>)}</select></Field>
       <Field label={t.fields.listedPrice}><input className="control w-full" name="listedPrice" type="number" step="0.01" /></Field>
-      <Field label={t.fields.notes}><textarea className="control min-h-24 w-full" name="notes" /></Field>
+      <Field label={t.fields.notes}><textarea className="control min-h-24 w-full" name="notes" defaultValue={prefill?.notes} /></Field>
       <div className="lg:col-span-2"><button className="primary-button" type="submit">{t.actions.saveVehicle}</button></div>
     </form>
   );
@@ -2625,14 +2632,17 @@ function DealRadarPage({
   organizationId,
   navigate,
   permissions,
+  onVehiclePrefill,
 }: {
   t: ReturnType<typeof getDictionary>;
   organizationId: string;
   navigate: (view: View, options?: { mode?: VehicleMode; vehicleId?: string; tab?: VehicleTab }) => void;
   permissions: Permissions;
+  onVehiclePrefill: (prefill: VehiclePrefill) => void;
 }) {
   const [mode, setMode] = useState<"cards" | "table">("table");
   const [items, setItems] = useState<Array<Record<string, unknown>>>([]);
+  const [selectedItem, setSelectedItem] = useState<Record<string, unknown> | null>(null);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
@@ -2649,6 +2659,38 @@ function DealRadarPage({
       cancelled = true;
     };
   }, [organizationId]);
+
+  async function removeListing(id: string) {
+    setMessage("");
+    const response = await fetch(`/api/market-snap/deal-radar/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ organizationId }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok) {
+      setMessage(String(payload.message ?? "Could not remove listing."));
+      return;
+    }
+    setItems((current) => current.filter((item) => String(item.id) !== id));
+    if (String(selectedItem?.id ?? "") === id) setSelectedItem(null);
+  }
+
+  async function convertListing(id: string) {
+    setMessage("");
+    const response = await fetch(`/api/market-snap/deal-radar/${encodeURIComponent(id)}/convert-to-inventory`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ organizationId }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok) {
+      setMessage(String(payload.message ?? "Could not prepare inventory prefill."));
+      return;
+    }
+    onVehiclePrefill((payload.prefill ?? {}) as VehiclePrefill);
+    navigate("vehicles", { mode: "new" });
+  }
 
   return (
     <div className="space-y-4">
@@ -2667,11 +2709,23 @@ function DealRadarPage({
         <EmptyState title={t.marketSnap.noSavedListings} copy={t.marketSnap.noSavedListingsCopy} />
       ) : mode === "cards" ? (
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {items.map((item) => <DealRadarCard key={String(item.id)} t={t} item={item} canManage={permissions.manageVehicles} navigate={navigate} />)}
+          {items.map((item) => <DealRadarCard key={String(item.id)} t={t} item={item} canManage={permissions.manageVehicles} onView={() => setSelectedItem(item)} onRemove={() => removeListing(String(item.id))} onConvert={() => convertListing(String(item.id))} />)}
         </div>
       ) : (
         <Panel title={t.nav.dealRadar}>
-          <DealRadarTable t={t} items={items} canManage={permissions.manageVehicles} navigate={navigate} />
+          <DealRadarTable t={t} items={items} canManage={permissions.manageVehicles} onView={setSelectedItem} onRemove={(item) => removeListing(String(item.id))} onConvert={(item) => convertListing(String(item.id))} />
+        </Panel>
+      )}
+      {selectedItem && (
+        <Panel title={t.marketSnap.viewAnalysis}>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-lg font-semibold text-white">{dealRadarLabel(selectedItem)}</p>
+              <p className="mt-1 text-sm text-slate-400">{String(selectedItem.listing_url ?? selectedItem.source_name ?? "-")}</p>
+            </div>
+            <button className="secondary-button" onClick={() => setSelectedItem(null)}><X size={16} />Close</button>
+          </div>
+          <DealRadarAnalysis t={t} item={selectedItem} />
         </Panel>
       )}
     </div>
@@ -2680,14 +2734,24 @@ function DealRadarPage({
 
 function MarketDataAdminPage({ t, organizationId, permissions }: { t: ReturnType<typeof getDictionary>; organizationId: string; permissions: Permissions }) {
   const [metrics, setMetrics] = useState<Record<string, number>>({});
+  const [sources, setSources] = useState<Array<Record<string, unknown>>>([]);
+  const [jobs, setJobs] = useState<Array<Record<string, unknown>>>([]);
+  const [jsonImport, setJsonImport] = useState("");
   const [message, setMessage] = useState("");
   useEffect(() => {
     if (!permissions.manageBackups) return;
     let cancelled = false;
-    fetch(`/api/market-snap/admin/data-quality?organizationId=${encodeURIComponent(organizationId)}`)
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error("Market Data tables are waiting for the migration.")))
-      .then((payload: { metrics?: Record<string, number> }) => {
-        if (!cancelled) setMetrics(payload.metrics ?? {});
+    Promise.all([
+      fetch(`/api/market-snap/admin/data-quality?organizationId=${encodeURIComponent(organizationId)}`).then((response) => response.ok ? response.json() : Promise.reject(new Error("Market Data tables are waiting for the migration."))),
+      fetch(`/api/market-snap/admin/sources?organizationId=${encodeURIComponent(organizationId)}`).then((response) => response.ok ? response.json() : Promise.reject(new Error("Market sources are not available yet."))),
+      fetch(`/api/market-snap/admin/jobs?organizationId=${encodeURIComponent(organizationId)}`).then((response) => response.ok ? response.json() : Promise.reject(new Error("Market jobs are not available yet."))),
+    ])
+      .then(([quality, sourcePayload, jobPayload]: Array<{ metrics?: Record<string, number>; items?: Array<Record<string, unknown>> }>) => {
+        if (!cancelled) {
+          setMetrics(quality.metrics ?? {});
+          setSources(sourcePayload.items ?? []);
+          setJobs(jobPayload.items ?? []);
+        }
       })
       .catch((error: unknown) => {
         if (!cancelled) setMessage(error instanceof Error ? error.message : "Market Data is not available yet.");
@@ -2701,26 +2765,87 @@ function MarketDataAdminPage({ t, organizationId, permissions }: { t: ReturnType
     return <EmptyState title={t.marketSnap.adminOnly} copy={t.marketSnap.adminOnlyCopy} />;
   }
 
+  async function importJson() {
+    setMessage("");
+    let rows: unknown;
+    try {
+      rows = JSON.parse(jsonImport);
+    } catch {
+      setMessage("JSON import must be an array of listing objects.");
+      return;
+    }
+    const response = await fetch("/api/market-snap/admin/import-json", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ organizationId, sourceName: "Manual JSON Import", rows }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    setMessage(response.ok && payload.ok ? `Imported ${payload.imported ?? 0} listings.` : String(payload.message ?? "Import failed."));
+  }
+
+  async function trainCandidate() {
+    setMessage("");
+    const response = await fetch("/api/market-snap/admin/train-candidate-model", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ organizationId }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    setMessage(response.ok && payload.ok ? `Candidate training queued: ${payload.trainingRunId ?? "pending"}` : String(payload.message ?? "Could not queue training."));
+  }
+
   return (
     <div className="space-y-4">
       {message && <div className="message-banner border border-amber-300/20 bg-amber-300/10 text-amber-100">{message}</div>}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard label={t.marketSnap.totalListings} value={String(metrics.totalListings ?? 0)} icon={<DatabaseIcon />} />
+        <MetricCard label={t.marketSnap.validListings} value={String(metrics.validListings ?? 0)} icon={<ShieldCheck size={18} />} />
+        <MetricCard label={t.marketSnap.invalidListings} value={String(metrics.invalidListings ?? 0)} icon={<Archive size={18} />} />
+        <MetricCard label={t.marketSnap.duplicateListings} value={String(metrics.duplicateListings ?? 0)} icon={<Search size={18} />} />
         <MetricCard label={t.marketSnap.missingMileage} value={String(metrics.missingMileageCount ?? 0)} icon={<Search size={18} />} />
         <MetricCard label={t.marketSnap.missingPrice} value={String(metrics.missingPriceCount ?? 0)} icon={<Receipt size={18} />} />
+        <MetricCard label={t.marketSnap.usablePhotoFeatures} value={String(metrics.usablePhotoFeatureCount ?? 0)} icon={<Car size={18} />} />
+        <MetricCard label={t.marketSnap.averageFreshness} value={String(metrics.averageDataFreshness ?? 0)} icon={<Activity size={18} />} />
         <MetricCard label={t.marketSnap.averageDataQuality} value={String(metrics.averageDataQuality ?? 0)} icon={<Activity size={18} />} />
       </div>
       <div className="grid gap-4 xl:grid-cols-2">
-        <Panel title={t.marketSnap.sources}><p className="text-sm text-slate-400">{t.marketSnap.sourcesCopy}</p></Panel>
-        <Panel title={t.marketSnap.jobs}><p className="text-sm text-slate-400">{t.marketSnap.jobsCopy}</p></Panel>
+        <Panel title={t.marketSnap.sources}>
+          <p className="text-sm text-slate-400">{t.marketSnap.sourcesCopy}</p>
+          <Ledger emptyTitle={t.marketSnap.noSources} emptyCopy={t.marketSnap.noSourcesCopy} rows={sources.map((source) => [
+            String(source.name ?? source.source_name ?? "-"),
+            String(source.source_type ?? "-"),
+            String(source.status ?? "-"),
+            String(source.last_sync_at ?? "-"),
+          ])} />
+        </Panel>
+        <Panel title={t.marketSnap.jobs}>
+          <div className="mb-3 flex flex-wrap gap-2">
+            <button className="secondary-button" type="button" onClick={trainCandidate}>{t.marketSnap.trainCandidate}</button>
+          </div>
+          <Ledger emptyTitle={t.marketSnap.noJobs} emptyCopy={t.marketSnap.jobsCopy} rows={jobs.map((job) => [
+            String(job.job_type ?? "-"),
+            String(job.status ?? "-"),
+            String(job.failed_records ?? 0),
+            String(job.created_at ?? "-"),
+          ])} />
+        </Panel>
         <Panel title={t.marketSnap.retention}><p className="text-sm text-slate-400">{t.marketSnap.retentionSummary}</p></Panel>
-        <Panel title={t.marketSnap.imports}><p className="text-sm text-slate-400">{t.marketSnap.importsCopy}</p></Panel>
+        <Panel title={t.marketSnap.imports}>
+          <p className="text-sm text-slate-400">{t.marketSnap.importsCopy}</p>
+          <textarea
+            className="control mt-3 min-h-32 w-full"
+            value={jsonImport}
+            onChange={(event) => setJsonImport(event.target.value)}
+            placeholder='[{"sourceName":"Manual Import","year":2020,"make":"Toyota","model":"Corolla","listedPrice":18000}]'
+          />
+          <button className="primary-button mt-3" type="button" onClick={importJson}>{t.marketSnap.importJson}</button>
+        </Panel>
       </div>
     </div>
   );
 }
 
-function DealRadarTable({ t, items, canManage, navigate }: { t: ReturnType<typeof getDictionary>; items: Array<Record<string, unknown>>; canManage: boolean; navigate: (view: View, options?: { mode?: VehicleMode; vehicleId?: string; tab?: VehicleTab }) => void }) {
+function DealRadarTable({ t, items, canManage, onView, onRemove, onConvert }: { t: ReturnType<typeof getDictionary>; items: Array<Record<string, unknown>>; canManage: boolean; onView: (item: Record<string, unknown>) => void; onRemove: (item: Record<string, unknown>) => void; onConvert: (item: Record<string, unknown>) => void }) {
   return (
     <div className="overflow-x-auto">
       <table className="data-table">
@@ -2740,7 +2865,13 @@ function DealRadarTable({ t, items, canManage, navigate }: { t: ReturnType<typeo
               <td>{money(Number(item.potential_profit ?? 0))}</td>
               <td>{String(item.confidence_score ?? 0)}</td>
               <td><RecommendationBadgeView badge={String(item.recommendation_badge ?? "Negotiate")} /></td>
-              <td>{canManage ? <button className="secondary-button" onClick={() => navigate("vehicles", { mode: "new" })}>{t.marketSnap.convertToInventory}</button> : "-"}</td>
+              <td>
+                <div className="flex flex-wrap gap-2">
+                  <button className="secondary-button" type="button" onClick={() => onView(item)}>{t.marketSnap.viewAnalysis}</button>
+                  {canManage && <button className="secondary-button" type="button" onClick={() => onConvert(item)}>{t.marketSnap.convertToInventory}</button>}
+                  {canManage && <button className="danger-button" type="button" onClick={() => onRemove(item)}>{t.marketSnap.remove}</button>}
+                </div>
+              </td>
             </tr>
           ))}
         </tbody>
@@ -2749,7 +2880,7 @@ function DealRadarTable({ t, items, canManage, navigate }: { t: ReturnType<typeo
   );
 }
 
-function DealRadarCard({ t, item, canManage, navigate }: { t: ReturnType<typeof getDictionary>; item: Record<string, unknown>; canManage: boolean; navigate: (view: View, options?: { mode?: VehicleMode; vehicleId?: string; tab?: VehicleTab }) => void }) {
+function DealRadarCard({ t, item, canManage, onView, onRemove, onConvert }: { t: ReturnType<typeof getDictionary>; item: Record<string, unknown>; canManage: boolean; onView: () => void; onRemove: () => void; onConvert: () => void }) {
   return (
     <div className="vehicle-card">
       <div className="flex items-start justify-between gap-3">
@@ -2765,7 +2896,37 @@ function DealRadarCard({ t, item, canManage, navigate }: { t: ReturnType<typeof 
         [t.marketSnap.dealScore, String(item.deal_score ?? 0)],
         [t.marketSnap.riskScore, String(item.risk_score ?? 0)],
       ]} />
-      {canManage && <button className="secondary-button mt-4" onClick={() => navigate("vehicles", { mode: "new" })}>{t.marketSnap.convertToInventory}</button>}
+      <div className="mt-4 flex flex-wrap gap-2">
+        <button className="secondary-button" type="button" onClick={onView}>{t.marketSnap.viewAnalysis}</button>
+        {canManage && <button className="secondary-button" type="button" onClick={onConvert}>{t.marketSnap.convertToInventory}</button>}
+        {canManage && <button className="danger-button" type="button" onClick={onRemove}>{t.marketSnap.remove}</button>}
+      </div>
+    </div>
+  );
+}
+
+function DealRadarAnalysis({ t, item }: { t: ReturnType<typeof getDictionary>; item: Record<string, unknown> }) {
+  const valuation = (item.valuation_snapshot as Record<string, unknown> | null) ?? {};
+  const warnings = Array.isArray(valuation.warnings) ? valuation.warnings : [];
+  const missing = Array.isArray(valuation.missingData) ? valuation.missingData : [];
+  return (
+    <div className="mt-4 grid gap-4 xl:grid-cols-2">
+      <InfoGrid rows={[
+        [t.marketSnap.retailValue, money(Number(valuation.estimatedRetailMarketValue ?? 0))],
+        [t.marketSnap.wholesaleBuyValue, money(Number(valuation.estimatedWholesaleBuyValue ?? 0))],
+        [t.marketSnap.wholesaleSellValue, money(Number(valuation.estimatedWholesaleSellValue ?? 0))],
+        [t.marketSnap.maxBid, money(Number(valuation.maxRecommendedBid ?? 0))],
+        [t.marketSnap.potentialProfit, money(Number(valuation.potentialNetProfit ?? item.potential_profit ?? 0))],
+        [t.marketSnap.confidence, String(valuation.confidenceScore ?? item.confidence_score ?? 0)],
+      ]} />
+      <div className="rounded-md border border-slate-800 bg-slate-950/35 p-4">
+        <p className="text-sm font-semibold text-white">{t.marketSnap.explanation}</p>
+        <p className="mt-2 text-sm text-slate-400">{String(valuation.explanation ?? "-")}</p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <Info label={t.marketSnap.warnings} value={warnings.length ? warnings.join("; ") : "-"} />
+          <Info label={t.marketSnap.missingData} value={missing.length ? missing.join(", ") : "-"} />
+        </div>
+      </div>
     </div>
   );
 }

@@ -20,6 +20,28 @@ dl {
   gap: 8px;
 }
 
+.header-actions {
+  display: flex;
+  gap: 6px;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+input {
+  min-height: 34px;
+  border: 1px solid rgba(100, 116, 139, 0.38);
+  border-radius: 7px;
+  background: #0f172a;
+  color: #f8fafc;
+  padding: 0 10px;
+}
+
 button {
   min-height: 36px;
   border: 1px solid rgba(103, 183, 199, 0.35);
@@ -30,7 +52,11 @@ button {
 }
 
 #save {
-  width: 36px;
+  background: rgba(15, 23, 42, 0.9);
+  color: #f8fafc;
+}
+
+#settings {
   background: rgba(15, 23, 42, 0.9);
   color: #f8fafc;
 }
@@ -43,7 +69,8 @@ button {
 }
 
 .empty,
-#status {
+#status,
+.muted {
   color: #94a3b8;
 }
 

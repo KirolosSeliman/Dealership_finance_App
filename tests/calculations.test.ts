@@ -12,8 +12,9 @@ import {
   calculateVehicleTotalCost,
 } from "../src/lib/domain/calculations";
 import { generateBackupExport, generateTaxReportExport, restoreBackupDryRun, verifyBackupExport } from "../src/lib/backup/export";
-import { calculateTimeDecayWeight, inferMarketType, normalizeListing, runComparableEstimator, shouldRefreshVehicle, shouldStoreValuationSnapshot } from "../src/lib/market-snap/engine";
-import { marketListingPayloadSchema } from "../src/lib/market-snap/validation";
+import { calculateTimeDecayWeight, extractConditionFeaturesFromText, inferMarketType, normalizeListing, runComparableEstimator, shouldRefreshVehicle, shouldStoreValuationSnapshot } from "../src/lib/market-snap/engine";
+import { processTemporaryListingImages } from "../src/lib/market-snap/image-features";
+import { importPayloadSchema, marketListingPayloadSchema } from "../src/lib/market-snap/validation";
 import { assertAllowedUpload, canExportTaxReports, canManageBackups, sanitizeCsvCell, sanitizeStorageFileName } from "../src/lib/security";
 import { assertSameOrigin, checkRateLimit, resetRateLimitForTests, RouteSecurityError } from "../src/lib/server/security";
 import { activityLogSchema, applyRecurringExpenseTemplateSchema, attachmentSchema, backupRequestSchema, expenseSchema, recurringExpenseTemplateSchema, regenerateInvitationSchema, taxExportSchema } from "../src/lib/validation";
@@ -151,6 +152,83 @@ test("Market Snap extension/API payload validation accepts visible listing data 
     sourceName: "",
     listingUrl: "javascript:alert(1)",
   }).success, false);
+});
+
+test("Market Snap import validation can use batch source name for rows", () => {
+  assert.equal(importPayloadSchema.safeParse({
+    organizationId: "63c47786-fb41-40c1-a573-71346969b9e0",
+    sourceName: "Manual JSON Import",
+    rows: [{ year: 2020, make: "Toyota", model: "Corolla", listedPrice: 18000 }],
+  }).success, true);
+});
+
+test("Market Snap condition intelligence keeps unknowns but raises risk for severe evidence", () => {
+  const clean = runComparableEstimator({
+    organizationId: "org-1",
+    listing: {
+      organizationId: "org-1",
+      sourceName: "AutoTrader/AutoHebdo",
+      sourceType: "retail",
+      year: 2020,
+      make: "Toyota",
+      model: "Corolla",
+      mileageKm: 80000,
+      listedPrice: 18000,
+      imageCount: 8,
+    },
+    comparables: [],
+  });
+  const highRisk = runComparableEstimator({
+    organizationId: "org-1",
+    listing: {
+      organizationId: "org-1",
+      sourceName: "Copart",
+      sourceType: "salvage",
+      title: "2020 Toyota Corolla salvage structural rust",
+      description: "P0700 transmission code, non-repairable, parts only, flood damage",
+      year: 2020,
+      make: "Toyota",
+      model: "Corolla",
+      mileageKm: 80000,
+      auctionHammerPrice: 4000,
+      diagnosticFeatures: {
+        diagnosticCodesAvailable: true,
+        obdCodes: [{ code: "P0700", severity: "high", description: "Transmission control system" }],
+      },
+    },
+    comparables: [],
+  });
+
+  assert.ok(clean.missingData.includes("diagnostic_codes_unknown"));
+  assert.ok(highRisk.riskScore > clean.riskScore);
+  assert.equal(highRisk.recommendationBadge, "High Risk");
+  assert.ok(highRisk.estimatedReconditioningCost > clean.estimatedReconditioningCost);
+});
+
+test("Market Snap extracts only explicit condition evidence from text", () => {
+  const features = extractConditionFeaturesFromText("frame rust, cracked bumper, SRS airbag warning, clean title");
+
+  assert.equal(features.rust?.rustDetected, true);
+  assert.equal(features.rust?.rustSeverity, "structural");
+  assert.equal(features.cosmetic?.cosmeticDamageDetected, true);
+  assert.equal(features.mechanical?.electricalIssue, true);
+  assert.equal(features.title?.cleanTitle, true);
+});
+
+test("Market Snap image pipeline stores features and releases temporary buffers", async () => {
+  let fetched = 0;
+  const features = await processTemporaryListingImages({
+    imageUrls: ["https://example.test/a.jpg", "https://example.test/b.jpg"],
+    fetchImage: async () => {
+      fetched += 1;
+      return new ArrayBuffer(8);
+    },
+  });
+
+  assert.equal(fetched, 2);
+  assert.equal(features.imageCount, 2);
+  assert.equal(features.photoAnalysisStatus, "processed");
+  assert.equal(Boolean(features.imageProcessedAt), true);
 });
 
 test("optional 15 percent tax works for regular expenses", () => {

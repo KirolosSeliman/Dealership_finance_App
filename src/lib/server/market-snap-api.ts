@@ -4,7 +4,7 @@ import { assertSameOrigin, checkRateLimit, requireOrganizationRole, routeErrorRe
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { mapExpense, mapVehicle } from "@/lib/supabase/mappers";
 import { runComparableEstimator, shouldRefreshVehicle } from "@/lib/market-snap/engine";
-import { fetchMarketComparables, saveMarketListing, saveVehicleValuation } from "@/lib/market-snap/repository";
+import { fetchMarketComparables, insertMarketListings, saveMarketListing, saveVehicleValuation } from "@/lib/market-snap/repository";
 import { dealRadarQuerySchema, importPayloadSchema, marketListingPayloadSchema, saveListingSchema, valuationRequestSchema } from "@/lib/market-snap/validation";
 import type { MarketListingInput } from "@/types/market-snap";
 import type { Vehicle, VehicleExpense } from "@/types/domain";
@@ -304,17 +304,35 @@ export async function dataQuality(request: Request) {
     if (userError || !userData.user) return NextResponse.json({ ok: false, message: "Authentication required." }, { status: 401 });
     const organizationId = new URL(request.url).searchParams.get("organizationId") ?? "";
     await requireOrganizationRole(client, userData.user.id, organizationId, ["owner", "admin"]);
-    const { data, error } = await client.from("market_listings").select("mileage_km, listed_price, trim, data_quality_score").or(`organization_id.eq.${organizationId},organization_id.is.null`).limit(1000);
+    const { data, error } = await client
+      .from("market_listings")
+      .select("listing_url, mileage_km, listed_price, trim, data_quality_score, captured_at, image_features")
+      .or(`organization_id.eq.${organizationId},organization_id.is.null`)
+      .limit(1000);
     if (error) throw error;
     const rows = data ?? [];
+    const uniqueKeys = new Set(rows.map((row) => String(row.listing_url ?? "")).filter(Boolean));
+    const imageUsable = rows.filter((row) => {
+      const features = row.image_features as Record<string, unknown> | null;
+      return Number(features?.imageCount ?? 0) > 0 || Number(features?.photoQualityScore ?? 0) > 0;
+    }).length;
+    const freshnessDays = rows
+      .map((row) => row.captured_at ? Math.max(0, Math.round((Date.now() - new Date(String(row.captured_at)).getTime()) / 86_400_000)) : 999)
+      .filter(Number.isFinite);
     return NextResponse.json({
       ok: true,
       metrics: {
         totalListings: rows.length,
+        validListings: rows.filter((row) => row.mileage_km !== null && row.listed_price !== null).length,
+        invalidListings: rows.filter((row) => row.mileage_km === null || row.listed_price === null).length,
+        duplicateListings: Math.max(0, rows.filter((row) => row.listing_url).length - uniqueKeys.size),
         missingMileageCount: rows.filter((row) => row.mileage_km === null).length,
         missingPriceCount: rows.filter((row) => row.listed_price === null).length,
         missingTrimCount: rows.filter((row) => !row.trim).length,
+        usablePhotoFeatureCount: imageUsable,
         averageDataQuality: rows.length ? Math.round(rows.reduce((sum, row) => sum + Number(row.data_quality_score ?? 0), 0) / rows.length) : 0,
+        averageConfidence: rows.length ? Math.round(rows.reduce((sum, row) => sum + Number(row.data_quality_score ?? 0), 0) / rows.length) : 0,
+        averageDataFreshness: freshnessDays.length ? Math.round(freshnessDays.reduce((sum, value) => sum + value, 0) / freshnessDays.length) : 0,
       },
     });
   } catch (error) {
@@ -328,6 +346,7 @@ export async function importListings(request: Request, importType: "csv" | "json
     const payload = importPayloadSchema.parse(body);
     await requireOrganizationRole(client, userId, payload.organizationId, ["owner", "admin"]);
     const rows = payload.rows.map((row) => ({ ...row, organizationId: payload.organizationId, sourceName: row.sourceName || payload.sourceName }));
+    const inserted = await insertMarketListings(client, rows);
     const { error } = await client.from("market_import_jobs").insert({
       organization_id: payload.organizationId,
       source_name: payload.sourceName,
@@ -340,7 +359,7 @@ export async function importListings(request: Request, importType: "csv" | "json
       created_by: userId,
     });
     if (error) throw error;
-    return NextResponse.json({ ok: true, imported: rows.length });
+    return NextResponse.json({ ok: true, imported: inserted.inserted });
   });
 }
 

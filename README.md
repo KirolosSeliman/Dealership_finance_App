@@ -12,6 +12,7 @@ Dealer Flow is a personal finance, inventory, tax-reporting, backup, and contact
 - PWA manifest/service worker
 - Local ZIP backups
 - Cloudflare R2 backup upload route
+- Market Snap foundation module with Deal Radar, Market Data Admin, browser-extension scaffold, and ML-service scaffold
 
 ## Local development
 
@@ -44,7 +45,12 @@ Cloudflare R2 automatic backups require:
 - `R2_SECRET_ACCESS_KEY`
 - `R2_BUCKET_NAME`
 
-Do not expose service-role or R2 secrets to the browser. `CRON_SECRET` is required; `/api/backups/daily` returns an error when it is missing or incorrect.
+Optional Market Snap variables:
+
+- `MARKET_SNAP_ML_SERVICE_URL`
+- `MARKET_SNAP_EXTENSION_ORIGINS`
+
+Do not expose service-role or R2 secrets to the browser. `CRON_SECRET` is required; `/api/backups/daily` and `/api/market-snap/cron/daily-refresh` return an error when it is missing or incorrect.
 
 ## Database
 
@@ -70,11 +76,23 @@ After the base schema, run the migrations in `supabase/migrations`:
 20260509_recurring_expenses_funding_source.sql
 20260510_delete_vehicle_cascade.sql
 20260510_delete_vehicle_cascade_hardening.sql
+20260510_market_snap_foundation.sql
+20260511_market_snap_hardening.sql
 ```
 
 The production constraints migrations add financial data checks, prevent duplicate sales for the same vehicle, validate organization matches for expenses/sales/attachments, enforce private attachment paths, protect final owners, restrict sensitive file reads, and add atomic vehicle/sale RPCs.
 
 Vehicle deletion depends on the `delete_vehicle_and_related_data(uuid, uuid)` RPC created by the 20260510 vehicle deletion migrations. Deploying code alone does not create this database function; run those SQL files in Supabase before using vehicle deletion in production.
+
+Market Snap depends on the two Market Snap migrations. The foundation migration creates sources, market listings, Deal Radar, valuation history, ML run/version tables, data settings, and RLS. The hardening migration adds condition/image/diagnostic features, retention cleanup, import quality fields, sold-vehicle prediction-error columns, and indexes.
+
+## Market Snap
+
+Market Snap is additive to the existing Dealer Flow app. It keeps clean retail, wholesale, auction, salvage, rebuilt, and parts/non-running market contexts separate. The production MVP uses a comparable estimator with time-decay weighting and condition/risk scoring; the CatBoost service in `ml-service/` is candidate-only until a model is trained, evaluated, and manually promoted.
+
+Browser capture lives in `browser-extension/`. Configure the extension from its Options page with the Dealer Flow URL and organization ID. It is for visible, authorized, user-assisted listing capture only and must not be used for CAPTCHA bypass, login-wall bypass, proxy evasion, anti-bot evasion, rate-limit bypass, private-message capture, or unauthorized scraping.
+
+Market Snap daily refresh uses Vercel Cron at `/api/market-snap/cron/daily-refresh`. It refreshes only active inventory statuses (`purchased`, `in_repair`, `listed_for_sale`), skips sold vehicles, and avoids duplicate valuation snapshots when no meaningful change occurred.
 
 ## Backups
 

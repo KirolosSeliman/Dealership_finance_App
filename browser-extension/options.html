@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Market Snap Settings</title>
+    <link rel="stylesheet" href="src/popup.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Market Snap Settings</h1>
+      <label>
+        Dealer Flow URL
+        <input id="dealerFlowBaseUrl" type="url" placeholder="http://localhost:3000" />
+      </label>
+      <label>
+        Organization ID
+        <input id="organizationId" type="text" placeholder="Supabase organization UUID" />
+      </label>
+      <p class="muted">Use only authorized/user-assisted listing capture. This extension does not bypass login walls, CAPTCHAs, rate limits, access controls, or platform restrictions.</p>
+      <button id="saveSettings">Save settings</button>
+      <p id="status" class="muted"></p>
+    </main>
+    <script src="src/options.js"></script>
+  </body>
+</html>
