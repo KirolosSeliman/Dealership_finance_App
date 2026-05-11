@@ -3,3 +3,4 @@ uvicorn[standard]==0.32.1
 catboost==1.2.7
 pydantic==2.10.4
 numpy==2.2.1
+scrapling==0.4.7
