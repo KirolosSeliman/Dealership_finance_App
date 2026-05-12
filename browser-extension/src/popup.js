@@ -13,7 +13,9 @@ document.getElementById("analyze").addEventListener("click", analyzeListing);
 
 async function readPageExtraction() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const response = await chrome.tabs.sendMessage(tab.id, { type: "MARKET_SNAP_EXTRACT" });
+  const response = await chrome.tabs.sendMessage(tab.id, { type: "MARKET_SNAP_EXTRACT" }).catch((error) => {
+    throw new Error(error?.message || "Market Snap extension could not connect to this tab. Refresh the listing page after reloading the extension.");
+  });
   if (!response?.ok) throw new Error(response?.message || "Could not extract listing.");
   return response;
 }
@@ -30,6 +32,9 @@ async function extractListing() {
       statusEl.textContent = "Listing extracted locally. Open Settings to connect Dealer Flow.";
       return;
     }
+    if (settings.dealerFlowBaseUrl.startsWith("http://localhost") || settings.dealerFlowBaseUrl.startsWith("http://127.0.0.1")) {
+      lastExtraction.permissionBasis = `${lastExtraction.permissionBasis} Local development capture.`;
+    }
     const apiResponse = await fetch(`${settings.dealerFlowBaseUrl}/api/market-snap/extract-authorized-listing`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -42,7 +47,7 @@ async function extractListing() {
     renderPreview(lastListing, payload);
     statusEl.textContent = "Extraction complete. Review, then analyze or save.";
   } catch (error) {
-    statusEl.textContent = error.message || "Extraction failed.";
+    statusEl.textContent = formatExtensionError(error, "Extraction failed.");
   }
 }
 
@@ -65,7 +70,7 @@ async function analyzeListing() {
     renderResult(lastValuation);
     statusEl.textContent = "Analysis complete.";
   } catch (error) {
-    statusEl.textContent = error.message || "Analysis failed.";
+    statusEl.textContent = formatExtensionError(error, "Analysis failed.");
   }
 }
 
@@ -84,7 +89,7 @@ saveButton.addEventListener("click", async () => {
     if (!response.ok || !payload.ok) throw new Error(payload.message || "Could not save listing.");
     statusEl.textContent = "Saved to Deal Radar.";
   } catch (error) {
-    statusEl.textContent = error.message || "Save failed.";
+    statusEl.textContent = formatExtensionError(error, "Save failed.");
   }
 });
 
@@ -124,4 +129,18 @@ function renderResult(valuation) {
 
 function money(value) {
   return new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD" }).format(value || 0);
+}
+
+function formatExtensionError(error, fallback) {
+  const message = error?.message || fallback;
+  if (message.includes("Receiving end does not exist") || message.includes("Could not establish connection")) {
+    return "This listing tab is not connected to Market Snap. Reload the extension, refresh the OpenLane tab, then try Extract again.";
+  }
+  if (message.includes("Invalid request origin")) {
+    return "Dealer Flow blocked the extension origin. Add this extension origin to MARKET_SNAP_EXTENSION_ORIGINS and restart Next.js.";
+  }
+  if (message.includes("Authentication required")) {
+    return "Dealer Flow needs you signed in on the same browser profile before extracting.";
+  }
+  return message;
 }

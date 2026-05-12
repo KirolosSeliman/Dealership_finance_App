@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "description": "Analyze visible vehicle listings with Dealer Flow Market Snap.",
   "permissions": ["activeTab", "storage", "scripting"],
-  "host_permissions": ["http://localhost:3000/*", "https://*.vercel.app/*"],
+  "host_permissions": ["http://localhost:3000/*", "https://*.vercel.app/*", "https://*.openlane.ca/*", "https://*.openlane.com/*"],
   "action": {
     "default_popup": "popup.html",
     "default_title": "Market Snap"
@@ -12,7 +12,7 @@
   "options_page": "options.html",
   "content_scripts": [
     {
-      "matches": ["https://www.facebook.com/marketplace/*", "https://www.autotrader.ca/*", "https://www.autohebdo.net/*", "https://*.openlane.com/*"],
+      "matches": ["https://www.facebook.com/marketplace/*", "https://www.autotrader.ca/*", "https://www.autohebdo.net/*", "https://*.openlane.com/*", "https://*.openlane.ca/*"],
       "js": ["src/connectors.js", "src/content-script.js"],
       "run_at": "document_idle"
     }

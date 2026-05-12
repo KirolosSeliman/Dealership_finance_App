@@ -2551,6 +2551,9 @@ function MarketSnapDashboard({
     setExtractedListing(null);
     setExtractedValuation(null);
     try {
+      if (/^https?:\/\//i.test(html.trim())) {
+        throw new Error("Paste the visible listing HTML here, not only the URL. For OpenLane login pages, use the Chrome/Brave extension so it can capture the HTML you are authorized to view.");
+      }
       const response = await fetch("/api/market-snap/extract-authorized-listing", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -2628,7 +2631,7 @@ function MarketSnapDashboard({
             </div>
             <Field label="Source URL"><input className="control w-full" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} placeholder="https://..." /></Field>
             <Field label="Permission basis"><input className="control w-full" value={permissionBasis} onChange={(event) => setPermissionBasis(event.target.value)} /></Field>
-            <Field label="Visible listing HTML"><textarea className="control min-h-44 w-full resize-y" value={html} onChange={(event) => setHtml(event.target.value)} placeholder="<html>...</html>" /></Field>
+            <Field label="Visible listing HTML"><textarea className="control min-h-44 w-full resize-y" value={html} onChange={(event) => setHtml(event.target.value)} placeholder="Paste the visible listing HTML here. For OpenLane pages behind login, use the browser extension instead of pasting only the URL." /></Field>
             <div className="flex flex-wrap gap-2">
               <button className="primary-button" type="button" disabled={extracting || !html.trim()} onClick={extractListing}>{extracting ? "Working..." : "Extract listing"}</button>
               <button className="secondary-button" type="button" disabled={!extractedListing || extracting} onClick={analyzeExtractedListing}>Analyze listing</button>
