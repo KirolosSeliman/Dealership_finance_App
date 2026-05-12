@@ -6,5 +6,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     sendResponse({ ok: false, message: "This page is not supported yet." });
     return;
   }
-  sendResponse({ ok: true, listing: connector.extract() });
+  const listing = connector.extract();
+  sendResponse({
+    ok: true,
+    listing,
+    extraction: {
+      html: window.DealerFlowCapture.captureAuthorizedHtml(),
+      sourceName: listing.sourceName,
+      sourceType: listing.sourceType,
+      sourceUrl: location.href,
+      permissionBasis: "User-assisted visible listing capture from browser extension.",
+    },
+  });
 });

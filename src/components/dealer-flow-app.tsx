@@ -2533,9 +2533,133 @@ function MarketSnapDashboard({
   const lowConfidence = valuations.filter((valuation) => valuation.confidenceScore < 45).length;
   const highRisk = valuations.filter((valuation) => valuation.riskScore >= 70).length;
   const chartData = buildMonthlyBuySellSeries(scoped, dateRange);
+  const organizationId = scoped.activeOrganizationId;
+  const [sourceName, setSourceName] = useState("Authorized listing");
+  const [sourceType, setSourceType] = useState("retail");
+  const [sourceUrl, setSourceUrl] = useState("");
+  const [permissionBasis, setPermissionBasis] = useState("User provided visible listing HTML for authorized Market Snap analysis.");
+  const [html, setHtml] = useState("");
+  const [extracting, setExtracting] = useState(false);
+  const [extractionMessage, setExtractionMessage] = useState("");
+  const [extractedListing, setExtractedListing] = useState<Record<string, unknown> | null>(null);
+  const [extractionMeta, setExtractionMeta] = useState<Record<string, unknown> | null>(null);
+  const [extractedValuation, setExtractedValuation] = useState<Record<string, unknown> | null>(null);
+
+  async function extractListing() {
+    setExtracting(true);
+    setExtractionMessage("");
+    setExtractedListing(null);
+    setExtractedValuation(null);
+    try {
+      const response = await fetch("/api/market-snap/extract-authorized-listing", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ organizationId, html, sourceName, sourceType, sourceUrl, permissionBasis, robotsAllowed: true }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) throw new Error(String(payload.message ?? payload.warnings?.[0] ?? "Extraction failed."));
+      setExtractedListing(payload.listing ?? null);
+      setExtractionMeta(payload);
+      setExtractionMessage("Listing extracted. Review the preview before analysis or saving.");
+    } catch (error) {
+      setExtractionMessage(error instanceof Error ? error.message : "Extraction failed.");
+    } finally {
+      setExtracting(false);
+    }
+  }
+
+  async function analyzeExtractedListing() {
+    if (!extractedListing) return;
+    setExtracting(true);
+    setExtractionMessage("");
+    try {
+      const response = await fetch("/api/market-snap/analyze-listing", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...extractedListing, organizationId }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) throw new Error(String(payload.message ?? "Analysis failed."));
+      setExtractedValuation(payload.valuation ?? null);
+      setExtractionMessage("Market Snap analysis complete.");
+    } catch (error) {
+      setExtractionMessage(error instanceof Error ? error.message : "Analysis failed.");
+    } finally {
+      setExtracting(false);
+    }
+  }
+
+  async function saveExtractedListing() {
+    if (!extractedListing) return;
+    setExtracting(true);
+    setExtractionMessage("");
+    try {
+      const response = await fetch("/api/market-snap/save-listing", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ organizationId, listing: extractedListing, valuation: extractedValuation ?? undefined }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) throw new Error(String(payload.message ?? "Could not save to Deal Radar."));
+      setExtractionMessage("Saved to Deal Radar.");
+    } catch (error) {
+      setExtractionMessage(error instanceof Error ? error.message : "Could not save to Deal Radar.");
+    } finally {
+      setExtracting(false);
+    }
+  }
 
   return (
     <div className="space-y-6">
+      <Panel title="Extract listing with Scrapling">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.85fr)]">
+          <div className="space-y-3">
+            <div className="grid gap-3 md:grid-cols-2">
+              <Field label="Source name"><input className="control w-full" value={sourceName} onChange={(event) => setSourceName(event.target.value)} /></Field>
+              <Field label="Source type">
+                <select className="control w-full" value={sourceType} onChange={(event) => setSourceType(event.target.value)}>
+                  <option value="retail">Retail</option>
+                  <option value="auction">Auction</option>
+                  <option value="salvage">Salvage</option>
+                  <option value="wholesale">Wholesale</option>
+                  <option value="extension">Extension</option>
+                </select>
+              </Field>
+            </div>
+            <Field label="Source URL"><input className="control w-full" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} placeholder="https://..." /></Field>
+            <Field label="Permission basis"><input className="control w-full" value={permissionBasis} onChange={(event) => setPermissionBasis(event.target.value)} /></Field>
+            <Field label="Visible listing HTML"><textarea className="control min-h-44 w-full resize-y" value={html} onChange={(event) => setHtml(event.target.value)} placeholder="<html>...</html>" /></Field>
+            <div className="flex flex-wrap gap-2">
+              <button className="primary-button" type="button" disabled={extracting || !html.trim()} onClick={extractListing}>{extracting ? "Working..." : "Extract listing"}</button>
+              <button className="secondary-button" type="button" disabled={!extractedListing || extracting} onClick={analyzeExtractedListing}>Analyze listing</button>
+              <button className="secondary-button" type="button" disabled={!extractedListing || extracting} onClick={saveExtractedListing}>Save to Deal Radar</button>
+            </div>
+            {extractionMessage && <p className="text-sm text-slate-300">{extractionMessage}</p>}
+          </div>
+          <div className="surface-muted p-4">
+            {!extractedListing ? (
+              <EmptyState title="No extracted listing yet" copy="Paste authorized visible listing HTML, then extract a preview before analysis or saving." />
+            ) : (
+              <div className="space-y-3">
+                <p className="text-base font-semibold text-white">{String(extractedListing.title ?? "Untitled listing")}</p>
+                <InfoGrid rows={[
+                  ["Vehicle", [extractedListing.year, extractedListing.make, extractedListing.model, extractedListing.trim].filter(Boolean).join(" ") || "-"],
+                  ["Mileage", extractedListing.mileageKm ? `${extractedListing.mileageKm} km` : "-"],
+                  ["Price", money(Number(extractedListing.listedPrice ?? extractedListing.auctionHammerPrice ?? 0))],
+                  ["Location", [extractedListing.location, extractedListing.province].filter(Boolean).join(", ") || "-"],
+                  ["Title status", String(extractedListing.titleStatus ?? "-")],
+                  ["Images", String(extractedListing.imageCount ?? 0)],
+                  ["Quality", String(extractionMeta?.extractionQualityScore ?? "-")],
+                  ["Policy", String(extractionMeta?.policyDecision ?? "-")],
+                ]} />
+                <Info label="Warnings" value={Array.isArray(extractionMeta?.warnings) && extractionMeta.warnings.length ? extractionMeta.warnings.join("; ") : "-"} />
+                <Info label="Missing fields" value={Array.isArray(extractionMeta?.missingFields) && extractionMeta.missingFields.length ? extractionMeta.missingFields.join(", ") : "-"} />
+                {extractedValuation && <RecommendationBadgeView badge={String(extractedValuation.recommendationBadge ?? "Negotiate") as never} />}
+              </div>
+            )}
+          </div>
+        </div>
+      </Panel>
       <div className="surface-muted flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <p className="text-sm text-slate-400">{t.marketSnap.subtitle}</p>

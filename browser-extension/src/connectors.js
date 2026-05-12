@@ -16,6 +16,11 @@ window.DealerFlowConnectors = [
   },
 ];
 
+window.DealerFlowCapture = {
+  captureAuthorizedHtml,
+  extractGenericListing,
+};
+
 function extractGenericListing(sourceName, sourceType) {
   const text = document.body.innerText || "";
   const title = document.querySelector("h1")?.innerText || document.title;
@@ -38,6 +43,14 @@ function extractGenericListing(sourceName, sourceType) {
     imageCount: document.images.length,
     capturedAt: new Date().toISOString(),
   };
+}
+
+function captureAuthorizedHtml() {
+  const clone = document.body.cloneNode(true);
+  clone.querySelectorAll("script, style, noscript, svg, canvas, form, input, textarea, select, button").forEach((node) => node.remove());
+  clone.querySelectorAll("[contenteditable='true'], [aria-label*='message' i], [class*='message' i]").forEach((node) => node.remove());
+  const html = clone.innerHTML.replace(/\s+/g, " ").slice(0, 900000);
+  return html;
 }
 
 function matchNumber(value) {

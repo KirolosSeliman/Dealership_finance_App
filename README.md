@@ -93,6 +93,20 @@ Market Snap is additive to the existing Dealer Flow app. It keeps clean retail, 
 
 Browser capture lives in `browser-extension/`. Configure the extension from its Options page with the Dealer Flow URL and organization ID. It is for visible, authorized, user-assisted listing capture only and must not be used for CAPTCHA bypass, login-wall bypass, proxy evasion, anti-bot evasion, rate-limit bypass, private-message capture, or unauthorized scraping.
 
+### Local Market Snap ML service
+
+Authorized Scrapling extraction is served by `ml-service/` and called server-side through `MARKET_SNAP_ML_SERVICE_URL`.
+
+```powershell
+cd ml-service
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn main:app --reload --port 8000
+```
+
+Then run Dealer Flow with `MARKET_SNAP_ML_SERVICE_URL=http://localhost:8000`, open Market Snap, paste authorized visible listing HTML, click **Extract listing**, then **Analyze listing** or **Save to Deal Radar**. The extension uses the same extraction API when `dealerFlowBaseUrl`, `organizationId`, and session cookies are available. CatBoost remains candidate-only; use Python 3.11/3.12 for CatBoost training because the pinned CatBoost package does not currently install cleanly on Python 3.13.
+
 Market Snap daily refresh uses Vercel Cron at `/api/market-snap/cron/daily-refresh`. It refreshes only active inventory statuses (`purchased`, `in_repair`, `listed_for_sale`), skips sold vehicles, and avoids duplicate valuation snapshots when no meaningful change occurred.
 
 ## Backups

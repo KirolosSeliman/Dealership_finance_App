@@ -156,3 +156,28 @@ export const importPayloadSchema = z.object({
     sourceName: z.string().trim().min(1).max(120).optional(),
   })).min(1).max(1000),
 });
+
+export const authorizedExtractionRequestSchema = z.object({
+  organizationId: z.string().uuid(),
+  html: z.string().min(1).max(1_000_000),
+  sourceName: z.string().trim().min(1).max(120),
+  sourceUrl: urlText,
+  sourceType: z.enum(marketSourceTypes).optional(),
+  permissionBasis: z.string().trim().min(3).max(500),
+  robotsAllowed: z.boolean().optional(),
+});
+
+export const authorizedExtractionResponseSchema = z.object({
+  ok: z.boolean(),
+  listing: marketListingPayloadSchema.omit({ organizationId: true }).partial().extend({
+    imageUrls: z.array(z.string().url()).max(30).optional(),
+  }).optional().nullable(),
+  warnings: z.array(z.string()).default([]),
+  missingFields: z.array(z.string()).default([]),
+  degraded: z.boolean().default(false),
+  extractionQualityScore: z.coerce.number().min(0).max(100).default(0),
+  policyDecision: z.string().default("unknown"),
+  policyReasons: z.array(z.string()).default([]),
+  fallbackStrategies: z.array(z.string()).default([]),
+  rawVisibleTextPreview: z.string().optional(),
+});

@@ -4,7 +4,7 @@ from typing import Any
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 from train_candidate import build_candidate_report
-from scrapling_connector import ExtractionPolicy, extract_visible_vehicle_fields, fallback_strategies
+from scrapling_connector import ExtractionPolicy, extract_visible_vehicle_fields, fallback_strategies, scrapling_available, scrapling_version
 
 app = FastAPI(title="Dealer Flow Market Snap ML Service", version="0.1.0")
 
@@ -28,6 +28,8 @@ class AuthorizedExtractionRequest(BaseModel):
     permission_basis: str
     source_url: str | None = None
     robots_allowed: bool | None = None
+    source_type: str | None = None
+    organization_id: str | None = None
     requested_capabilities: list[str] = Field(default_factory=list)
 
 
@@ -82,7 +84,19 @@ def extract_authorized_listing(request: AuthorizedExtractionRequest):
         robots_allowed=request.robots_allowed,
         requested_capabilities=tuple(request.requested_capabilities),
     )
-    return extract_visible_vehicle_fields(request.html, policy)
+    return extract_visible_vehicle_fields(request.html, policy, source_type=request.source_type)
+
+
+@app.get("/extract/health")
+def extract_health():
+    return {
+        "ok": True,
+        "scraplingInstalled": scrapling_available(),
+        "version": scrapling_version(),
+        "serviceName": "Dealer Flow Market Snap ML Service",
+        "supportedExtractors": ["scrapling_adaptor", "regex_visible_text_fallback"],
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 @app.get("/data-access-strategies")
