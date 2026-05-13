@@ -180,7 +180,7 @@ export function runComparableEstimator(input: ValuationInput & { expenses?: Vehi
 }
 
 export function shouldRefreshVehicle(vehicle: Vehicle) {
-  return ["purchased", "in_repair", "listed_for_sale"].includes(vehicle.status);
+  return !vehicle.archivedAt && ["purchased", "in_repair", "listed_for_sale"].includes(vehicle.status);
 }
 
 export function shouldStoreValuationSnapshot(previous: VehicleValuation | undefined, next: VehicleValuation) {

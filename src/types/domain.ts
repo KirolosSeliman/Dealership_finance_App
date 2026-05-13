@@ -87,6 +87,9 @@ export interface Vehicle {
   createdAt: string;
   updatedAt: string;
   createdBy: string;
+  archivedAt?: string;
+  archivedBy?: string;
+  archiveReason?: string;
 }
 
 export interface VehicleExpense {

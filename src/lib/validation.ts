@@ -44,6 +44,7 @@ export const vehicleUpdateSchema = vehicleSchema.pick({
 export const deleteVehicleSchema = z.object({
   vehicleId: z.string().uuid(),
   confirmationText: z.string().trim().min(1).max(100),
+  archiveReason: optionalText,
 });
 
 export const expenseSchema = z.object({

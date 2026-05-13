@@ -19,8 +19,8 @@ import { importPayloadSchema, marketListingPayloadSchema } from "../src/lib/mark
 import { assertAllowedUpload, canExportTaxReports, canManageBackups, sanitizeCsvCell, sanitizeStorageFileName } from "../src/lib/security";
 import { assertSameOrigin, checkRateLimit, resetRateLimitForTests, RouteSecurityError } from "../src/lib/server/security";
 import { activityLogSchema, applyRecurringExpenseTemplateSchema, attachmentSchema, backupRequestSchema, expenseSchema, recurringExpenseTemplateSchema, regenerateInvitationSchema, taxExportSchema } from "../src/lib/validation";
-import { dedupeOrganizationsByHighestRole, emptyAppData, mapExpense } from "../src/lib/supabase/mappers";
-import { isValidVehicleDeleteConfirmation } from "../src/lib/vehicle-delete";
+import { dedupeOrganizationsByHighestRole, emptyAppData, mapExpense, mapVehicle } from "../src/lib/supabase/mappers";
+import { activeVehiclesOnly, isValidVehicleDeleteConfirmation } from "../src/lib/vehicle-delete";
 import type {
   CompanyCashTransaction,
   ExternalCashTransaction,
@@ -120,6 +120,7 @@ test("Market Snap comparable estimator scores deals, risk, cost basis, and recom
 test("Market Snap refresh excludes sold vehicles and stores only useful snapshots", () => {
   const soldVehicle: Vehicle = { ...vehicle, status: "sold" };
   const activeVehicle: Vehicle = { ...vehicle, status: "listed_for_sale" };
+  const archivedVehicle: Vehicle = { ...activeVehicle, archivedAt: "2026-05-13T12:00:00.000Z" };
   const valuationBase: VehicleValuation = runComparableEstimator({
     organizationId: "org-1",
     vehicle: activeVehicle,
@@ -130,6 +131,7 @@ test("Market Snap refresh excludes sold vehicles and stores only useful snapshot
 
   assert.equal(shouldRefreshVehicle(soldVehicle), false);
   assert.equal(shouldRefreshVehicle(activeVehicle), true);
+  assert.equal(shouldRefreshVehicle(archivedVehicle), false);
   assert.equal(shouldStoreValuationSnapshot(valuationBase, unchanged), false);
   assert.equal(shouldStoreValuationSnapshot(valuationBase, changed), true);
 });
@@ -731,19 +733,106 @@ test("vehicle delete confirmation accepts DELETE or VIN case-insensitively", () 
   assert.equal(isValidVehicleDeleteConfirmation("wrong", "KM8JUCAC7AU031562"), false);
 });
 
-test("vehicle cascade delete migration creates the exact RPC and preserves contacts", () => {
-  const baseSql = readFileSync(join(process.cwd(), "supabase/migrations/20260510_delete_vehicle_cascade.sql"), "utf8");
-  const hardeningSql = readFileSync(join(process.cwd(), "supabase/migrations/20260510_delete_vehicle_cascade_hardening.sql"), "utf8");
+test("vehicle archive helpers hide archived inventory without removing audit data", () => {
+  const activeVehicle = { ...vehicle, id: "active-vehicle", status: "listed_for_sale" as const };
+  const archivedVehicle = {
+    ...vehicle,
+    id: "archived-vehicle",
+    status: "listed_for_sale" as const,
+    archivedAt: "2026-05-13T12:00:00.000Z",
+  };
+  const sale: Sale = {
+    id: "sale-1",
+    organizationId: "org-1",
+    vehicleId: archivedVehicle.id,
+    saleDate: "2026-05-13",
+    vehicleTotalCost: 12000,
+    taxableProfitAmount: 1000,
+    profitTaxDue: 150,
+    paperSalePrice: 13000,
+    realClientPayment: 13500,
+    externalCommission: 500,
+    createdAt: "2026-05-13T12:00:00.000Z",
+    createdBy: "user-1",
+  };
+  const expense: VehicleExpense = {
+    id: "expense-1",
+    organizationId: "org-1",
+    vehicleId: archivedVehicle.id,
+    category: "repair",
+    amountBeforeTax: 500,
+    taxRate: 0,
+    taxAmount: 0,
+    totalAmount: 500,
+    fundingSource: "company_cash",
+    date: "2026-05-12",
+    createdAt: "2026-05-12T12:00:00.000Z",
+    createdBy: "user-1",
+  };
+  const companyCashTransaction: CompanyCashTransaction = {
+    id: "cash-1",
+    organizationId: "org-1",
+    type: "vehicle_cost_paid",
+    amount: 500,
+    date: "2026-05-12",
+    sourceVehicleId: archivedVehicle.id,
+    sourceExpenseId: expense.id,
+    createdAt: "2026-05-12T12:00:00.000Z",
+    createdBy: "user-1",
+  };
 
-  assert.match(baseSql, /create or replace function delete_vehicle_and_related_data\(\s*p_organization_id uuid,\s*p_vehicle_id uuid\s*\)/i);
-  assert.match(hardeningSql, /drop function if exists delete_vehicle_and_related_data\(uuid, uuid\)/i);
-  assert.match(hardeningSql, /grant execute on function delete_vehicle_and_related_data\(uuid, uuid\) to authenticated/i);
-  assert.match(hardeningSql, /delete from company_cash_transactions/i);
-  assert.match(hardeningSql, /delete from external_cash_transactions/i);
-  assert.match(hardeningSql, /delete from sales/i);
-  assert.match(hardeningSql, /delete from vehicle_expenses/i);
-  assert.match(hardeningSql, /delete from vehicles/i);
-  assert.doesNotMatch(hardeningSql, /delete from contacts/i);
+  assert.deepEqual(activeVehiclesOnly([activeVehicle, archivedVehicle]).map((item) => item.id), [activeVehicle.id]);
+
+  const metrics = calculateDashboardMetrics({
+    vehicles: [activeVehicle, archivedVehicle],
+    expenses: [expense],
+    sales: [sale],
+    companyCashTransactions: [companyCashTransaction],
+    externalCashTransactions: [],
+  });
+
+  assert.equal(metrics.vehiclesInStock, 1);
+  assert.equal(metrics.inventoryValue, activeVehicle.purchasePrice);
+  assert.equal(sale.vehicleId, archivedVehicle.id);
+  assert.equal(expense.vehicleId, archivedVehicle.id);
+  assert.equal(companyCashTransaction.sourceVehicleId, archivedVehicle.id);
+});
+
+test("vehicle archive migration adds safe RPC and disables destructive hard delete", () => {
+  const archiveSql = readFileSync(join(process.cwd(), "supabase/migrations/20260513_vehicle_archive.sql"), "utf8");
+
+  assert.match(archiveSql, /add column if not exists archived_at timestamptz/i);
+  assert.match(archiveSql, /add column if not exists archived_by uuid references profiles\(id\)/i);
+  assert.match(archiveSql, /add column if not exists archive_reason text/i);
+  assert.match(archiveSql, /create or replace function archive_vehicle\(\s*p_organization_id uuid,\s*p_vehicle_id uuid,\s*p_reason text default null\s*\)/i);
+  assert.match(archiveSql, /for update/i);
+  assert.match(archiveSql, /has_org_role\(p_organization_id, array\['owner','admin'\]::app_role\[\]\)/i);
+  assert.match(archiveSql, /update vehicles\s+set archived_at = now\(\)/i);
+  assert.match(archiveSql, /'vehicle_archived'/i);
+  assert.match(archiveSql, /delete_vehicle_and_related_data is deprecated/i);
+  assert.doesNotMatch(archiveSql, /delete from (tax_reports|attachments|company_cash_transactions|external_cash_transactions|sales|vehicle_expenses|activity_logs|vehicles)/i);
+});
+
+test("vehicle archive fields map from Supabase rows", () => {
+  const mapped = mapVehicle({
+    id: "vehicle-1",
+    organization_id: "org-1",
+    vin: "VIN",
+    purchase_price: 10000,
+    purchase_date: "2026-01-01",
+    purchase_source: "OpenLane",
+    status: "purchased",
+    created_at: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-01-01T00:00:00.000Z",
+    created_by: "user-1",
+    archived_at: "2026-05-13T12:00:00.000Z",
+    archived_by: "admin-1",
+    archive_reason: "Duplicate unit",
+  });
+
+  assert.equal(mapped.archivedAt, "2026-05-13T12:00:00.000Z");
+  assert.equal(mapped.archivedBy, "admin-1");
+  assert.equal(mapped.archiveReason, "Duplicate unit");
 });
 
 test("P0 migration adds atomic vehicle and sale RPCs", () => {

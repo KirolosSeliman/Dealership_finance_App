@@ -101,6 +101,9 @@ export function mapVehicle(row: Row): Vehicle {
     createdAt: dateTimeValue(row.created_at),
     updatedAt: dateTimeValue(row.updated_at),
     createdBy: String(row.created_by ?? ""),
+    archivedAt: optionalString(row.archived_at),
+    archivedBy: optionalString(row.archived_by),
+    archiveReason: optionalString(row.archive_reason),
   };
 }
 

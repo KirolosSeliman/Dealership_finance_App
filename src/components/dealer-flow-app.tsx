@@ -57,7 +57,7 @@ import {
 import { verifyBackupExport } from "@/lib/backup/export";
 import { getDictionary } from "@/lib/i18n";
 import { runComparableEstimator, shouldRefreshVehicle } from "@/lib/market-snap/engine";
-import { isValidVehicleDeleteConfirmation } from "@/lib/vehicle-delete";
+import { activeVehiclesOnly, isValidVehicleDeleteConfirmation } from "@/lib/vehicle-delete";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { emptyAppData } from "@/lib/supabase/mappers";
 import {
@@ -261,9 +261,10 @@ export function DealerFlowApp() {
   );
   const permissions = getPermissions(activeOrganization?.role);
   const metrics = useMemo(() => calculateDashboardMetrics(scoped), [scoped]);
+  const activeVehicles = activeVehiclesOnly(scoped.vehicles);
   const selectedVehicle =
-    scoped.vehicles.find((vehicle) => vehicle.id === selectedVehicleId) ?? scoped.vehicles[0];
-  const filteredVehicles = scoped.vehicles.filter((vehicle) => {
+    activeVehicles.find((vehicle) => vehicle.id === selectedVehicleId) ?? activeVehicles[0];
+  const filteredVehicles = activeVehicles.filter((vehicle) => {
     const haystack = [vehicle.vin, vehicle.make, vehicle.model, vehicle.year, vehicle.notes]
       .join(" ")
       .toLowerCase();
@@ -617,7 +618,7 @@ export function DealerFlowApp() {
     }
   }
 
-  async function removeVehicle(confirmationText: string) {
+  async function removeVehicle(confirmationText: string, archiveReason: string) {
     if (!supabase || !selectedVehicle) return;
     const vehicleSnapshot = selectedVehicle;
     setLoading(true);
@@ -628,12 +629,13 @@ export function DealerFlowApp() {
         organizationId: vehicleSnapshot.organizationId,
         vehicleId: vehicleSnapshot.id,
         confirmationText,
+        archiveReason,
       })) as { warning?: string };
       navigate("vehicles", { mode: "list" });
-      setStatusMessage(result.warning || "Vehicle deleted successfully.");
+      setStatusMessage(result.warning || "Vehicle archived. It is hidden from active inventory but preserved for financial and tax history.");
       await refreshData(vehicleSnapshot.organizationId);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Could not delete vehicle.");
+      setErrorMessage(error instanceof Error ? error.message : "Could not archive vehicle.");
     } finally {
       setLoading(false);
     }
@@ -1183,7 +1185,7 @@ function Dashboard({
   const visibleExpenses = scoped.expenses.filter((expense) => isInDateRange(expense.date, dateRange));
   const activeCompanyTransactions = scoped.companyCashTransactions.filter((transaction) => !transaction.deletedAt);
   const activeExternalTransactions = scoped.externalCashTransactions.filter((transaction) => !transaction.deletedAt);
-  const visibleVehicles = scoped.vehicles.filter((vehicle) => isInDateRange(vehicle.purchaseDate, dateRange));
+  const visibleVehicles = activeVehiclesOnly(scoped.vehicles).filter((vehicle) => isInDateRange(vehicle.purchaseDate, dateRange));
   const visibleSoldVehicles = scoped.vehicles.filter((vehicle) => {
     const sale = scoped.sales.find((item) => item.vehicleId === vehicle.id);
     return sale ? isInDateRange(sale.saleDate, dateRange) : false;
@@ -1363,7 +1365,7 @@ function VehiclesSection(props: {
   navigate: (view: View, options?: { mode?: VehicleMode; vehicleId?: string; tab?: VehicleTab }) => void;
   addVehicle: (formData: FormData) => void;
   editVehicle: (formData: FormData) => void;
-  deleteVehicle: (confirmationText: string) => void;
+  deleteVehicle: (confirmationText: string, archiveReason: string) => void;
   addExpense: (formData: FormData) => void;
   applyRecurringExpenseTemplate: (templateId: string) => void;
   editExpense: (expenseId: string, formData: FormData) => void;
@@ -1515,6 +1517,7 @@ function VehicleDetailTabs({
   const totalCost = calculateVehicleTotalCost(vehicle, expenses);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [deleteConfirmationText, setDeleteConfirmationText] = useState("");
+  const [archiveReason, setArchiveReason] = useState("");
   const canConfirmDelete = isValidVehicleDeleteConfirmation(deleteConfirmationText, vehicle.vin);
 
   return (
@@ -1544,22 +1547,22 @@ function VehicleDetailTabs({
               type="button"
               onClick={() => {
                 setDeleteConfirmationText("");
+                setArchiveReason("");
                 setConfirmDeleteOpen(true);
               }}
               disabled={loading}
             >
               <Trash2 size={18} />
-              Delete vehicle
+              Archive vehicle
             </button>
           )}
         </div>
       </div>
       {confirmDeleteOpen && permissions.deleteVehicles && (
         <div className="panel border-rose-400/40 bg-rose-900/10">
-          <h3 className="section-title text-rose-100">Permanently delete vehicle</h3>
+          <h3 className="section-title text-rose-100">Archive vehicle</h3>
           <p className="text-sm text-rose-100/90">
-            This permanently removes the vehicle and all linked financial records (expenses, sale, cash impacts, and linked reports).
-            This action cannot be undone.
+            Archived vehicles are hidden from active inventory, but the vehicle, expenses, sale, cash ledger entries, documents, reports, and activity history are preserved for audit and tax records.
           </p>
           <div className="mt-3 grid gap-2 text-sm text-slate-200 sm:grid-cols-2">
             <Info label="Vehicle" value={`${vehicle.year ?? ""} ${vehicle.make ?? ""} ${vehicle.model ?? ""}`.trim() || vehicle.id} />
@@ -1578,6 +1581,14 @@ function VehicleDetailTabs({
               onChange={(event) => setDeleteConfirmationText(event.target.value)}
               disabled={loading}
             />
+            <textarea
+              className="control min-h-20 w-full"
+              placeholder="Archive reason, optional"
+              value={archiveReason}
+              onChange={(event) => setArchiveReason(event.target.value)}
+              disabled={loading}
+              maxLength={500}
+            />
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
             <button
@@ -1585,11 +1596,11 @@ function VehicleDetailTabs({
               type="button"
               disabled={loading || !canConfirmDelete}
               onClick={() => {
-                deleteVehicle(deleteConfirmationText.trim());
+                deleteVehicle(deleteConfirmationText.trim(), archiveReason.trim());
                 setConfirmDeleteOpen(false);
               }}
             >
-              {loading ? "Deleting..." : "Permanently delete vehicle"}
+              {loading ? "Archiving..." : "Archive vehicle"}
             </button>
             <button className="secondary-button" type="button" onClick={() => setConfirmDeleteOpen(false)} disabled={loading}>
               Cancel

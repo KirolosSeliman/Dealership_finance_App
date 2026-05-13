@@ -122,7 +122,7 @@ export function calculateDashboardMetrics(input: {
   externalCashTransactions: ExternalCashTransaction[];
 }) {
   const vehiclesInStock = input.vehicles.filter((vehicle) =>
-    ["purchased", "in_repair", "listed_for_sale"].includes(vehicle.status),
+    !vehicle.archivedAt && ["purchased", "in_repair", "listed_for_sale"].includes(vehicle.status),
   );
   const soldVehicles = input.vehicles.filter((vehicle) => vehicle.status === "sold");
   const inventoryValue = vehiclesInStock.reduce(

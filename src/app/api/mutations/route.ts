@@ -3,6 +3,7 @@ import { calculateCompanyCashBalance, calculateExternalCashBalance } from "@/lib
 import { assertSameOrigin, checkRateLimit } from "@/lib/server/security";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
+  archiveVehicle,
   createAttachment,
   createCashTransaction,
   createContact,
@@ -10,7 +11,6 @@ import {
   createOrganization,
   createRecurringExpenseTemplate,
   createVehicle,
-  deleteVehicle,
   deleteCashTransaction,
   deleteExpense,
   deleteRecurringExpenseTemplate,
@@ -133,11 +133,13 @@ export async function POST(request: Request) {
         deleteVehicleSchema.parse(formDataToObject(formData));
         const vehicleId = String(formData.get("vehicleId") || "");
         const confirmationText = String(formData.get("confirmationText") || "").trim();
+        const archiveReason = String(formData.get("archiveReason") || "").trim();
         const vehicle = await getVehicleOptional(supabase, organizationId, vehicleId);
-        if (!vehicle) throw new ApiError(404, "Vehicle was not found or was already deleted.");
+        if (!vehicle) throw new ApiError(404, "Vehicle was not found.");
+        if (vehicle.archivedAt) throw new ApiError(400, "Vehicle is already archived.");
         assertVehicleDeleteConfirmation(vehicle, confirmationText);
-        const { storageWarning } = await deleteVehicle(supabase, organizationId, vehicle.id);
-        return ok(storageWarning ? { warning: storageWarning } : undefined);
+        await archiveVehicle(supabase, organizationId, vehicle.id, archiveReason);
+        return ok({ archived: true });
       }
       case "createExpense": {
         await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin", "member"]);
@@ -433,20 +435,21 @@ function toClientErrorMessage(error: unknown, operation: Operation) {
   }
   if (operation === "deleteVehicle") {
     const normalized = message.toLowerCase();
-    if (normalized.includes("not allowed")) return "You are not allowed to delete this vehicle.";
+    if (normalized.includes("not allowed")) return "You are not allowed to archive this vehicle.";
     if (normalized.includes("vehicle not found")) return "Vehicle not found.";
+    if (normalized.includes("already archived")) return "Vehicle is already archived.";
     if (
-      normalized.includes("delete_vehicle_and_related_data") ||
+      normalized.includes("archive_vehicle") ||
       normalized.includes("could not find the function") ||
       normalized.includes("does not exist")
     ) {
-      console.error("[deleteVehicle] missing database RPC. Apply supabase/migrations/20260510_delete_vehicle_cascade.sql and supabase/migrations/20260510_delete_vehicle_cascade_hardening.sql.");
-      return "Vehicle deletion database migration is missing. Run the latest vehicle deletion migrations in Supabase, then try again.";
+      console.error("[deleteVehicle] missing database RPC. Apply the latest vehicle archive migration in Supabase.");
+      return "Vehicle archive database migration is missing. Run the latest vehicle archive migration in Supabase, then try again.";
     }
     if (normalized === "invalid input." || normalized.includes("invalid input syntax")) {
-      return "Type DELETE or the vehicle VIN to confirm deletion.";
+      return "Type DELETE or the vehicle VIN to confirm archive.";
     }
-    return "Vehicle could not be deleted. Please try again.";
+    return "Vehicle could not be archived. Please try again.";
   }
   return message;
 }
