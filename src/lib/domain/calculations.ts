@@ -121,6 +121,7 @@ export function calculateDashboardMetrics(input: {
   companyCashTransactions: CompanyCashTransaction[];
   externalCashTransactions: ExternalCashTransaction[];
 }) {
+  const vehiclesById = indexVehiclesById(input.vehicles);
   const vehiclesInStock = input.vehicles.filter((vehicle) =>
     !vehicle.archivedAt && ["purchased", "in_repair", "listed_for_sale"].includes(vehicle.status),
   );
@@ -131,7 +132,7 @@ export function calculateDashboardMetrics(input: {
   );
   const totalExpenses =
     input.vehicles.reduce((sum, vehicle) => sum + vehicle.purchasePrice, 0) +
-    input.expenses.reduce((sum, expense) => sum + normalizedExpenseAmount(expense), 0);
+    input.expenses.reduce((sum, expense) => sum + normalizedExpenseAmount(expense, vehiclesById.get(expense.vehicleId)), 0);
   const totalTaxableProfit = input.sales.reduce(
     (sum, sale) => sum + sale.taxableProfitAmount,
     0,
@@ -183,6 +184,8 @@ export function generateTaxReport(input: {
   );
   const totalTaxableProfit = sales.reduce((sum, sale) => sum + sale.taxableProfitAmount, 0);
   const taxDue = sales.reduce((sum, sale) => sum + sale.profitTaxDue, 0);
+  const vehiclePurchaseCosts = calculatePeriodPurchaseCosts(input.vehicles, input.startDate, input.endDate);
+  const periodExpenses = calculatePeriodExpenses(input.vehicles, input.expenses, input.startDate, input.endDate);
 
   return {
     totalTaxableProfit: roundMoney(totalTaxableProfit),
@@ -201,18 +204,13 @@ export function generateTaxReport(input: {
         .filter((transaction) => transaction.type === "external_cash_personally_removed")
         .reduce((sum, transaction) => sum + transaction.amount, 0),
     ),
-    vehiclePurchaseCosts: roundMoney(
-      input.vehicles.reduce((sum, vehicle) => sum + vehicle.purchasePrice, 0),
-    ),
+    vehiclePurchaseCosts,
     auctionFees: roundMoney(
       expenses
         .filter((expense) => expense.category === "auction_fee")
         .reduce((sum, expense) => sum + expense.amountBeforeTax, 0),
     ),
-    totalExpenses: roundMoney(
-      input.vehicles.reduce((sum, vehicle) => sum + vehicle.purchasePrice, 0) +
-        expenses.reduce((sum, expense) => sum + normalizedExpenseAmount(expense), 0),
-    ),
+    totalExpenses: roundMoney(vehiclePurchaseCosts + periodExpenses),
     taxesPaidOnPurchasesAndExpenses: roundMoney(
       expenses.reduce((sum, expense) => sum + expense.taxAmount, 0),
     ),
@@ -223,6 +221,30 @@ export function generateTaxReport(input: {
         .reduce((sum, transaction) => sum + transaction.amount, 0),
     ),
   };
+}
+
+export function filterVehiclesByPurchaseDate(vehicles: Vehicle[], startDate?: string, endDate?: string) {
+  return filterByDate(vehicles, "purchaseDate", startDate, endDate);
+}
+
+export function calculatePeriodPurchaseCosts(vehicles: Vehicle[], startDate?: string, endDate?: string) {
+  return roundMoney(
+    filterVehiclesByPurchaseDate(vehicles, startDate, endDate)
+      .reduce((sum, vehicle) => sum + vehicle.purchasePrice, 0),
+  );
+}
+
+export function calculatePeriodExpenses(
+  vehicles: Vehicle[],
+  expenses: VehicleExpense[],
+  startDate?: string,
+  endDate?: string,
+) {
+  const vehiclesById = indexVehiclesById(vehicles);
+  return roundMoney(
+    filterByDate(expenses, "date", startDate, endDate)
+      .reduce((sum, expense) => sum + normalizedExpenseAmount(expense, vehiclesById.get(expense.vehicleId)), 0),
+  );
 }
 
 export function makeSeries(input: { label: string; value: number }[]) {
@@ -253,9 +275,13 @@ export function roundMoney(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
 
-function normalizedExpenseAmount(expense: VehicleExpense) {
+function indexVehiclesById(vehicles: Vehicle[]) {
+  return new Map(vehicles.map((vehicle) => [vehicle.id, vehicle]));
+}
+
+function normalizedExpenseAmount(expense: VehicleExpense, vehicle?: Vehicle) {
   if (expense.category === "vehicle_purchase_price") {
-    return expense.taxAmount;
+    return vehicle && vehicle.purchasePrice <= 0 ? expense.totalAmount : expense.taxAmount;
   }
   return expense.totalAmount;
 }

@@ -8,6 +8,10 @@ import {
   calculateDashboardMetrics,
   calculateExpenseTax,
   calculateExternalCashBalance,
+  calculatePeriodExpenses,
+  calculatePeriodPurchaseCosts,
+  filterVehiclesByPurchaseDate,
+  generateTaxReport,
   calculateSaleBreakdown,
   calculateVehicleTotalCost,
 } from "../src/lib/domain/calculations";
@@ -499,6 +503,150 @@ test("vehicle purchase price expense does not duplicate the vehicle purchase pri
   assert.equal(calculateVehicleTotalCost(tiguan, expenses), 4838.25);
 });
 
+test("tax report period totals filter vehicles by purchase date without losing period activity", () => {
+  const januaryVehicle: Vehicle = {
+    ...vehicle,
+    id: "jan-vehicle",
+    purchasePrice: 10000,
+    purchaseDate: "2026-01-15",
+    status: "sold",
+  };
+  const februaryVehicle: Vehicle = {
+    ...vehicle,
+    id: "feb-vehicle",
+    purchasePrice: 20000,
+    purchaseDate: "2026-02-10",
+    status: "listed_for_sale",
+  };
+  const marchVehicleWithExpenseOnly: Vehicle = {
+    ...vehicle,
+    id: "march-expense-vehicle",
+    purchasePrice: 0,
+    purchaseDate: "2026-03-05",
+    status: "purchased",
+  };
+  const expenses: VehicleExpense[] = [
+    {
+      id: "jan-purchase-expense",
+      organizationId: "org-1",
+      vehicleId: januaryVehicle.id,
+      category: "vehicle_purchase_price",
+      amountBeforeTax: 10000,
+      taxRate: 0.05,
+      taxAmount: 500,
+      totalAmount: 10500,
+      fundingSource: "company_cash",
+      date: "2026-01-15",
+      createdAt: "2026-01-15",
+      createdBy: "user-1",
+    },
+    {
+      id: "feb-repair",
+      organizationId: "org-1",
+      vehicleId: januaryVehicle.id,
+      category: "repair",
+      amountBeforeTax: 300,
+      taxRate: 0.15,
+      taxAmount: 45,
+      totalAmount: 345,
+      fundingSource: "company_cash",
+      date: "2026-02-12",
+      createdAt: "2026-02-12",
+      createdBy: "user-1",
+    },
+    {
+      id: "march-purchase-expense",
+      organizationId: "org-1",
+      vehicleId: marchVehicleWithExpenseOnly.id,
+      category: "vehicle_purchase_price",
+      amountBeforeTax: 7000,
+      taxRate: 0.05,
+      taxAmount: 350,
+      totalAmount: 7350,
+      fundingSource: "company_cash",
+      date: "2026-03-05",
+      createdAt: "2026-03-05",
+      createdBy: "user-1",
+    },
+  ];
+  const marchSale: Sale = {
+    id: "march-sale",
+    organizationId: "org-1",
+    vehicleId: januaryVehicle.id,
+    saleDate: "2026-03-20",
+    vehicleTotalCost: 10845,
+    taxableProfitAmount: 2000,
+    profitTaxDue: 440,
+    paperSalePrice: 12845,
+    realClientPayment: 13000,
+    externalCommission: 155,
+    createdAt: "2026-03-20",
+    createdBy: "user-1",
+  };
+  const companyCashTransactions: CompanyCashTransaction[] = [
+    {
+      id: "jan-cash",
+      organizationId: "org-1",
+      type: "vehicle_cost_paid",
+      amount: 10500,
+      date: "2026-01-15",
+      sourceVehicleId: januaryVehicle.id,
+      sourceExpenseId: "jan-purchase-expense",
+      createdAt: "2026-01-15",
+      createdBy: "user-1",
+    },
+    {
+      id: "feb-cash",
+      organizationId: "org-1",
+      type: "vehicle_cost_paid",
+      amount: 345,
+      date: "2026-02-12",
+      sourceVehicleId: januaryVehicle.id,
+      sourceExpenseId: "feb-repair",
+      createdAt: "2026-02-12",
+      createdBy: "user-1",
+    },
+  ];
+  const data = {
+    vehicles: [januaryVehicle, februaryVehicle, marchVehicleWithExpenseOnly],
+    expenses,
+    sales: [marchSale],
+    companyCashTransactions,
+    externalCashTransactions: [] as ExternalCashTransaction[],
+  };
+
+  assert.deepEqual(filterVehiclesByPurchaseDate(data.vehicles, "2026-02-01", "2026-02-28").map((item) => item.id), ["feb-vehicle"]);
+  assert.equal(calculatePeriodPurchaseCosts(data.vehicles, "2026-02-01", "2026-02-28"), 20000);
+  assert.equal(calculatePeriodExpenses(data.vehicles, data.expenses, "2026-02-01", "2026-02-28"), 345);
+
+  const februaryReport = generateTaxReport({ ...data, startDate: "2026-02-01", endDate: "2026-02-28" });
+  assert.equal(februaryReport.vehiclePurchaseCosts, 20000);
+  assert.equal(februaryReport.totalExpenses, 20345);
+  assert.equal(februaryReport.totalTaxableProfit, 0);
+
+  const marchReport = generateTaxReport({ ...data, startDate: "2026-03-01", endDate: "2026-03-31" });
+  assert.equal(marchReport.vehiclePurchaseCosts, 0);
+  assert.equal(marchReport.totalExpenses, 7350);
+  assert.equal(marchReport.totalTaxableProfit, 2000);
+  assert.equal(marchReport.taxDue, 440);
+
+  const emptyReport = generateTaxReport({ ...data, startDate: "2026-04-01", endDate: "2026-04-30" });
+  assert.deepEqual(emptyReport, {
+    totalTaxableProfit: 0,
+    taxDue: 0,
+    totalCompanySales: 0,
+    totalExternalCommission: 0,
+    externalTransferredToCompany: 0,
+    externalPersonallyRemoved: 0,
+    vehiclePurchaseCosts: 0,
+    auctionFees: 0,
+    totalExpenses: 0,
+    taxesPaidOnPurchasesAndExpenses: 0,
+    netProfitAfterTax: 0,
+    companyCashAdded: 0,
+  });
+});
+
 test("dashboard metrics use sold and in-stock vehicle status", () => {
   const sale: Sale = {
     id: "sale-1",
@@ -640,6 +788,30 @@ test("tax report exports produce real PDF, CSV, and JSON", async () => {
   const data = {
     ...emptyAppData,
     activeOrganizationId: "org-1",
+    vehicles: [
+      {
+        ...vehicle,
+        id: "old-vehicle",
+        purchasePrice: 9000,
+        purchaseDate: "2026-04-15",
+      },
+    ],
+    expenses: [
+      {
+        id: "expense-1",
+        organizationId: "org-1",
+        vehicleId: "old-vehicle",
+        category: "repair",
+        amountBeforeTax: 100,
+        taxRate: 0.15,
+        taxAmount: 15,
+        totalAmount: 115,
+        fundingSource: "company_cash",
+        date: "2026-05-10",
+        createdAt: "2026-05-10",
+        createdBy: "user-1",
+      },
+    ],
     sales: [
       {
         id: "sale-1",
@@ -662,8 +834,14 @@ test("tax report exports produce real PDF, CSV, and JSON", async () => {
   const json = await generateTaxReportExport(data, { format: "json", startDate: "2026-05-01", endDate: "2026-05-31" });
 
   assert.equal((await pdf.text()).slice(0, 8), "%PDF-1.4");
-  assert.match(await csv.text(), /These calculations are estimates/);
-  assert.equal(JSON.parse(await json.text()).report.taxDue, 220);
+  const csvText = await csv.text();
+  const jsonReport = JSON.parse(await json.text()).report;
+  assert.match(csvText, /These calculations are estimates/);
+  assert.match(csvText, /vehiclePurchaseCosts/);
+  assert.match(csvText, /"0"/);
+  assert.equal(jsonReport.taxDue, 220);
+  assert.equal(jsonReport.vehiclePurchaseCosts, 0);
+  assert.equal(jsonReport.totalExpenses, 115);
 });
 
 test("upload validation rejects dangerous files and sanitizes names", () => {
