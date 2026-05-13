@@ -54,3 +54,9 @@ export const TAX_DISCLAIMER =
 export function getPurchaseTaxRate(purchaseSource?: string) {
   return PURCHASE_TAX_RATE_BY_SOURCE[purchaseSource as PurchaseSource] ?? 0;
 }
+
+export function getAllowedVehicleStatusTransitions(status: VehicleStatus): VehicleStatus[] {
+  if (status === "purchased") return ["in_repair"];
+  if (status === "in_repair") return ["listed_for_sale"];
+  return [];
+}

@@ -38,8 +38,31 @@ export const vehicleUpdateSchema = vehicleSchema.pick({
   trim: true,
   color: true,
   mileage: true,
+  listedPrice: true,
   notes: true,
+}).extend({
+  updateMode: z.literal("basic").optional(),
 });
+
+export const vehicleStatusUpdateSchema = z.object({
+  updateMode: z.literal("status"),
+  status: z.enum(VEHICLE_STATUSES as [string, ...string[]]),
+  reason: optionalText,
+});
+
+export const vehiclePurchaseCorrectionSchema = z.object({
+  updateMode: z.literal("purchase"),
+  purchasePrice: money,
+  purchaseDate: dateString,
+  purchaseSource: z.enum(PURCHASE_SOURCES as [string, ...string[]]),
+  reason: z.string().trim().min(3).max(500),
+});
+
+export const vehicleAnyUpdateSchema = z.union([
+  vehicleUpdateSchema,
+  vehicleStatusUpdateSchema,
+  vehiclePurchaseCorrectionSchema,
+]);
 
 export const deleteVehicleSchema = z.object({
   vehicleId: z.string().uuid(),

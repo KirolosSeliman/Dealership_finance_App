@@ -43,8 +43,8 @@ import {
   roleUpdateSchema,
   saleSchema,
   deleteVehicleSchema,
+  vehicleAnyUpdateSchema,
   vehicleSchema,
-  vehicleUpdateSchema,
 } from "@/lib/validation";
 import type { Role } from "@/types/domain";
 import type { CompanyCashTransactionType, ExternalCashTransactionType } from "@/types/domain";
@@ -123,7 +123,7 @@ export async function POST(request: Request) {
       }
       case "updateVehicle": {
         await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin", "member"]);
-        vehicleUpdateSchema.parse(formDataToObject(formData));
+        vehicleAnyUpdateSchema.parse(formDataToObject(formData));
         const vehicle = await getVehicle(supabase, organizationId, String(formData.get("vehicleId") || ""));
         await updateVehicle(supabase, vehicle, formData);
         return ok();
@@ -464,6 +464,19 @@ function toClientErrorMessage(error: unknown, operation: Operation) {
     }
     if (normalized.includes("system-generated cash transactions")) {
       return "This linked cash transaction must be corrected through the vehicle or sale workflow.";
+    }
+    return message;
+  }
+  if (operation === "updateVehicle") {
+    const normalized = message.toLowerCase();
+    if (
+      normalized.includes("correct_vehicle_purchase") ||
+      normalized.includes("transition_vehicle_status") ||
+      normalized.includes("could not find the function") ||
+      normalized.includes("does not exist")
+    ) {
+      console.error("[updateVehicle] missing database RPC. Apply the latest vehicle correction migration in Supabase.");
+      return "Vehicle correction database migration is missing. Run the latest vehicle correction migration in Supabase, then try again.";
     }
     return message;
   }

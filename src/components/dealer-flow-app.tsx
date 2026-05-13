@@ -41,6 +41,7 @@ import {
   EXPENSE_CATEGORIES,
   EXPENSE_FUNDING_SOURCES,
   EXPENSE_TAX_BEHAVIORS,
+  getAllowedVehicleStatusTransitions,
   PURCHASE_SOURCES,
   ROLES,
   VEHICLE_STATUSES,
@@ -1636,7 +1637,7 @@ function VehicleDetailTabs({
           </div>
         </div>
       )}
-      {selectedTab === "details" && <VehicleDetailsTab t={t} vehicle={vehicle} onSubmit={editVehicle} permissions={permissions} />}
+      {selectedTab === "details" && <VehicleDetailsTab t={t} vehicle={vehicle} sale={sale} onSubmit={editVehicle} permissions={permissions} />}
       {selectedTab === "expenses" && <Expenses t={t} vehicle={vehicle} expenses={expenses} recurringExpenseTemplates={recurringExpenseTemplates} onSubmit={addExpense} onApplyTemplate={applyRecurringExpenseTemplate} onEdit={editExpense} onDelete={deleteExpense} permissions={permissions} loading={loading} />}
       {selectedTab === "documents" && <DocumentsTab t={t} vehicle={vehicle} attachments={vehicleAttachments} onSubmit={addAttachment} permissions={permissions} />}
       {selectedTab === "sale" && <SaleForm t={t} vehicle={vehicle} expenses={expenses} onSubmit={recordSale} sale={sale} permissions={permissions} />}
@@ -1783,21 +1784,71 @@ function AddVehicle({ t, onSubmit, prefill }: { t: ReturnType<typeof getDictiona
   );
 }
 
-function VehicleDetailsTab({ t, vehicle, onSubmit, permissions }: { t: ReturnType<typeof getDictionary>; vehicle: Vehicle; onSubmit: (formData: FormData) => void; permissions: Permissions }) {
+function VehicleDetailsTab({
+  t,
+  vehicle,
+  sale,
+  onSubmit,
+  permissions,
+}: {
+  t: ReturnType<typeof getDictionary>;
+  vehicle: Vehicle;
+  sale?: Sale;
+  onSubmit: (formData: FormData) => void;
+  permissions: Permissions;
+}) {
+  const allowedStatuses = getAllowedVehicleStatusTransitions(vehicle.status);
+  const soldLocked = Boolean(sale) || vehicle.status === "sold";
   return (
-    <Panel title={tabLabel(t, "details")}>
-      <form className="grid gap-4 lg:grid-cols-2" action={onSubmit}>
-        <Field label={t.fields.vin}><input className="control w-full" name="vin" defaultValue={vehicle.vin} /></Field>
-        <Field label={t.fields.year}><input className="control w-full" name="year" defaultValue={vehicle.year} /></Field>
-        <Field label={t.fields.make}><input className="control w-full" name="make" defaultValue={vehicle.make} /></Field>
-        <Field label={t.fields.model}><input className="control w-full" name="model" defaultValue={vehicle.model} /></Field>
-        <Field label={t.fields.trim}><input className="control w-full" name="trim" defaultValue={vehicle.trim} /></Field>
-        <Field label={t.fields.color}><input className="control w-full" name="color" defaultValue={vehicle.color} /></Field>
-        <Field label={t.fields.mileage}><input className="control w-full" name="mileage" type="number" defaultValue={vehicle.mileage} /></Field>
-        <Field label={t.fields.notes}><textarea className="control min-h-24 w-full" name="notes" defaultValue={vehicle.notes} /></Field>
-        {permissions.manageVehicles && <div className="lg:col-span-2"><button className="primary-button" type="submit">{t.actions.saveVehicle}</button></div>}
-      </form>
-    </Panel>
+    <div className="grid gap-4 xl:grid-cols-2">
+      <Panel title="Basic details">
+        <form className="grid gap-4 lg:grid-cols-2" action={onSubmit}>
+          <input type="hidden" name="updateMode" value="basic" />
+          <Field label={t.fields.vin}><input className="control w-full" name="vin" defaultValue={vehicle.vin} /></Field>
+          <Field label={t.fields.year}><input className="control w-full" name="year" defaultValue={vehicle.year} /></Field>
+          <Field label={t.fields.make}><input className="control w-full" name="make" defaultValue={vehicle.make} /></Field>
+          <Field label={t.fields.model}><input className="control w-full" name="model" defaultValue={vehicle.model} /></Field>
+          <Field label={t.fields.trim}><input className="control w-full" name="trim" defaultValue={vehicle.trim} /></Field>
+          <Field label={t.fields.color}><input className="control w-full" name="color" defaultValue={vehicle.color} /></Field>
+          <Field label={t.fields.mileage}><input className="control w-full" name="mileage" type="number" defaultValue={vehicle.mileage} /></Field>
+          <Field label={t.fields.listedPrice}><input className="control w-full" name="listedPrice" type="number" step="0.01" defaultValue={vehicle.listedPrice} /></Field>
+          <Field label={t.fields.notes}><textarea className="control min-h-24 w-full" name="notes" defaultValue={vehicle.notes} /></Field>
+          {permissions.manageVehicles && <div className="lg:col-span-2"><button className="primary-button" type="submit">{t.actions.saveVehicle}</button></div>}
+        </form>
+      </Panel>
+      <Panel title="Status transition">
+        <form className="grid gap-3" action={onSubmit}>
+          <input type="hidden" name="updateMode" value="status" />
+          <InfoGrid rows={[
+            ["Current status", t.status[vehicle.status]],
+            ["Allowed next step", allowedStatuses.map((status) => t.status[status]).join(", ") || "Use the sale or correction workflow"],
+          ]} />
+          <Field label={t.fields.status}>
+            <select className="control w-full" name="status" defaultValue={allowedStatuses[0] ?? vehicle.status} disabled={allowedStatuses.length === 0}>
+              {allowedStatuses.length === 0 ? <option value={vehicle.status}>{t.status[vehicle.status]}</option> : allowedStatuses.map((status) => <option key={status} value={status}>{t.status[status]}</option>)}
+            </select>
+          </Field>
+          <Field label="Reason"><input className="control w-full" name="reason" placeholder="Optional status note" /></Field>
+          <p className="text-sm text-slate-400">Vehicles move from purchased to repair to listed. Sold status is created only by recording a sale.</p>
+          {permissions.manageVehicles && <button className="secondary-button" type="submit" disabled={allowedStatuses.length === 0}>Update status</button>}
+        </form>
+      </Panel>
+      <div className="xl:col-span-2">
+        <Panel title="Purchase correction">
+          <form className="grid gap-4 lg:grid-cols-2" action={onSubmit}>
+            <input type="hidden" name="updateMode" value="purchase" />
+            <Field label={t.fields.purchasePrice}><input className="control w-full" name="purchasePrice" type="number" step="0.01" defaultValue={vehicle.purchasePrice} disabled={soldLocked} required /></Field>
+            <Field label={t.fields.purchaseDate}><input className="control w-full" name="purchaseDate" type="date" defaultValue={vehicle.purchaseDate} disabled={soldLocked} required /></Field>
+            <Field label={t.fields.purchaseSource}><select className="control w-full" name="purchaseSource" defaultValue={vehicle.purchaseSource} disabled={soldLocked}>{PURCHASE_SOURCES.map((source) => <option key={source} value={source}>{formatLabel(source)}</option>)}</select></Field>
+            <Field label="Correction reason"><textarea className="control min-h-24 w-full" name="reason" placeholder="Explain why the purchase record is being corrected" disabled={soldLocked} required /></Field>
+            <div className="lg:col-span-2 rounded-md border border-amber-400/20 bg-amber-400/8 p-3 text-sm text-amber-100">
+              {soldLocked ? "Sold vehicle purchase details are locked until the sale void/correction workflow is used." : "This recalculates purchase tax and the linked company cash impact atomically."}
+            </div>
+            {permissions.manageVehicles && <div className="lg:col-span-2"><button className="secondary-button" type="submit" disabled={soldLocked}>Correct purchase details</button></div>}
+          </form>
+        </Panel>
+      </div>
+    </div>
   );
 }
 

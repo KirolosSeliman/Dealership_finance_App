@@ -16,14 +16,14 @@ import {
   calculateVehicleTotalCost,
 } from "../src/lib/domain/calculations";
 import { generateBackupExport, generateTaxReportExport, restoreBackupDryRun, verifyBackupExport } from "../src/lib/backup/export";
-import { getPurchaseTaxRate, PURCHASE_SOURCES } from "../src/lib/domain/constants";
+import { getAllowedVehicleStatusTransitions, getPurchaseTaxRate, PURCHASE_SOURCES } from "../src/lib/domain/constants";
 import { calculateTimeDecayWeight, extractConditionFeaturesFromText, inferMarketType, normalizeListing, runComparableEstimator, shouldRefreshVehicle, shouldStoreValuationSnapshot } from "../src/lib/market-snap/engine";
 import { processTemporaryListingImages } from "../src/lib/market-snap/image-features";
 import { convertDealRadarListingToInventory } from "../src/lib/market-snap/repository";
 import { importPayloadSchema, marketListingPayloadSchema } from "../src/lib/market-snap/validation";
 import { assertAllowedUpload, canExportTaxReports, canManageBackups, sanitizeCsvCell, sanitizeStorageFileName } from "../src/lib/security";
 import { assertSameOrigin, checkRateLimit, resetRateLimitForTests, RouteSecurityError } from "../src/lib/server/security";
-import { activityLogSchema, applyRecurringExpenseTemplateSchema, attachmentSchema, backupRequestSchema, expenseSchema, recurringExpenseTemplateSchema, regenerateInvitationSchema, taxExportSchema } from "../src/lib/validation";
+import { activityLogSchema, applyRecurringExpenseTemplateSchema, attachmentSchema, backupRequestSchema, expenseSchema, recurringExpenseTemplateSchema, regenerateInvitationSchema, taxExportSchema, vehicleAnyUpdateSchema } from "../src/lib/validation";
 import { dedupeOrganizationsByHighestRole, emptyAppData, mapExpense, mapVehicle } from "../src/lib/supabase/mappers";
 import { activeVehiclesOnly, isValidVehicleDeleteConfirmation } from "../src/lib/vehicle-delete";
 import type {
@@ -773,6 +773,65 @@ test("dashboard metrics use sold and in-stock vehicle status", () => {
   assert.equal(metrics.vehiclesSold, 1);
   assert.equal(metrics.netProfit, 780);
   assert.equal(metrics.averageTimeToSell, 10);
+});
+
+test("vehicle status transitions allow only the active inventory path", () => {
+  assert.deepEqual(getAllowedVehicleStatusTransitions("purchased"), ["in_repair"]);
+  assert.deepEqual(getAllowedVehicleStatusTransitions("in_repair"), ["listed_for_sale"]);
+  assert.deepEqual(getAllowedVehicleStatusTransitions("listed_for_sale"), []);
+  assert.deepEqual(getAllowedVehicleStatusTransitions("sold"), []);
+
+  assert.equal(vehicleAnyUpdateSchema.safeParse({
+    updateMode: "status",
+    status: "in_repair",
+    reason: "Moved to the shop",
+  }).success, true);
+  assert.equal(vehicleAnyUpdateSchema.safeParse({
+    updateMode: "status",
+    status: "sold",
+  }).success, true);
+});
+
+test("vehicle purchase correction validation requires auditable financial inputs", () => {
+  assert.equal(vehicleAnyUpdateSchema.safeParse({
+    updateMode: "purchase",
+    purchasePrice: 12000,
+    purchaseDate: "2026-03-15",
+    purchaseSource: "OpenLane",
+    reason: "Corrected auction invoice",
+  }).success, true);
+  assert.equal(vehicleAnyUpdateSchema.safeParse({
+    updateMode: "purchase",
+    purchasePrice: 12000,
+    purchaseDate: "2026-03-15",
+    purchaseSource: "OpenLane",
+    reason: "",
+  }).success, false);
+});
+
+test("vehicle financial correction migration is atomic and blocks sold vehicles", () => {
+  const sql = readFileSync(join(process.cwd(), "supabase/migrations/20260517_vehicle_financial_corrections.sql"), "utf8");
+  const repository = readFileSync(join(process.cwd(), "src/lib/supabase/repository.ts"), "utf8");
+
+  assert.match(sql, /create table if not exists vehicle_corrections/i);
+  assert.match(sql, /create or replace function transition_vehicle_status/i);
+  assert.match(sql, /create or replace function correct_vehicle_purchase/i);
+  assert.match(sql, /for update/i);
+  assert.match(sql, /vehicle_record\.status = 'purchased'::vehicle_status and p_next_status = 'in_repair'::vehicle_status/i);
+  assert.match(sql, /vehicle_record\.status = 'in_repair'::vehicle_status and p_next_status = 'listed_for_sale'::vehicle_status/i);
+  assert.match(sql, /Record sales through the sale workflow/i);
+  assert.match(sql, /Sold vehicle purchase details require the sale correction workflow/i);
+  assert.match(sql, /calculate_purchase_tax_rate\(p_purchase_source\)/i);
+  assert.match(sql, /organization_company_cash_balance\(p_organization_id\) \+ old_cash_impact/i);
+  assert.match(sql, /update vehicle_expenses/i);
+  assert.match(sql, /update company_cash_transactions/i);
+  assert.match(sql, /vehicle_purchase_corrected/i);
+  assert.match(sql, /grant execute on function correct_vehicle_purchase/i);
+
+  assert.match(repository, /rpc\("correct_vehicle_purchase"/i);
+  assert.match(repository, /rpc\("transition_vehicle_status"/i);
+  const updateVehicleBody = repository.slice(repository.indexOf("export async function updateVehicle"));
+  assert.doesNotMatch(updateVehicleBody, /\bpurchase_price:/);
 });
 
 test("backup export includes required restorable files", async () => {

@@ -200,6 +200,29 @@ export async function createVehicle(client: Client, organizationId: string, form
 }
 
 export async function updateVehicle(client: Client, vehicle: Vehicle, formData: FormData) {
+  const updateMode = stringValue(formData.get("updateMode")) || "basic";
+  if (updateMode === "purchase") {
+    const { error } = await client.rpc("correct_vehicle_purchase", {
+      p_organization_id: vehicle.organizationId,
+      p_vehicle_id: vehicle.id,
+      p_purchase_price: numberValue(formData.get("purchasePrice")),
+      p_purchase_date: stringValue(formData.get("purchaseDate")) || today(),
+      p_purchase_source: stringValue(formData.get("purchaseSource")) as PurchaseSource,
+      p_reason: stringValue(formData.get("reason")),
+    });
+    if (error) throw error;
+    return;
+  }
+  if (updateMode === "status") {
+    const { error } = await client.rpc("transition_vehicle_status", {
+      p_organization_id: vehicle.organizationId,
+      p_vehicle_id: vehicle.id,
+      p_next_status: stringValue(formData.get("status")) as VehicleStatus,
+      p_reason: optionalString(formData.get("reason")),
+    });
+    if (error) throw error;
+    return;
+  }
   const payload = {
     vin: stringValue(formData.get("vin")).toUpperCase(),
     year: optionalNumber(formData.get("year")),
@@ -208,6 +231,7 @@ export async function updateVehicle(client: Client, vehicle: Vehicle, formData: 
     trim: optionalString(formData.get("trim")),
     color: optionalString(formData.get("color")),
     mileage: optionalNumber(formData.get("mileage")),
+    listed_price: optionalNumber(formData.get("listedPrice")),
     notes: optionalString(formData.get("notes")),
     updated_at: new Date().toISOString(),
   };
