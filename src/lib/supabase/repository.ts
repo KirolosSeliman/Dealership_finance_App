@@ -1,9 +1,5 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
-import {
-  calculateCompanyCashBalance,
-  calculateExpenseTax,
-  calculateExternalCashBalance,
-} from "@/lib/domain/calculations";
+import { calculateExpenseTax } from "@/lib/domain/calculations";
 import { assertAllowedUpload, sanitizeStorageFileName } from "@/lib/security";
 import { dedupeOrganizationsByHighestRole, emptyAppData, mapActivityLog, mapAttachment, mapCompanyCashTransaction, mapContact, mapExpense, mapExternalCashTransaction, mapMembership, mapOrganization, mapRecurringExpenseTemplate, mapSale, mapVehicle } from "@/lib/supabase/mappers";
 import type {
@@ -251,28 +247,24 @@ export async function createExpense(client: Client, vehicle: Vehicle, formData: 
     amountBeforeTax,
     addFifteenPercentTax: formData.get("addTax") === "on",
   });
-  return createExpenseWithCashImpact(client, vehicle, {
-    category,
-    amountBeforeTax,
-    taxRate: tax.taxRate,
-    taxAmount: tax.taxAmount,
-    totalAmount: tax.totalAmount,
-    fundingSource: (stringValue(formData.get("fundingSource")) || "company_cash") as ExpenseFundingSource,
-    date: stringValue(formData.get("date")) || today(),
-    note: optionalString(formData.get("note")),
+  const { data, error } = await client.rpc("create_vehicle_expense_with_cash_impact", {
+    p_organization_id: vehicle.organizationId,
+    p_vehicle_id: vehicle.id,
+    p_recurring_template_id: null,
+    p_category: category,
+    p_amount_before_tax: amountBeforeTax,
+    p_tax_rate: tax.taxRate,
+    p_tax_amount: tax.taxAmount,
+    p_total_amount: tax.totalAmount,
+    p_funding_source: (stringValue(formData.get("fundingSource")) || "company_cash") as ExpenseFundingSource,
+    p_date: stringValue(formData.get("date")) || today(),
+    p_note: optionalString(formData.get("note")),
   });
+  if (error) throw error;
+  return String(data);
 }
 
 export async function updateExpense(client: Client, vehicle: Vehicle, expenseId: string, formData: FormData) {
-  const { data: existing, error: readError } = await client
-    .from("vehicle_expenses")
-    .select("*")
-    .eq("id", expenseId)
-    .eq("vehicle_id", vehicle.id)
-    .eq("organization_id", vehicle.organizationId)
-    .single();
-  if (readError) throw readError;
-  const existingExpense = mapExpense(existing as Record<string, unknown>);
   const amountBeforeTax = numberValue(formData.get("amountBeforeTax"));
   const category = stringValue(formData.get("category")) as ExpenseCategory;
   const tax = calculateExpenseTax({
@@ -281,21 +273,19 @@ export async function updateExpense(client: Client, vehicle: Vehicle, expenseId:
     amountBeforeTax,
     addFifteenPercentTax: formData.get("addTax") === "on",
   });
-  const fundingSource = existingExpense.fundingSource ?? "company_cash";
-  await assertFundingSourceBalance(client, vehicle.organizationId, fundingSource, tax.totalAmount, expenseId);
-  const { error } = await client.from("vehicle_expenses").update({
-    category,
-    amount_before_tax: amountBeforeTax,
-    tax_rate: tax.taxRate,
-    tax_amount: tax.taxAmount,
-    total_amount: tax.totalAmount,
-    date: stringValue(formData.get("date")) || today(),
-    note: optionalString(formData.get("note")),
-    updated_at: new Date().toISOString(),
-  }).eq("id", expenseId).eq("vehicle_id", vehicle.id);
+  const { error } = await client.rpc("update_vehicle_expense_with_cash_impact", {
+    p_organization_id: vehicle.organizationId,
+    p_vehicle_id: vehicle.id,
+    p_expense_id: expenseId,
+    p_category: category,
+    p_amount_before_tax: amountBeforeTax,
+    p_tax_rate: tax.taxRate,
+    p_tax_amount: tax.taxAmount,
+    p_total_amount: tax.totalAmount,
+    p_date: stringValue(formData.get("date")) || today(),
+    p_note: optionalString(formData.get("note")),
+  });
   if (error) throw error;
-  await updateExpenseCashImpact(client, vehicle, fundingSource, expenseId, tax.totalAmount, stringValue(formData.get("date")) || today(), optionalString(formData.get("note")));
-  await logActivity(client, vehicle.organizationId, "expense_updated", "vehicle", vehicle.id, category);
 }
 
 export async function createRecurringExpenseTemplate(client: Client, organizationId: string, formData: FormData) {
@@ -381,17 +371,21 @@ export async function applyRecurringExpenseTemplate(client: Client, vehicle: Veh
   if (error) throw error;
   if (!data) throw new Error("Template not found.");
   const template = mapRecurringExpenseTemplate(data as Record<string, unknown>);
-  return createExpenseWithCashImpact(client, vehicle, {
-    category: template.category,
-    amountBeforeTax: template.amountBeforeTax,
-    taxRate: template.taxRate,
-    taxAmount: template.taxAmount,
-    totalAmount: template.totalAmount,
-    fundingSource: template.defaultFundingSource,
-    date: today(),
-    note: template.description || template.name,
-    recurringTemplateId: template.id,
+  const { data: expenseId, error: createError } = await client.rpc("create_vehicle_expense_with_cash_impact", {
+    p_organization_id: vehicle.organizationId,
+    p_vehicle_id: vehicle.id,
+    p_recurring_template_id: template.id,
+    p_category: template.category,
+    p_amount_before_tax: template.amountBeforeTax,
+    p_tax_rate: template.taxRate,
+    p_tax_amount: template.taxAmount,
+    p_total_amount: template.totalAmount,
+    p_funding_source: template.defaultFundingSource,
+    p_date: today(),
+    p_note: template.description || template.name,
   });
+  if (createError) throw createError;
+  return String(expenseId);
 }
 
 export async function deleteExpense(client: Client, vehicle: Vehicle, expenseId: string) {
@@ -582,134 +576,6 @@ export async function createAttachment(client: Client, organizationId: string, f
     undefined,
     formData.get("isSensitive") === "on" ? "Sensitive document uploaded" : title,
   );
-}
-
-async function createExpenseWithCashImpact(
-  client: Client,
-  vehicle: Vehicle,
-  input: {
-    category: ExpenseCategory;
-    amountBeforeTax: number;
-    taxRate: number;
-    taxAmount: number;
-    totalAmount: number;
-    fundingSource: ExpenseFundingSource;
-    date: string;
-    note?: string | null;
-    recurringTemplateId?: string;
-  },
-) {
-  const user = await requireUser(client);
-  if (!["company_cash", "external_cash"].includes(input.fundingSource)) {
-    throw new Error("Funding source is invalid.");
-  }
-  await assertFundingSourceBalance(client, vehicle.organizationId, input.fundingSource, input.totalAmount);
-  const { data, error } = await client.from("vehicle_expenses").insert({
-    organization_id: vehicle.organizationId,
-    vehicle_id: vehicle.id,
-    recurring_template_id: input.recurringTemplateId ?? null,
-    category: input.category,
-    amount_before_tax: input.amountBeforeTax,
-    tax_rate: input.taxRate,
-    tax_amount: input.taxAmount,
-    total_amount: input.totalAmount,
-    funding_source: input.fundingSource,
-    date: input.date,
-    note: input.note,
-    created_by: user.id,
-  }).select("*").single();
-  if (error) throw error;
-  const expenseId = String(data.id);
-  await insertExpenseCashImpact(client, vehicle, input.fundingSource, expenseId, input.totalAmount, input.date, input.note ?? input.category, user.id);
-  await logActivity(client, vehicle.organizationId, "expense_added", "vehicle", vehicle.id, input.category);
-  return expenseId;
-}
-
-async function insertExpenseCashImpact(
-  client: Client,
-  vehicle: Vehicle,
-  fundingSource: ExpenseFundingSource,
-  expenseId: string,
-  amount: number,
-  date: string,
-  note: string,
-  userId: string,
-) {
-  if (amount <= 0) return;
-  const isExternal = fundingSource === "external_cash";
-  const { error } = await client.from(isExternal ? "external_cash_transactions" : "company_cash_transactions").insert({
-    organization_id: vehicle.organizationId,
-    type: isExternal ? "external_vehicle_expense_paid" : "vehicle_cost_paid",
-    amount,
-    date,
-    note: `Vehicle expense: ${note}`,
-    source_vehicle_id: vehicle.id,
-    source_expense_id: expenseId,
-    created_by: userId,
-  });
-  if (error) throw error;
-}
-
-async function updateExpenseCashImpact(
-  client: Client,
-  vehicle: Vehicle,
-  fundingSource: ExpenseFundingSource,
-  expenseId: string,
-  amount: number,
-  date: string,
-  note?: string | null,
-) {
-  const table = fundingSource === "external_cash" ? "external_cash_transactions" : "company_cash_transactions";
-  const { data: existing, error: readError } = await client
-    .from(table)
-    .select("id")
-    .eq("organization_id", vehicle.organizationId)
-    .eq("source_expense_id", expenseId)
-    .is("deleted_at", null)
-    .limit(1)
-    .maybeSingle();
-  if (readError) throw readError;
-  if (existing?.id) {
-    const { error } = await client.from(table).update({
-      amount,
-      date,
-      note: `Vehicle expense: ${note || expenseId}`,
-      updated_at: new Date().toISOString(),
-    }).eq("id", String(existing.id)).eq("organization_id", vehicle.organizationId);
-    if (error) throw error;
-    return;
-  }
-  const user = await requireUser(client);
-  await insertExpenseCashImpact(client, vehicle, fundingSource, expenseId, amount, date, note || expenseId, user.id);
-}
-
-async function assertFundingSourceBalance(
-  client: Client,
-  organizationId: string,
-  fundingSource: ExpenseFundingSource,
-  nextAmount: number,
-  replacingExpenseId?: string,
-) {
-  if (nextAmount <= 0) return;
-  if (fundingSource === "company_cash") {
-    const rows = await selectOrgRows(client, "company_cash_transactions", organizationId);
-    const transactions = rows.map(mapCompanyCashTransaction);
-    const currentImpact = replacingExpenseId
-      ? transactions.find((transaction) => transaction.sourceExpenseId === replacingExpenseId && !transaction.deletedAt)?.amount ?? 0
-      : 0;
-    if (nextAmount > calculateCompanyCashBalance(transactions) + currentImpact) {
-      throw new Error("Company cash does not have enough available balance for this expense.");
-    }
-    return;
-  }
-  const rows = await selectOrgRows(client, "external_cash_transactions", organizationId);
-  const transactions = rows.map(mapExternalCashTransaction);
-  const currentImpact = replacingExpenseId
-    ? transactions.find((transaction) => transaction.sourceExpenseId === replacingExpenseId && !transaction.deletedAt)?.amount ?? 0
-    : 0;
-  if (nextAmount > calculateExternalCashBalance(transactions) + currentImpact) {
-    throw new Error("External cash does not have enough available balance for this expense.");
-  }
 }
 
 async function ensureProfile(client: Client, user: User) {

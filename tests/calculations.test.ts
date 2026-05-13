@@ -1079,6 +1079,33 @@ test("purchase tax consistency migration makes SQL source-aware", () => {
   assert.doesNotMatch(sql, /'Automatic 5% purchase tax'/i);
 });
 
+test("atomic expense migration moves expense and cash impact into RPCs", () => {
+  const sql = readFileSync(join(process.cwd(), "supabase/migrations/20260515_atomic_expense_cash_impact.sql"), "utf8");
+  const repository = readFileSync(join(process.cwd(), "src/lib/supabase/repository.ts"), "utf8");
+
+  assert.match(sql, /create or replace function create_vehicle_expense_with_cash_impact/i);
+  assert.match(sql, /create or replace function update_vehicle_expense_with_cash_impact/i);
+  assert.match(sql, /from organizations\s+where id = p_organization_id\s+for update/i);
+  assert.match(sql, /from vehicles[\s\S]+for update/i);
+  assert.match(sql, /from vehicle_expenses[\s\S]+for update/i);
+  assert.match(sql, /organization_company_cash_balance\(p_organization_id\)/i);
+  assert.match(sql, /organization_external_cash_balance\(p_organization_id\)/i);
+  assert.match(sql, /insert into vehicle_expenses/i);
+  assert.match(sql, /insert into company_cash_transactions/i);
+  assert.match(sql, /insert into external_cash_transactions/i);
+  assert.match(sql, /update vehicle_expenses/i);
+  assert.match(sql, /update company_cash_transactions/i);
+  assert.match(sql, /update external_cash_transactions/i);
+  assert.match(sql, /grant execute on function create_vehicle_expense_with_cash_impact/i);
+  assert.match(sql, /grant execute on function update_vehicle_expense_with_cash_impact/i);
+
+  assert.match(repository, /rpc\("create_vehicle_expense_with_cash_impact"/i);
+  assert.match(repository, /rpc\("update_vehicle_expense_with_cash_impact"/i);
+  assert.doesNotMatch(repository, /createExpenseWithCashImpact|insertExpenseCashImpact|updateExpenseCashImpact|assertFundingSourceBalance/);
+  assert.doesNotMatch(repository, /\.from\("vehicle_expenses"\)\.insert/);
+  assert.doesNotMatch(repository, /\.from\("vehicle_expenses"\)\.update/);
+});
+
 test("recurring expense migration replaces hardcoded plate commission with templates", () => {
   const sql = readFileSync(join(process.cwd(), "supabase/migrations/20260509_recurring_expenses_funding_source.sql"), "utf8");
   const p0Sql = readFileSync(join(process.cwd(), "supabase/migrations/20260508_p0_atomic_security.sql"), "utf8");
