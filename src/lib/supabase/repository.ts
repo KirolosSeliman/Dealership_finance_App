@@ -452,6 +452,33 @@ export async function recordVehicleSale(client: Client, _appData: AppData, vehic
   return String(data);
 }
 
+export async function voidVehicleSale(client: Client, organizationId: string, saleId: string, reason: string) {
+  const { error } = await client.rpc("void_vehicle_sale_atomic", {
+    p_organization_id: organizationId,
+    p_sale_id: saleId,
+    p_reason: reason,
+  });
+  if (error) throw error;
+}
+
+export async function correctVehicleSale(client: Client, organizationId: string, saleId: string, formData: FormData) {
+  const { data, error } = await client.rpc("correct_vehicle_sale_atomic", {
+    p_organization_id: organizationId,
+    p_sale_id: saleId,
+    p_sale_date: stringValue(formData.get("saleDate")) || today(),
+    p_taxable_profit_amount: numberValue(formData.get("taxableProfitAmount")),
+    p_real_client_payment: numberValue(formData.get("realClientPayment")),
+    p_buyer_name: optionalString(formData.get("buyerName")),
+    p_phone: optionalString(formData.get("phone")),
+    p_email: optionalString(formData.get("email")),
+    p_address: optionalString(formData.get("address")),
+    p_notes: optionalString(formData.get("notes")),
+    p_reason: stringValue(formData.get("reason")),
+  });
+  if (error) throw error;
+  return String(data);
+}
+
 export async function createCashTransaction(
   client: Client,
   organizationId: string,

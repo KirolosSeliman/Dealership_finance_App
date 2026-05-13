@@ -142,6 +142,12 @@ export interface Sale {
   realClientPayment: number;
   externalCommission: number;
   notes?: string;
+  status?: "active" | "voided" | "corrected";
+  voidedAt?: string;
+  voidedBy?: string;
+  voidReason?: string;
+  correctedBySaleId?: string;
+  correctionOfSaleId?: string;
   createdAt: string;
   createdBy: string;
 }
@@ -199,6 +205,7 @@ export interface CompanyCashTransaction {
   note?: string;
   sourceVehicleId?: string;
   sourceExpenseId?: string;
+  sourceSaleId?: string;
   createdAt: string;
   createdBy: string;
   updatedAt?: string;
@@ -221,6 +228,7 @@ export interface ExternalCashTransaction {
   note?: string;
   sourceVehicleId?: string;
   sourceExpenseId?: string;
+  sourceSaleId?: string;
   createdAt: string;
   createdBy: string;
   updatedAt?: string;

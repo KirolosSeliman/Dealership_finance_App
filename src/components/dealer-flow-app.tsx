@@ -54,6 +54,7 @@ import {
   calculateExternalCashBalance,
   daysBetween,
   generateTaxReport,
+  isActiveSale,
 } from "@/lib/domain/calculations";
 import { verifyBackupExport } from "@/lib/backup/export";
 import { getDictionary } from "@/lib/i18n";
@@ -605,6 +606,34 @@ export function DealerFlowApp() {
     }
   }
 
+  async function voidSale(saleId: string, reason: string) {
+    if (!supabase || !activeOrganization) return;
+    setLoading(true);
+    setErrorMessage("");
+    try {
+      await serverMutation("voidSale", newMutationForm({ organizationId: activeOrganization.id, saleId, reason }));
+      await refreshData(activeOrganization.id);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not void sale.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function correctSale(saleId: string, formData: FormData) {
+    if (!supabase || !activeOrganization) return;
+    setLoading(true);
+    setErrorMessage("");
+    try {
+      await serverMutation("correctSale", cloneFormData(formData, { organizationId: activeOrganization.id, saleId }));
+      await refreshData(activeOrganization.id);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Could not correct sale.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   async function editVehicle(formData: FormData) {
     if (!supabase || !selectedVehicle) return;
     setLoading(true);
@@ -962,6 +991,8 @@ export function DealerFlowApp() {
               editExpense={editExpense}
               deleteExpense={removeExpense}
               recordSale={recordSale}
+              voidSale={voidSale}
+              correctSale={correctSale}
               addAttachment={addAttachment}
               setMainPhoto={setVehicleMainPhoto}
               permissions={permissions}
@@ -1182,13 +1213,13 @@ function Dashboard({
   navigate: (view: View, options?: { mode?: VehicleMode; vehicleId?: string; tab?: VehicleTab }) => void;
   permissions: Permissions;
 }) {
-  const visibleSales = scoped.sales.filter((sale) => isInDateRange(sale.saleDate, dateRange));
+  const visibleSales = scoped.sales.filter((sale) => isActiveSale(sale) && isInDateRange(sale.saleDate, dateRange));
   const visibleExpenses = scoped.expenses.filter((expense) => isInDateRange(expense.date, dateRange));
   const activeCompanyTransactions = scoped.companyCashTransactions.filter((transaction) => !transaction.deletedAt);
   const activeExternalTransactions = scoped.externalCashTransactions.filter((transaction) => !transaction.deletedAt);
   const visibleVehicles = activeVehiclesOnly(scoped.vehicles).filter((vehicle) => isInDateRange(vehicle.purchaseDate, dateRange));
   const visibleSoldVehicles = scoped.vehicles.filter((vehicle) => {
-    const sale = scoped.sales.find((item) => item.vehicleId === vehicle.id);
+    const sale = scoped.sales.find((item) => item.vehicleId === vehicle.id && isActiveSale(item));
     return sale ? isInDateRange(sale.saleDate, dateRange) : false;
   });
   const rangeMetrics = calculateDashboardMetrics({
@@ -1226,7 +1257,7 @@ function Dashboard({
   })));
   const vehiclesSoldSeries = buildDailySeries(visibleSales.map((sale) => ({ date: sale.saleDate, value: 1 })));
   const lotTimeSeries = buildDailySeries(visibleSoldVehicles.map((vehicle) => {
-    const sale = scoped.sales.find((item) => item.vehicleId === vehicle.id);
+    const sale = scoped.sales.find((item) => item.vehicleId === vehicle.id && isActiveSale(item));
     return { date: sale?.saleDate ?? vehicle.purchaseDate, value: sale ? daysBetween(vehicle.purchaseDate, sale.saleDate) : 0 };
   }));
 
@@ -1280,7 +1311,7 @@ function Dashboard({
                 t={t}
                 vehicle={vehicle}
                 expenses={scoped.expenses}
-                sale={scoped.sales.find((item) => item.vehicleId === vehicle.id)}
+                sale={scoped.sales.find((item) => item.vehicleId === vehicle.id && isActiveSale(item))}
                 onOpen={() => navigate("vehicles", { mode: "detail", vehicleId: vehicle.id, tab: "overview" })}
               />
             ))}
@@ -1372,6 +1403,8 @@ function VehiclesSection(props: {
   editExpense: (expenseId: string, formData: FormData) => void;
   deleteExpense: (expenseId: string) => void;
   recordSale: (formData: FormData) => void;
+  voidSale: (saleId: string, reason: string) => void;
+  correctSale: (saleId: string, formData: FormData) => void;
   addAttachment: (formData: FormData, relation: Record<string, string | undefined>) => void;
   setMainPhoto: (attachment: Attachment) => void;
   permissions: Permissions;
@@ -1437,7 +1470,7 @@ function Inventory({
               t={t}
               vehicle={vehicle}
               expenses={expenses}
-              sale={sales.find((item) => item.vehicleId === vehicle.id)}
+              sale={sales.find((item) => item.vehicleId === vehicle.id && isActiveSale(item))}
               onOpen={() => navigate("vehicles", { mode: "detail", vehicleId: vehicle.id, tab: "overview" })}
             />
           ))}
@@ -1459,7 +1492,7 @@ function Inventory({
                 </tr>
               )}
               {vehicles.map((vehicle) => {
-                const sale = sales.find((item) => item.vehicleId === vehicle.id);
+                const sale = sales.find((item) => item.vehicleId === vehicle.id && isActiveSale(item));
                 const totalCost = calculateVehicleTotalCost(vehicle, expenses);
                 const expenseTotal = expenses.filter((expense) => expense.vehicleId === vehicle.id).reduce((sum, expense) => sum + expense.totalAmount, 0);
                 return (
@@ -1507,12 +1540,14 @@ function VehicleDetailTabs({
   deleteExpense,
   deleteVehicle,
   recordSale,
+  voidSale,
+  correctSale,
   addAttachment,
   setMainPhoto,
   permissions,
   loading,
 }: Parameters<typeof VehiclesSection>[0] & { vehicle: Vehicle }) {
-  const sale = sales.find((item) => item.vehicleId === vehicle.id);
+  const sale = sales.find((item) => item.vehicleId === vehicle.id && isActiveSale(item));
   const vehicleAttachments = attachments.filter((attachment) => attachment.vehicleId === vehicle.id || attachment.saleId === sale?.id);
   const vehiclePhotos = attachments.filter((attachment) => attachment.vehicleId === vehicle.id && attachment.type === "photo");
   const totalCost = calculateVehicleTotalCost(vehicle, expenses);
@@ -1640,7 +1675,7 @@ function VehicleDetailTabs({
       {selectedTab === "details" && <VehicleDetailsTab t={t} vehicle={vehicle} sale={sale} onSubmit={editVehicle} permissions={permissions} />}
       {selectedTab === "expenses" && <Expenses t={t} vehicle={vehicle} expenses={expenses} recurringExpenseTemplates={recurringExpenseTemplates} onSubmit={addExpense} onApplyTemplate={applyRecurringExpenseTemplate} onEdit={editExpense} onDelete={deleteExpense} permissions={permissions} loading={loading} />}
       {selectedTab === "documents" && <DocumentsTab t={t} vehicle={vehicle} attachments={vehicleAttachments} onSubmit={addAttachment} permissions={permissions} />}
-      {selectedTab === "sale" && <SaleForm t={t} vehicle={vehicle} expenses={expenses} onSubmit={recordSale} sale={sale} permissions={permissions} />}
+      {selectedTab === "sale" && <SaleForm t={t} vehicle={vehicle} expenses={expenses} onSubmit={recordSale} onVoid={voidSale} onCorrect={correctSale} sale={sale} permissions={permissions} />}
       {selectedTab === "timeline" && (
         <Panel title={tabLabel(t, "timeline")}>
           <Ledger
@@ -2018,15 +2053,58 @@ function DocumentsTab({
   );
 }
 
-function SaleForm({ t, vehicle, expenses, onSubmit, sale, permissions }: { t: ReturnType<typeof getDictionary>; vehicle: Vehicle; expenses: VehicleExpense[]; onSubmit: (formData: FormData) => void; sale?: Sale; permissions: Permissions }) {
+function SaleForm({
+  t,
+  vehicle,
+  expenses,
+  onSubmit,
+  onVoid,
+  onCorrect,
+  sale,
+  permissions,
+}: {
+  t: ReturnType<typeof getDictionary>;
+  vehicle: Vehicle;
+  expenses: VehicleExpense[];
+  onSubmit: (formData: FormData) => void;
+  onVoid: (saleId: string, reason: string) => void;
+  onCorrect: (saleId: string, formData: FormData) => void;
+  sale?: Sale;
+  permissions: Permissions;
+}) {
   const [taxableProfitAmount, setTaxableProfitAmount] = useState(sale?.taxableProfitAmount ?? 1500);
   const [realClientPayment, setRealClientPayment] = useState(sale?.realClientPayment ?? 0);
+  const [voidReason, setVoidReason] = useState("");
   const vehicleTotalCost = calculateVehicleTotalCost(vehicle, expenses);
   const breakdown = calculateSaleBreakdown({ vehicleTotalCost, taxableProfitAmount, realClientPayment });
   return (
     <div className="grid gap-4 xl:grid-cols-[420px_1fr]">
       {sale ? (
-        <EmptyState title="Vehicle already sold" copy="The recorded sale is shown in the summary. A second sale cannot be created for the same vehicle." />
+        <div className="panel space-y-4">
+          <h3 className="section-title">Sale correction</h3>
+          <p className="text-sm text-slate-400">Corrections preserve the original sale, reverse its cash impact, and create a new active sale.</p>
+          {permissions.manageSales ? (
+            <>
+              <form className="grid gap-3" action={(formData) => onCorrect(sale.id, formData)}>
+                <Field label={t.fields.saleDate}><input className="control w-full" name="saleDate" type="date" defaultValue={sale.saleDate} /></Field>
+                <Field label={t.fields.taxableProfit}><input className="control w-full" name="taxableProfitAmount" type="number" step="0.01" defaultValue={sale.taxableProfitAmount} /></Field>
+                <Field label={t.fields.realClientPayment}><input className="control w-full" name="realClientPayment" type="number" step="0.01" defaultValue={sale.realClientPayment} /></Field>
+                <Field label={t.fields.buyerName}><input className="control w-full" name="buyerName" /></Field>
+                <Field label={t.fields.phone}><input className="control w-full" name="phone" /></Field>
+                <Field label={t.fields.email}><input className="control w-full" name="email" type="email" /></Field>
+                <Field label={t.fields.address}><input className="control w-full" name="address" /></Field>
+                <Field label="Correction reason"><textarea className="control min-h-20 w-full" name="reason" required /></Field>
+                <Field label={t.fields.notes}><textarea className="control min-h-20 w-full" name="notes" defaultValue={sale.notes} /></Field>
+                <button className="secondary-button" type="submit">Correct sale</button>
+              </form>
+              <div className="rounded-md border border-rose-400/30 bg-rose-900/10 p-3">
+                <p className="text-sm text-rose-100">Void only for cancelled or accidental sales. This adds reversal cash entries and returns the vehicle to listed status.</p>
+                <textarea className="control mt-3 min-h-20 w-full" value={voidReason} onChange={(event) => setVoidReason(event.target.value)} placeholder="Reason for void" />
+                <button className="danger-button mt-3" type="button" disabled={voidReason.trim().length < 3} onClick={() => onVoid(sale.id, voidReason.trim())}>Void sale</button>
+              </div>
+            </>
+          ) : <EmptyState title="Read-only sale correction" copy="Your role cannot correct or void sales." />}
+        </div>
       ) : permissions.manageSales ? <form className="panel space-y-4" action={onSubmit}>
         <h3 className="section-title">{t.actions.recordSale}</h3>
         <Field label={t.fields.saleDate}><input className="control w-full" name="saleDate" type="date" defaultValue={today()} /></Field>
@@ -3363,7 +3441,7 @@ function buildBalanceSeries<T extends CashTransaction>(
 
 function buildMonthlyBuySellSeries(scoped: AppData, range: { start: string; end: string }) {
   const months = new Map<string, { label: string; buyTotal: number; sellTotal: number; count: number }>();
-  scoped.sales.filter((sale) => isInDateRange(sale.saleDate, range)).forEach((sale) => {
+  scoped.sales.filter((sale) => isActiveSale(sale) && isInDateRange(sale.saleDate, range)).forEach((sale) => {
     const key = sale.saleDate.slice(0, 7);
     const current = months.get(key) ?? { label: key.slice(5), buyTotal: 0, sellTotal: 0, count: 0 };
     current.buyTotal += sale.vehicleTotalCost;

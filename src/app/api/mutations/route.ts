@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { calculateCompanyCashBalance, calculateExternalCashBalance } from "@/lib/domain/calculations";
+import { calculateCompanyCashBalance, calculateExternalCashBalance, isActiveSale } from "@/lib/domain/calculations";
 import { assertSameOrigin, checkRateLimit } from "@/lib/server/security";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
@@ -11,6 +11,7 @@ import {
   createOrganization,
   createRecurringExpenseTemplate,
   createVehicle,
+  correctVehicleSale,
   deleteCashTransaction,
   deleteExpense,
   deleteRecurringExpenseTemplate,
@@ -23,6 +24,7 @@ import {
   updateRecurringExpenseTemplate,
   updateVehicle,
   updateVehicleMainPhoto,
+  voidVehicleSale,
 } from "@/lib/supabase/repository";
 import { mapAttachment, mapVehicle } from "@/lib/supabase/mappers";
 import { isValidVehicleDeleteConfirmation } from "@/lib/vehicle-delete";
@@ -41,7 +43,9 @@ import {
   regenerateInvitationSchema,
   recurringExpenseTemplateSchema,
   roleUpdateSchema,
+  saleCorrectionSchema,
   saleSchema,
+  saleVoidSchema,
   deleteVehicleSchema,
   vehicleAnyUpdateSchema,
   vehicleSchema,
@@ -63,6 +67,8 @@ type Operation =
   | "deleteRecurringExpenseTemplate"
   | "applyRecurringExpenseTemplate"
   | "recordSale"
+  | "voidSale"
+  | "correctSale"
   | "createCashTransaction"
   | "updateCashTransaction"
   | "deleteCashTransaction"
@@ -166,11 +172,33 @@ export async function POST(request: Request) {
         saleSchema.parse(formDataToObject(formData));
         const vehicle = await getVehicle(supabase, organizationId, String(formData.get("vehicleId") || ""));
         const appData = await loadAppData(supabase, userData.user, organizationId);
-        if (appData.sales.some((sale) => sale.vehicleId === vehicle.id)) {
+        if (appData.sales.some((sale) => sale.vehicleId === vehicle.id && isActiveSale(sale))) {
           throw new ApiError(400, "This vehicle already has a sale record.");
         }
         await recordVehicleSale(supabase, appData, vehicle, formData);
         return ok();
+      }
+      case "voidSale": {
+        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin", "member"]);
+        saleVoidSchema.parse(formDataToObject(formData));
+        await voidVehicleSale(
+          supabase,
+          organizationId,
+          String(formData.get("saleId") || ""),
+          String(formData.get("reason") || ""),
+        );
+        return ok();
+      }
+      case "correctSale": {
+        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin", "member"]);
+        saleCorrectionSchema.parse(formDataToObject(formData));
+        const id = await correctVehicleSale(
+          supabase,
+          organizationId,
+          String(formData.get("saleId") || ""),
+          formData,
+        );
+        return ok({ id });
       }
       case "createRecurringExpenseTemplate": {
         await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin"]);
@@ -477,6 +505,19 @@ function toClientErrorMessage(error: unknown, operation: Operation) {
     ) {
       console.error("[updateVehicle] missing database RPC. Apply the latest vehicle correction migration in Supabase.");
       return "Vehicle correction database migration is missing. Run the latest vehicle correction migration in Supabase, then try again.";
+    }
+    return message;
+  }
+  if (operation === "voidSale" || operation === "correctSale") {
+    const normalized = message.toLowerCase();
+    if (
+      normalized.includes("void_vehicle_sale_atomic") ||
+      normalized.includes("correct_vehicle_sale_atomic") ||
+      normalized.includes("could not find the function") ||
+      normalized.includes("does not exist")
+    ) {
+      console.error("[saleCorrection] missing database RPC. Apply the latest sale correction migration in Supabase.");
+      return "Sale correction database migration is missing. Run the latest sale correction migration in Supabase, then try again.";
     }
     return message;
   }

@@ -243,7 +243,12 @@ export async function averageBuySellChart(request: Request) {
     if (userError || !userData.user) return NextResponse.json({ ok: false, message: "Authentication required." }, { status: 401 });
     const organizationId = new URL(request.url).searchParams.get("organizationId") ?? "";
     await requireOrganizationRole(client, userData.user.id, organizationId, ["owner", "admin", "member", "accountant", "viewer"]);
-    const { data, error } = await client.from("sales").select("sale_date, paper_sale_price, vehicle_total_cost").eq("organization_id", organizationId);
+    const { data, error } = await client
+      .from("sales")
+      .select("sale_date, paper_sale_price, vehicle_total_cost")
+      .eq("organization_id", organizationId)
+      .is("voided_at", null)
+      .eq("status", "active");
     if (error) throw error;
     const months = buildLastTwelveMonths();
     for (const sale of data ?? []) {

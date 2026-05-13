@@ -23,7 +23,7 @@ import { convertDealRadarListingToInventory } from "../src/lib/market-snap/repos
 import { importPayloadSchema, marketListingPayloadSchema } from "../src/lib/market-snap/validation";
 import { assertAllowedUpload, canExportTaxReports, canManageBackups, sanitizeCsvCell, sanitizeStorageFileName } from "../src/lib/security";
 import { assertSameOrigin, checkRateLimit, resetRateLimitForTests, RouteSecurityError } from "../src/lib/server/security";
-import { activityLogSchema, applyRecurringExpenseTemplateSchema, attachmentSchema, backupRequestSchema, expenseSchema, recurringExpenseTemplateSchema, regenerateInvitationSchema, taxExportSchema, vehicleAnyUpdateSchema } from "../src/lib/validation";
+import { activityLogSchema, applyRecurringExpenseTemplateSchema, attachmentSchema, backupRequestSchema, expenseSchema, recurringExpenseTemplateSchema, regenerateInvitationSchema, saleCorrectionSchema, saleVoidSchema, taxExportSchema, vehicleAnyUpdateSchema } from "../src/lib/validation";
 import { dedupeOrganizationsByHighestRole, emptyAppData, mapExpense, mapVehicle } from "../src/lib/supabase/mappers";
 import { activeVehiclesOnly, isValidVehicleDeleteConfirmation } from "../src/lib/vehicle-delete";
 import type {
@@ -746,6 +746,104 @@ test("tax report period totals filter vehicles by purchase date without losing p
     netProfitAfterTax: 0,
     companyCashAdded: 0,
   });
+});
+
+test("voided sales are excluded from dashboard and tax report totals", () => {
+  const activeSale: Sale = {
+    id: "active-sale",
+    organizationId: "org-1",
+    vehicleId: "vehicle-1",
+    saleDate: "2026-03-01",
+    vehicleTotalCost: 10000,
+    taxableProfitAmount: 2000,
+    profitTaxDue: 440,
+    paperSalePrice: 12000,
+    realClientPayment: 13000,
+    externalCommission: 1000,
+    status: "active",
+    createdAt: "2026-03-01",
+    createdBy: "user-1",
+  };
+  const voidedSale: Sale = {
+    ...activeSale,
+    id: "voided-sale",
+    taxableProfitAmount: 9000,
+    profitTaxDue: 1980,
+    paperSalePrice: 19000,
+    externalCommission: 5000,
+    status: "voided",
+    voidedAt: "2026-03-02",
+  };
+
+  const report = generateTaxReport({
+    vehicles: [vehicle],
+    expenses: [],
+    sales: [activeSale, voidedSale],
+    companyCashTransactions: [],
+    externalCashTransactions: [],
+  });
+  const metrics = calculateDashboardMetrics({
+    vehicles: [vehicle],
+    expenses: [],
+    sales: [activeSale, voidedSale],
+    companyCashTransactions: [],
+    externalCashTransactions: [],
+  });
+
+  assert.equal(report.totalTaxableProfit, 2000);
+  assert.equal(report.totalCompanySales, 12000);
+  assert.equal(report.totalExternalCommission, 1000);
+  assert.equal(metrics.netProfit, 1560);
+});
+
+test("sale void and correction validation requires auditable reasons", () => {
+  assert.equal(saleVoidSchema.safeParse({
+    saleId: "63c47786-fb41-40c1-a573-71346969b9e0",
+    reason: "Customer cancelled",
+  }).success, true);
+  assert.equal(saleVoidSchema.safeParse({
+    saleId: "63c47786-fb41-40c1-a573-71346969b9e0",
+    reason: "",
+  }).success, false);
+  assert.equal(saleCorrectionSchema.safeParse({
+    saleId: "63c47786-fb41-40c1-a573-71346969b9e0",
+    saleDate: "2026-03-05",
+    taxableProfitAmount: 2500,
+    realClientPayment: 14000,
+    buyerName: "Correct Buyer",
+    reason: "Wrong payment amount",
+  }).success, true);
+});
+
+test("sale void correction migration preserves sale and reverses cash impacts", () => {
+  const sql = readFileSync(join(process.cwd(), "supabase/migrations/20260518_sale_void_correction_workflow.sql"), "utf8");
+  const calculations = readFileSync(join(process.cwd(), "src/lib/domain/calculations.ts"), "utf8");
+  const marketSnapApi = readFileSync(join(process.cwd(), "src/lib/server/market-snap-api.ts"), "utf8");
+  const repository = readFileSync(join(process.cwd(), "src/lib/supabase/repository.ts"), "utf8");
+
+  assert.match(sql, /add column if not exists voided_at timestamptz/i);
+  assert.match(sql, /add column if not exists corrected_by_sale_id uuid references sales/i);
+  assert.match(sql, /add column if not exists correction_of_sale_id uuid references sales/i);
+  assert.match(sql, /drop constraint if exists sales_one_per_vehicle/i);
+  assert.match(sql, /create unique index sales_one_active_per_vehicle_idx/i);
+  assert.match(sql, /create or replace function void_vehicle_sale_atomic/i);
+  assert.match(sql, /create or replace function correct_vehicle_sale_atomic/i);
+  assert.match(sql, /for update/i);
+  assert.match(sql, /organization_company_cash_balance\(p_organization_id\) - sale_record\.paper_sale_price < 0/i);
+  assert.match(sql, /company_cash_withdrawn/i);
+  assert.match(sql, /external_cash_personally_removed/i);
+  assert.match(sql, /source_sale_id/i);
+  assert.match(sql, /status = 'voided'/i);
+  assert.match(sql, /status = 'corrected'/i);
+  assert.match(sql, /record_vehicle_sale_atomic/i);
+  assert.match(sql, /grant execute on function void_vehicle_sale_atomic/i);
+  assert.match(sql, /grant execute on function correct_vehicle_sale_atomic/i);
+
+  assert.match(calculations, /function isActiveSale/i);
+  assert.match(marketSnapApi, /\.is\("voided_at", null\)/i);
+  assert.match(marketSnapApi, /\.eq\("status", "active"\)/i);
+  assert.match(repository, /rpc\("void_vehicle_sale_atomic"/i);
+  assert.match(repository, /rpc\("correct_vehicle_sale_atomic"/i);
 });
 
 test("dashboard metrics use sold and in-stock vehicle status", () => {

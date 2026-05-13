@@ -108,6 +108,16 @@ export const saleSchema = z.object({
   notes: optionalText,
 });
 
+export const saleVoidSchema = z.object({
+  saleId: z.string().uuid(),
+  reason: z.string().trim().min(3).max(500),
+});
+
+export const saleCorrectionSchema = saleSchema.extend({
+  saleId: z.string().uuid(),
+  reason: z.string().trim().min(3).max(500),
+});
+
 export const cashTransactionSchema = z.object({
   type: z.string().min(1).max(80),
   amount: positiveMoney,

@@ -122,11 +122,12 @@ export function calculateDashboardMetrics(input: {
   companyCashTransactions: CompanyCashTransaction[];
   externalCashTransactions: ExternalCashTransaction[];
 }) {
+  const activeSales = input.sales.filter(isActiveSale);
   const vehiclesById = indexVehiclesById(input.vehicles);
   const vehiclesInStock = input.vehicles.filter((vehicle) =>
     !vehicle.archivedAt && ["purchased", "in_repair", "listed_for_sale"].includes(vehicle.status),
   );
-  const soldVehicles = input.vehicles.filter((vehicle) => vehicle.status === "sold");
+  const soldVehicles = input.vehicles.filter((vehicle) => vehicle.status === "sold" && activeSales.some((sale) => sale.vehicleId === vehicle.id));
   const inventoryValue = vehiclesInStock.reduce(
     (sum, vehicle) => sum + calculateVehicleTotalCost(vehicle, input.expenses),
     0,
@@ -134,16 +135,16 @@ export function calculateDashboardMetrics(input: {
   const totalExpenses =
     input.vehicles.reduce((sum, vehicle) => sum + vehicle.purchasePrice, 0) +
     input.expenses.reduce((sum, expense) => sum + normalizedExpenseAmount(expense, vehiclesById.get(expense.vehicleId)), 0);
-  const totalTaxableProfit = input.sales.reduce(
+  const totalTaxableProfit = activeSales.reduce(
     (sum, sale) => sum + sale.taxableProfitAmount,
     0,
   );
-  const totalProfitTaxDue = input.sales.reduce((sum, sale) => sum + sale.profitTaxDue, 0);
+  const totalProfitTaxDue = activeSales.reduce((sum, sale) => sum + sale.profitTaxDue, 0);
   const averageTimeToSell =
     soldVehicles.length === 0
       ? 0
       : soldVehicles.reduce((sum, vehicle) => {
-          const sale = input.sales.find((item) => item.vehicleId === vehicle.id);
+          const sale = activeSales.find((item) => item.vehicleId === vehicle.id);
           if (!sale) return sum;
           return sum + daysBetween(vehicle.purchaseDate, sale.saleDate);
         }, 0) / soldVehicles.length;
@@ -169,7 +170,7 @@ export function generateTaxReport(input: {
   startDate?: string;
   endDate?: string;
 }) {
-  const sales = filterByDate(input.sales, "saleDate", input.startDate, input.endDate);
+  const sales = filterByDate(input.sales.filter(isActiveSale), "saleDate", input.startDate, input.endDate);
   const expenses = filterByDate(input.expenses, "date", input.startDate, input.endDate);
   const companyCash = filterByDate(
     input.companyCashTransactions.filter((transaction) => !transaction.deletedAt),
@@ -222,6 +223,10 @@ export function generateTaxReport(input: {
         .reduce((sum, transaction) => sum + transaction.amount, 0),
     ),
   };
+}
+
+export function isActiveSale(sale: Sale) {
+  return !sale.voidedAt && (sale.status ?? "active") === "active";
 }
 
 export function filterVehiclesByPurchaseDate(vehicles: Vehicle[], startDate?: string, endDate?: string) {
