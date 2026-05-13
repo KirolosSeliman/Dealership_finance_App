@@ -10,7 +10,7 @@ import type { VehicleValuation } from "@/types/market-snap";
 
 export async function GET(request: Request) {
   try {
-    checkRateLimit(request, "market-snap-daily-refresh", { limit: 5, windowMs: 60_000 });
+    await checkRateLimit(request, "market-snap-daily-refresh", { limit: 5, windowMs: 60_000 });
     const cronSecret = process.env.CRON_SECRET;
     if (!cronSecret?.trim()) return NextResponse.json({ ok: false, message: "CRON_SECRET is required." }, { status: 503 });
     if (!hasValidBearerSecret(request.headers.get("authorization"), cronSecret)) {

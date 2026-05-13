@@ -37,6 +37,7 @@ Required server-only variables:
 
 - `SUPABASE_SERVICE_ROLE_KEY`
 - `CRON_SECRET`
+- `RATE_LIMIT_BACKEND=supabase` for production persistent rate limiting
 
 Cloudflare R2 automatic backups require:
 

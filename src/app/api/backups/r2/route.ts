@@ -23,7 +23,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     assertSameOrigin(request);
-    checkRateLimit(request, "backup-r2", { limit: 8, windowMs: 60_000 });
+    await checkRateLimit(request, "backup-r2", { limit: 8, windowMs: 60_000 });
 
     const missing = required.filter((key) => !process.env[key]);
 
@@ -44,7 +44,7 @@ export async function POST(request: Request) {
     if (userError || !userData.user) {
       return NextResponse.json({ ok: false, message: "Authentication required." }, { status: 401 });
     }
-    checkRateLimit(request, "backup-r2-user", { limit: 4, windowMs: 60_000, userId: userData.user.id });
+    await checkRateLimit(request, "backup-r2-user", { limit: 4, windowMs: 60_000, userId: userData.user.id });
     await requireOrganizationRole(supabase, userData.user.id, body.organizationId, ["owner", "admin"]);
 
     const appData = await loadAppData(supabase, userData.user, body.organizationId);

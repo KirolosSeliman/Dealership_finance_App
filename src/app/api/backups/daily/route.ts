@@ -20,7 +20,7 @@ const organizationTables = [
 
 export async function GET(request: Request) {
   try {
-    checkRateLimit(request, "daily-backup", { limit: 5, windowMs: 60_000 });
+    await checkRateLimit(request, "daily-backup", { limit: 5, windowMs: 60_000 });
     const cronSecret = process.env.CRON_SECRET;
     const authHeader = request.headers.get("authorization");
     if (!cronSecret?.trim()) {

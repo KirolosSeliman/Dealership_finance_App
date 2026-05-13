@@ -84,7 +84,7 @@ type Operation =
 export async function POST(request: Request) {
   try {
     assertSameOrigin(request);
-    checkRateLimit(request, "mutations", { limit: 90, windowMs: 60_000 });
+    await checkRateLimit(request, "mutations", { limit: 90, windowMs: 60_000 });
   } catch (error) {
     const status = error instanceof Error && "status" in error ? Number((error as { status: number }).status) : 400;
     return NextResponse.json({ ok: false, message: error instanceof Error ? error.message : "Request failed." }, { status });
@@ -100,7 +100,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, message: "Authentication required." }, { status: 401 });
   }
   try {
-    checkRateLimit(request, "mutations-user", { limit: 60, windowMs: 60_000, userId: userData.user.id });
+    await checkRateLimit(request, "mutations-user", { limit: 60, windowMs: 60_000, userId: userData.user.id });
   } catch (error) {
     const status = error instanceof Error && "status" in error ? Number((error as { status: number }).status) : 400;
     return NextResponse.json({ ok: false, message: error instanceof Error ? error.message : "Request failed." }, { status });

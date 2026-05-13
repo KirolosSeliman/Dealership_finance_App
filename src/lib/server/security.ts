@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { createClient } from "@supabase/supabase-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Role } from "@/types/domain";
 
@@ -7,6 +9,7 @@ type RateLimitEntry = {
 };
 
 const rateLimitStore = new Map<string, RateLimitEntry>();
+let rateLimitClient: SupabaseClient | undefined;
 
 export class RouteSecurityError extends Error {
   constructor(public status: number, message: string) {
@@ -29,10 +32,21 @@ export function assertSameOrigin(request: Request) {
   }
 }
 
-export function checkRateLimit(request: Request, bucket: string, options?: { limit?: number; windowMs?: number; userId?: string }) {
+export async function checkRateLimit(request: Request, bucket: string, options?: { limit?: number; windowMs?: number; userId?: string }) {
   const limit = options?.limit ?? 60;
   const windowMs = options?.windowMs ?? 60_000;
-  const key = `${bucket}:${options?.userId ?? clientAddress(request)}`;
+  const identity = options?.userId ? `user:${options.userId}` : `ip:${clientAddress(request)}`;
+
+  if (shouldUsePersistentRateLimit()) {
+    await checkPersistentRateLimit(bucket, identity, limit, windowMs);
+    return;
+  }
+
+  checkLocalRateLimit(bucket, identity, limit, windowMs);
+}
+
+function checkLocalRateLimit(bucket: string, identity: string, limit: number, windowMs: number) {
+  const key = `${bucket}:${identity}`;
   const now = Date.now();
   const current = rateLimitStore.get(key);
 
@@ -45,6 +59,39 @@ export function checkRateLimit(request: Request, bucket: string, options?: { lim
   if (current.count > limit) {
     throw new RouteSecurityError(429, "Too many requests. Please try again shortly.");
   }
+}
+
+async function checkPersistentRateLimit(bucket: string, identity: string, limit: number, windowMs: number) {
+  const client = getRateLimitClient();
+  const { data, error } = await client.rpc("check_rate_limit", {
+    p_bucket: bucket,
+    p_identifier_hash: hashRateLimitIdentity(identity),
+    p_limit: limit,
+    p_window_seconds: Math.max(1, Math.ceil(windowMs / 1000)),
+  });
+  if (error) throw error;
+  const allowed = typeof data === "object" && data !== null && "allowed" in data ? Boolean((data as { allowed?: unknown }).allowed) : false;
+  if (!allowed) throw new RouteSecurityError(429, "Too many requests. Please try again shortly.");
+}
+
+function getRateLimitClient() {
+  if (rateLimitClient) return rateLimitClient;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !anonKey) {
+    throw new RouteSecurityError(503, "Persistent rate limiting is not configured. Set Supabase environment variables.");
+  }
+  rateLimitClient = createClient(url, anonKey, { auth: { persistSession: false, autoRefreshToken: false } });
+  return rateLimitClient;
+}
+
+function shouldUsePersistentRateLimit() {
+  if (process.env.RATE_LIMIT_BACKEND === "memory") return false;
+  return process.env.RATE_LIMIT_BACKEND === "supabase" || process.env.NODE_ENV === "production";
+}
+
+function hashRateLimitIdentity(identity: string) {
+  return createHash("sha256").update(identity).digest("hex");
 }
 
 export async function requireOrganizationRole(
@@ -74,6 +121,7 @@ export function routeErrorResponse(error: unknown) {
 
 export function resetRateLimitForTests() {
   rateLimitStore.clear();
+  rateLimitClient = undefined;
 }
 
 function normalizeOrigin(value: string) {

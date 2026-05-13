@@ -27,12 +27,12 @@ export async function withMarketSnapAuth(
 ) {
   try {
     assertSameOrigin(request);
-    checkRateLimit(request, bucket, { limit: 80, windowMs: 60_000 });
+    await checkRateLimit(request, bucket, { limit: 80, windowMs: 60_000 });
     const client = await createSupabaseServerClient();
     if (!client) return NextResponse.json({ ok: false, message: "Supabase is not configured." }, { status: 503 });
     const { data, error } = await client.auth.getUser();
     if (error || !data.user) return NextResponse.json({ ok: false, message: "Authentication required." }, { status: 401 });
-    checkRateLimit(request, `${bucket}-user`, { limit: 60, windowMs: 60_000, userId: data.user.id });
+    await checkRateLimit(request, `${bucket}-user`, { limit: 60, windowMs: 60_000, userId: data.user.id });
     const body = await readBody(request);
     return handler({ client, userId: data.user.id, body });
   } catch (error) {

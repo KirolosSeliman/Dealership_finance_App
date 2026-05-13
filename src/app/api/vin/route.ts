@@ -4,7 +4,7 @@ import { decodeVin } from "@/lib/vin/nhtsa";
 
 export async function GET(request: Request) {
   try {
-    checkRateLimit(request, "vin", { limit: 30, windowMs: 60_000 });
+    await checkRateLimit(request, "vin", { limit: 30, windowMs: 60_000 });
     const { searchParams } = new URL(request.url);
     const vin = (searchParams.get("vin") ?? "").trim().toUpperCase();
     if (!/^[A-HJ-NPR-Z0-9]{11,17}$/.test(vin)) {

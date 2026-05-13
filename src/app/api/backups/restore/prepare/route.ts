@@ -9,7 +9,7 @@ import type { AppData } from "@/types/domain";
 export async function POST(request: Request) {
   try {
     assertSameOrigin(request);
-    checkRateLimit(request, "restore-prepare", { limit: 6, windowMs: 60_000 });
+    await checkRateLimit(request, "restore-prepare", { limit: 6, windowMs: 60_000 });
 
     const supabase = await createSupabaseServerClient();
     if (!supabase) {
@@ -20,7 +20,7 @@ export async function POST(request: Request) {
     if (userError || !userData.user) {
       return NextResponse.json({ ok: false, message: "Authentication required." }, { status: 401 });
     }
-    checkRateLimit(request, "restore-prepare-user", { limit: 3, windowMs: 60_000, userId: userData.user.id });
+    await checkRateLimit(request, "restore-prepare-user", { limit: 3, windowMs: 60_000, userId: userData.user.id });
 
     const formData = await request.formData();
     const organizationId = String(formData.get("organizationId") || "");

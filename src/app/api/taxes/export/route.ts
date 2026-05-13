@@ -14,7 +14,7 @@ const contentTypes = {
 export async function POST(request: Request) {
   try {
     assertSameOrigin(request);
-    checkRateLimit(request, "tax-export", { limit: 20, windowMs: 60_000 });
+    await checkRateLimit(request, "tax-export", { limit: 20, windowMs: 60_000 });
 
     const supabase = await createSupabaseServerClient();
     if (!supabase) {
@@ -25,7 +25,7 @@ export async function POST(request: Request) {
     if (userError || !userData.user) {
       return NextResponse.json({ ok: false, message: "Authentication required." }, { status: 401 });
     }
-    checkRateLimit(request, "tax-export-user", { limit: 10, windowMs: 60_000, userId: userData.user.id });
+    await checkRateLimit(request, "tax-export-user", { limit: 10, windowMs: 60_000, userId: userData.user.id });
 
     const body = taxExportSchema.parse(await request.json());
     await requireOrganizationRole(supabase, userData.user.id, body.organizationId, ["owner", "admin", "accountant"]);

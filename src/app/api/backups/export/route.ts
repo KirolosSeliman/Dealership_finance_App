@@ -8,7 +8,7 @@ import { backupRequestSchema, formatValidationError } from "@/lib/validation";
 export async function POST(request: Request) {
   try {
     assertSameOrigin(request);
-    checkRateLimit(request, "backup-export", { limit: 10, windowMs: 60_000 });
+    await checkRateLimit(request, "backup-export", { limit: 10, windowMs: 60_000 });
 
     const supabase = await createSupabaseServerClient();
     if (!supabase) {
@@ -19,7 +19,7 @@ export async function POST(request: Request) {
     if (userError || !userData.user) {
       return NextResponse.json({ ok: false, message: "Authentication required." }, { status: 401 });
     }
-    checkRateLimit(request, "backup-export-user", { limit: 5, windowMs: 60_000, userId: userData.user.id });
+    await checkRateLimit(request, "backup-export-user", { limit: 5, windowMs: 60_000, userId: userData.user.id });
 
     const body = backupRequestSchema.parse(await request.json());
     await requireOrganizationRole(supabase, userData.user.id, body.organizationId, ["owner", "admin"]);

@@ -1094,15 +1094,60 @@ test("server origin checks reject unsafe cross-origin mutations", () => {
   );
 });
 
-test("rate limiter blocks obvious repeated route abuse", () => {
+test("rate limiter blocks repeated abuse by IP and by user", async () => {
   resetRateLimitForTests();
   const request = new Request("http://localhost:3000/api/vin", {
     headers: { "x-forwarded-for": "203.0.113.10" },
   });
-  assert.doesNotThrow(() => checkRateLimit(request, "test-bucket", { limit: 2, windowMs: 60_000 }));
-  assert.doesNotThrow(() => checkRateLimit(request, "test-bucket", { limit: 2, windowMs: 60_000 }));
-  assert.throws(() => checkRateLimit(request, "test-bucket", { limit: 2, windowMs: 60_000 }), RouteSecurityError);
+  await assert.doesNotReject(() => checkRateLimit(request, "test-bucket", { limit: 2, windowMs: 60_000 }));
+  await assert.doesNotReject(() => checkRateLimit(request, "test-bucket", { limit: 2, windowMs: 60_000 }));
+  await assert.rejects(() => checkRateLimit(request, "test-bucket", { limit: 2, windowMs: 60_000 }), RouteSecurityError);
+
   resetRateLimitForTests();
+  await assert.doesNotReject(() => checkRateLimit(request, "test-bucket", { limit: 1, windowMs: 60_000, userId: "user-a" }));
+  await assert.doesNotReject(() => checkRateLimit(request, "test-bucket", { limit: 1, windowMs: 60_000, userId: "user-b" }));
+  await assert.rejects(() => checkRateLimit(request, "test-bucket", { limit: 1, windowMs: 60_000, userId: "user-a" }), RouteSecurityError);
+
+  resetRateLimitForTests();
+  await assert.doesNotReject(() => checkRateLimit(request, "short-window", { limit: 1, windowMs: 1 }));
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  await assert.doesNotReject(() => checkRateLimit(request, "short-window", { limit: 1, windowMs: 1 }));
+  resetRateLimitForTests();
+});
+
+test("persistent rate limiter requires Supabase config when enabled", async () => {
+  const previousBackend = process.env.RATE_LIMIT_BACKEND;
+  const previousUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const previousAnon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  resetRateLimitForTests();
+  process.env.RATE_LIMIT_BACKEND = "supabase";
+  delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+  delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  await assert.rejects(
+    () => checkRateLimit(new Request("http://localhost:3000/api/vin"), "persistent-test", { limit: 1, windowMs: 60_000 }),
+    (error: unknown) => error instanceof RouteSecurityError && error.status === 503,
+  );
+  if (previousBackend === undefined) delete process.env.RATE_LIMIT_BACKEND;
+  else process.env.RATE_LIMIT_BACKEND = previousBackend;
+  if (previousUrl === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+  else process.env.NEXT_PUBLIC_SUPABASE_URL = previousUrl;
+  if (previousAnon === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  else process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = previousAnon;
+  resetRateLimitForTests();
+});
+
+test("persistent rate limit migration uses an atomic Supabase bucket", () => {
+  const sql = readFileSync(join(process.cwd(), "supabase/migrations/20260520_persistent_rate_limiting.sql"), "utf8");
+  const security = readFileSync(join(process.cwd(), "src/lib/server/security.ts"), "utf8");
+
+  assert.match(sql, /create table if not exists rate_limit_buckets/i);
+  assert.match(sql, /primary key \(bucket, identifier_hash\)/i);
+  assert.match(sql, /create or replace function check_rate_limit/i);
+  assert.match(sql, /on conflict \(bucket, identifier_hash\)/i);
+  assert.match(sql, /security definer/i);
+  assert.match(sql, /grant execute on function check_rate_limit/i);
+  assert.match(security, /createHash\("sha256"\)/i);
+  assert.match(security, /RATE_LIMIT_BACKEND/i);
 });
 
 test("backup and tax export request schemas reject invalid payloads", () => {

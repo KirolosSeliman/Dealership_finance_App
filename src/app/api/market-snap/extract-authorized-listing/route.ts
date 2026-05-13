@@ -8,12 +8,12 @@ export async function POST(request: Request) {
   const headers = extractionCorsHeaders(request);
   try {
     assertAllowedExtractionOrigin(request);
-    checkRateLimit(request, "market-snap-extract-authorized-listing", { limit: 30, windowMs: 60_000 });
+    await checkRateLimit(request, "market-snap-extract-authorized-listing", { limit: 30, windowMs: 60_000 });
     const client = await createSupabaseServerClient();
     if (!client) return NextResponse.json({ ok: false, message: "Supabase is not configured." }, { status: 503, headers });
     const { data, error } = await client.auth.getUser();
     if (error || !data.user) return NextResponse.json({ ok: false, message: "Authentication required." }, { status: 401, headers });
-    checkRateLimit(request, "market-snap-extract-authorized-listing-user", { limit: 20, windowMs: 60_000, userId: data.user.id });
+    await checkRateLimit(request, "market-snap-extract-authorized-listing-user", { limit: 20, windowMs: 60_000, userId: data.user.id });
     const payload = authorizedExtractionRequestSchema.parse(await request.json());
     await requireOrganizationRole(client, data.user.id, payload.organizationId, ["owner", "admin", "member"]);
     const extraction = await extractAuthorizedListing(payload);

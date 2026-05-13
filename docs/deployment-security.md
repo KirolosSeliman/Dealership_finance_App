@@ -8,6 +8,10 @@ Client-safe:
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `NEXT_PUBLIC_APP_URL`
 
+Rate limiting:
+
+- `RATE_LIMIT_BACKEND=supabase` in production. Use `memory` only for local development or deterministic tests.
+
 Server-only:
 
 - `SUPABASE_SERVICE_ROLE_KEY`
@@ -59,7 +63,7 @@ Vehicle deletion requires the `delete_vehicle_and_related_data(uuid, uuid)` RPC 
 
 - Full backup download and R2 upload are generated server-side and are owner/admin only.
 - Accountant users can export tax reports, but cannot generate full sensitive backups.
-- Mutation, backup, restore-preparation, tax-export, and VIN routes use lightweight rate limiting.
+- Mutation, backup, restore-preparation, tax-export, cron, Market Snap, and VIN routes use persistent Supabase-backed rate limiting in production.
 - Browser mutation and backup POST routes reject unsafe cross-origin requests.
 - Backup ZIP verification is local and does not execute backup content.
 - Restore dry-run validates structure and reports conflicts without writing data.
