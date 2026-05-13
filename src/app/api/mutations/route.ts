@@ -38,6 +38,7 @@ import {
   expenseSchema,
   formatValidationError,
   formDataToObject,
+  normalizeVin,
   invitationCodeSchema,
   organizationSchema,
   regenerateInvitationSchema,
@@ -123,14 +124,20 @@ export async function POST(request: Request) {
       }
       case "createVehicle": {
         await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin", "member"]);
-        vehicleSchema.parse(formDataToObject(formData));
+        const parsed = vehicleSchema.parse(formDataToObject(formData));
+        formData.set("vin", parsed.vin);
+        await assertUniqueActiveVin(supabase, organizationId, parsed.vin);
         const id = await createVehicle(supabase, organizationId, formData);
         return ok({ id });
       }
       case "updateVehicle": {
         await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin", "member"]);
-        vehicleAnyUpdateSchema.parse(formDataToObject(formData));
+        const parsed = vehicleAnyUpdateSchema.parse(formDataToObject(formData));
         const vehicle = await getVehicle(supabase, organizationId, String(formData.get("vehicleId") || ""));
+        if ("vin" in parsed) {
+          formData.set("vin", parsed.vin);
+          await assertUniqueActiveVin(supabase, organizationId, parsed.vin, vehicle.id);
+        }
         await updateVehicle(supabase, vehicle, formData);
         return ok();
       }
@@ -426,6 +433,30 @@ async function getVehicleOptional(client: Awaited<ReturnType<typeof createSupaba
   if (error) throw error;
   if (!data) return undefined;
   return mapVehicle(data as Record<string, unknown>);
+}
+
+async function assertUniqueActiveVin(
+  client: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  organizationId: string,
+  vin: string,
+  exceptVehicleId?: string,
+) {
+  if (!client) throw new Error("Supabase is not configured.");
+  const normalizedVin = normalizeVin(vin);
+  if (!normalizedVin) return;
+  const { data, error } = await client
+    .from("vehicles")
+    .select("id, vin")
+    .eq("organization_id", organizationId)
+    .is("archived_at", null);
+  if (error) throw error;
+
+  const duplicate = (data ?? []).find((row) => {
+    const id = String((row as Record<string, unknown>).id ?? "");
+    if (exceptVehicleId && id === exceptVehicleId) return false;
+    return normalizeVin((row as Record<string, unknown>).vin) === normalizedVin;
+  });
+  if (duplicate) throw new ApiError(400, "Another active vehicle already uses this VIN.");
 }
 
 async function getAttachment(client: Awaited<ReturnType<typeof createSupabaseServerClient>>, organizationId: string, attachmentId: string) {

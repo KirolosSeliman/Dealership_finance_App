@@ -2,6 +2,7 @@ import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { calculateExpenseTax } from "@/lib/domain/calculations";
 import { assertAllowedUpload, sanitizeStorageFileName } from "@/lib/security";
 import { dedupeOrganizationsByHighestRole, emptyAppData, mapActivityLog, mapAttachment, mapCompanyCashTransaction, mapContact, mapExpense, mapExternalCashTransaction, mapMembership, mapOrganization, mapRecurringExpenseTemplate, mapSale, mapVehicle } from "@/lib/supabase/mappers";
+import { normalizeVin } from "@/lib/validation";
 import type {
   AppData,
   Attachment,
@@ -181,7 +182,7 @@ export async function saveLanguagePreference(client: Client, language: "en" | "f
 export async function createVehicle(client: Client, organizationId: string, formData: FormData) {
   const { data, error } = await client.rpc("create_vehicle_with_defaults", {
     p_organization_id: organizationId,
-    p_vin: stringValue(formData.get("vin")),
+    p_vin: normalizeVin(formData.get("vin")),
     p_year: optionalNumber(formData.get("year")),
     p_make: optionalString(formData.get("make")),
     p_model: optionalString(formData.get("model")),
@@ -224,7 +225,7 @@ export async function updateVehicle(client: Client, vehicle: Vehicle, formData: 
     return;
   }
   const payload = {
-    vin: stringValue(formData.get("vin")).toUpperCase(),
+    vin: normalizeVin(formData.get("vin")),
     year: optionalNumber(formData.get("year")),
     make: optionalString(formData.get("make")),
     model: optionalString(formData.get("model")),

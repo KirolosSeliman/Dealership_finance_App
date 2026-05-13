@@ -23,7 +23,7 @@ import { convertDealRadarListingToInventory } from "../src/lib/market-snap/repos
 import { importPayloadSchema, marketListingPayloadSchema } from "../src/lib/market-snap/validation";
 import { assertAllowedUpload, canExportTaxReports, canManageBackups, sanitizeCsvCell, sanitizeStorageFileName } from "../src/lib/security";
 import { assertSameOrigin, checkRateLimit, resetRateLimitForTests, RouteSecurityError } from "../src/lib/server/security";
-import { activityLogSchema, applyRecurringExpenseTemplateSchema, attachmentSchema, backupRequestSchema, expenseSchema, recurringExpenseTemplateSchema, regenerateInvitationSchema, saleCorrectionSchema, saleVoidSchema, taxExportSchema, vehicleAnyUpdateSchema } from "../src/lib/validation";
+import { activityLogSchema, applyRecurringExpenseTemplateSchema, attachmentSchema, backupRequestSchema, cashTransactionSchema, contactSchema, expenseSchema, normalizeVin, recurringExpenseTemplateSchema, regenerateInvitationSchema, saleCorrectionSchema, saleVoidSchema, taxExportSchema, vehicleAnyUpdateSchema, vehicleSchema } from "../src/lib/validation";
 import { dedupeOrganizationsByHighestRole, emptyAppData, mapExpense, mapVehicle } from "../src/lib/supabase/mappers";
 import { activeVehiclesOnly, isValidVehicleDeleteConfirmation } from "../src/lib/vehicle-delete";
 import type {
@@ -473,6 +473,84 @@ test("applying a recurring expense template requires vehicle and template ids", 
     vehicleId: "63c47786-fb41-40c1-a573-71346969b9e0",
     templateId: "not-a-template-id",
   }).success, false);
+});
+
+test("domain validation rejects invalid controlled values", () => {
+  assert.equal(cashTransactionSchema.safeParse({
+    type: "external_cash_personally_removed",
+    amount: 100,
+    date: "2026-05-13",
+  }).success, true);
+  assert.equal(cashTransactionSchema.safeParse({
+    type: "surprise_cash_type",
+    amount: 100,
+    date: "2026-05-13",
+  }).success, false);
+  assert.equal(contactSchema.safeParse({
+    type: "buyer",
+    fullName: "Jane Buyer",
+  }).success, true);
+  assert.equal(contactSchema.safeParse({
+    type: "random_contact",
+    fullName: "Jane Buyer",
+  }).success, false);
+  assert.equal(expenseSchema.safeParse({
+    category: "repair",
+    amountBeforeTax: 100,
+    fundingSource: "wallet",
+  }).success, false);
+  assert.equal(vehicleAnyUpdateSchema.safeParse({
+    updateMode: "status",
+    status: "missing",
+  }).success, false);
+});
+
+test("vehicle VIN validation normalizes quality input and rejects unsafe identifiers", () => {
+  assert.equal(normalizeVin(" 1hg cm8263 3a004352 "), "1HGCM82633A004352");
+  const valid = vehicleSchema.parse({
+    vin: " 1hg cm8263 3a004352 ",
+    purchasePrice: 12000,
+    purchaseDate: "2026-05-13",
+    purchaseSource: "OpenLane",
+    status: "purchased",
+  });
+  assert.equal(valid.vin, "1HGCM82633A004352");
+  assert.equal(vehicleSchema.safeParse({
+    vin: "",
+    purchasePrice: 12000,
+    purchaseDate: "2026-05-13",
+    purchaseSource: "OpenLane",
+    status: "purchased",
+  }).success, true);
+  assert.equal(vehicleSchema.safeParse({
+    vin: "1HGCM82633A00435",
+    purchasePrice: 12000,
+    purchaseDate: "2026-05-13",
+    purchaseSource: "OpenLane",
+    status: "purchased",
+  }).success, false);
+  assert.equal(vehicleSchema.safeParse({
+    vin: "1HGCM82633A00IOQ2",
+    purchasePrice: 12000,
+    purchaseDate: "2026-05-13",
+    purchaseSource: "OpenLane",
+    status: "purchased",
+  }).success, false);
+});
+
+test("validation migration backs active VIN uniqueness without unsafe duplicate cleanup", () => {
+  const sql = readFileSync(join(process.cwd(), "supabase/migrations/20260519_validation_domain_integrity.sql"), "utf8");
+  const route = readFileSync(join(process.cwd(), "src/app/api/mutations/route.ts"), "utf8");
+  const repository = readFileSync(join(process.cwd(), "src/lib/supabase/repository.ts"), "utf8");
+
+  assert.match(sql, /create or replace function normalize_vehicle_vin/i);
+  assert.match(sql, /vehicles_vin_quality/i);
+  assert.match(sql, /contacts_type_valid/i);
+  assert.match(sql, /Duplicate active VINs exist/i);
+  assert.match(sql, /vehicles_org_active_vin_unique_idx/i);
+  assert.match(route, /assertUniqueActiveVin/i);
+  assert.match(route, /Another active vehicle already uses this VIN/i);
+  assert.match(repository, /normalizeVin\(formData\.get\("vin"\)\)/i);
 });
 test("duplicate organization rows resolve to the highest role", () => {
   const organizations = dedupeOrganizationsByHighestRole([

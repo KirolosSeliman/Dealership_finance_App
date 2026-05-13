@@ -1,10 +1,33 @@
 import { z } from "zod";
-import { EXPENSE_CATEGORIES, EXPENSE_FUNDING_SOURCES, EXPENSE_TAX_BEHAVIORS, PURCHASE_SOURCES, ROLES, VEHICLE_STATUSES } from "@/lib/domain/constants";
+import {
+  COMPANY_CASH_TRANSACTION_TYPES,
+  CONTACT_TYPES,
+  EXPENSE_CATEGORIES,
+  EXPENSE_FUNDING_SOURCES,
+  EXPENSE_TAX_BEHAVIORS,
+  EXTERNAL_CASH_TRANSACTION_TYPES,
+  PURCHASE_SOURCES,
+  ROLES,
+  VEHICLE_STATUSES,
+} from "@/lib/domain/constants";
 
 const optionalText = z.string().trim().optional().or(z.literal(""));
 const money = z.coerce.number().finite().min(0).max(999_999_999);
 const positiveMoney = z.coerce.number().finite().positive().max(999_999_999);
 const dateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD.");
+const cashTransactionTypes = [...COMPANY_CASH_TRANSACTION_TYPES, ...EXTERNAL_CASH_TRANSACTION_TYPES] as [string, ...string[]];
+const vinPattern = /^[A-HJ-NPR-Z0-9]{17}$/;
+
+export function normalizeVin(value: unknown) {
+  return String(value ?? "").replace(/\s+/g, "").toUpperCase();
+}
+
+export const vinSchema = z.preprocess(
+  normalizeVin,
+  z.string().refine((value) => value === "" || vinPattern.test(value), {
+    message: "VIN must be 17 characters and cannot contain I, O, or Q.",
+  }),
+);
 
 export const organizationSchema = z.object({
   organizationName: z.string().trim().min(1).max(120),
@@ -15,7 +38,7 @@ export const invitationCodeSchema = z.object({
 });
 
 export const vehicleSchema = z.object({
-  vin: optionalText,
+  vin: vinSchema,
   year: z.coerce.number().int().min(1900).max(2100).optional().or(z.literal("")),
   make: optionalText,
   model: optionalText,
@@ -119,7 +142,7 @@ export const saleCorrectionSchema = saleSchema.extend({
 });
 
 export const cashTransactionSchema = z.object({
-  type: z.string().min(1).max(80),
+  type: z.enum(cashTransactionTypes),
   amount: positiveMoney,
   date: dateString.optional().or(z.literal("")),
   note: optionalText,
@@ -132,7 +155,7 @@ export const cashUpdateSchema = z.object({
 });
 
 export const contactSchema = z.object({
-  type: z.string().min(1).max(80),
+  type: z.enum(CONTACT_TYPES as [string, ...string[]]),
   customTypeDescription: optionalText,
   fullName: z.string().trim().min(1).max(160),
   phone: optionalText,
