@@ -598,7 +598,7 @@ export function DealerFlowApp() {
       await serverMutation("deleteCashTransaction", newMutationForm({ organizationId: activeOrganization.id, account, transactionId, reason }));
       await refreshData(activeOrganization.id);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Could not delete cash transaction.");
+      setErrorMessage(error instanceof Error ? error.message : "Could not reverse cash transaction.");
     } finally {
       setLoading(false);
     }
@@ -2068,8 +2068,8 @@ function CashManagement({
         </Panel>
       </div>
       {deletedTransactions.length > 0 && (
-        <Panel title="Deleted cash history">
-          <Ledger emptyTitle="No deleted cash history" emptyCopy="Deleted or voided cash entries will appear here for audit review." rows={deletedTransactions.map(({ account, transaction }) => [
+        <Panel title="Legacy deleted cash history">
+          <Ledger emptyTitle="No legacy deleted cash history" emptyCopy="Legacy deleted cash entries will appear here for audit review." rows={deletedTransactions.map(({ account, transaction }) => [
             formatLabel(account),
             transaction.date,
             formatLabel(transaction.type),
@@ -2134,10 +2134,10 @@ function CashLedger({
                 setDeletingId(null);
               }}
             >
-              <p className="text-sm text-amber-100">This will remove it from balances, but keep it in deleted history.</p>
-              <input className="control w-full" name="reason" placeholder="Reason for deletion" />
+              <p className="text-sm text-amber-100">This will keep the original entry and add an equal opposite reversal entry.</p>
+              <input className="control w-full" name="reason" placeholder="Reason for reversal" />
               <div className="flex flex-wrap gap-2">
-                <button className="secondary-button" type="submit">Delete</button>
+                <button className="secondary-button" type="submit">Reverse transaction</button>
                 <button className="secondary-button" type="button" onClick={() => setDeletingId(null)}>Cancel</button>
               </div>
             </form>
@@ -2151,7 +2151,7 @@ function CashLedger({
               ]} />
               {canManage && <div className="flex flex-wrap gap-2">
                 <button className="secondary-button" type="button" onClick={() => setEditingId(transaction.id)}>Edit</button>
-                <button className="secondary-button" type="button" onClick={() => setDeletingId(transaction.id)}>Delete</button>
+                <button className="secondary-button" type="button" onClick={() => setDeletingId(transaction.id)}>Reverse</button>
               </div>}
             </div>
           )}

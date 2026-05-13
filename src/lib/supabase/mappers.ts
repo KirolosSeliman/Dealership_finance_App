@@ -231,6 +231,11 @@ export function mapCompanyCashTransaction(row: Row): CompanyCashTransaction {
     deletedAt: optionalString(row.deleted_at),
     deletedBy: optionalString(row.deleted_by),
     deletionNote: optionalString(row.deletion_note),
+    reversedTransactionId: optionalString(row.reversed_transaction_id),
+    correctionOfTransactionId: optionalString(row.correction_of_transaction_id),
+    voidedAt: optionalString(row.voided_at),
+    voidedBy: optionalString(row.voided_by),
+    voidReason: optionalString(row.void_reason),
   };
 }
 
@@ -250,6 +255,11 @@ export function mapExternalCashTransaction(row: Row): ExternalCashTransaction {
     deletedAt: optionalString(row.deleted_at),
     deletedBy: optionalString(row.deleted_by),
     deletionNote: optionalString(row.deletion_note),
+    reversedTransactionId: optionalString(row.reversed_transaction_id),
+    correctionOfTransactionId: optionalString(row.correction_of_transaction_id),
+    voidedAt: optionalString(row.voided_at),
+    voidedBy: optionalString(row.voided_by),
+    voidReason: optionalString(row.void_reason),
   };
 }
 

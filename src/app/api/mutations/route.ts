@@ -451,6 +451,22 @@ function toClientErrorMessage(error: unknown, operation: Operation) {
     }
     return "Vehicle could not be archived. Please try again.";
   }
+  if (operation === "deleteCashTransaction") {
+    const normalized = message.toLowerCase();
+    if (
+      normalized.includes("reverse_company_cash_transaction") ||
+      normalized.includes("reverse_external_cash_transaction") ||
+      normalized.includes("could not find the function") ||
+      normalized.includes("does not exist")
+    ) {
+      console.error("[deleteCashTransaction] missing database RPC. Apply the latest cash reversal migration in Supabase.");
+      return "Cash reversal database migration is missing. Run the latest cash reversal migration in Supabase, then try again.";
+    }
+    if (normalized.includes("system-generated cash transactions")) {
+      return "This linked cash transaction must be corrected through the vehicle or sale workflow.";
+    }
+    return message;
+  }
   return message;
 }
 

@@ -205,6 +205,11 @@ export interface CompanyCashTransaction {
   deletedAt?: string;
   deletedBy?: string;
   deletionNote?: string;
+  reversedTransactionId?: string;
+  correctionOfTransactionId?: string;
+  voidedAt?: string;
+  voidedBy?: string;
+  voidReason?: string;
 }
 
 export interface ExternalCashTransaction {
@@ -222,6 +227,11 @@ export interface ExternalCashTransaction {
   deletedAt?: string;
   deletedBy?: string;
   deletionNote?: string;
+  reversedTransactionId?: string;
+  correctionOfTransactionId?: string;
+  voidedAt?: string;
+  voidedBy?: string;
+  voidReason?: string;
 }
 
 export interface ActivityLog {

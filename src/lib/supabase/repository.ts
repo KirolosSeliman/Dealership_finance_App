@@ -478,32 +478,15 @@ export async function deleteCashTransaction(
   transactionId: string,
   reason: string,
 ) {
-  const user = await requireUser(client);
-  const table = account === "company" ? "company_cash_transactions" : "external_cash_transactions";
-  const { data: transaction, error: readError } = await client
-    .from(table)
-    .select("amount, type, date, note")
-    .eq("id", transactionId)
-    .eq("organization_id", organizationId)
-    .single();
-  if (readError) throw readError;
-
-  const { error } = await client.from(table).update({
-    deleted_at: new Date().toISOString(),
-    deleted_by: user.id,
-    deletion_note: reason || "Deleted from cash management",
-    updated_at: new Date().toISOString(),
-  }).eq("id", transactionId).eq("organization_id", organizationId);
+  const rpcName = account === "company"
+    ? "reverse_company_cash_transaction"
+    : "reverse_external_cash_transaction";
+  const { error } = await client.rpc(rpcName, {
+    p_organization_id: organizationId,
+    p_transaction_id: transactionId,
+    p_reason: reason || "Reversed from cash management",
+  });
   if (error) throw error;
-
-  await logActivity(
-    client,
-    organizationId,
-    "cash_transaction_deleted",
-    "cash_transaction",
-    transactionId,
-    `Deleted ${formatCashMessage(transaction)}. Reason: ${reason || "No reason provided"}`,
-  );
 }
 
 export async function createContact(client: Client, organizationId: string, formData: FormData) {
@@ -632,12 +615,6 @@ function actionForCashType(type: string) {
   if (type === "external_cash_transferred_to_company") return "external_cash_transferred";
   if (type === "external_cash_personally_removed") return "external_cash_personally_spent";
   return "cash_transaction_created";
-}
-
-function formatCashMessage(transaction: { amount?: unknown; type?: unknown; date?: unknown; note?: unknown } | null) {
-  if (!transaction) return "cash transaction";
-  const amount = numberValue(String(transaction.amount ?? "0"));
-  return `${String(transaction.type ?? "cash transaction")} for ${amount} on ${String(transaction.date ?? "")}${transaction.note ? ` (${String(transaction.note)})` : ""}`;
 }
 
 function normalizeEmail(email: string) {

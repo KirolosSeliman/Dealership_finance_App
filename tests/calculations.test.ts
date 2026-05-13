@@ -508,6 +508,64 @@ test("deleted cash transactions are excluded from balances", () => {
   assert.equal(calculateExternalCashBalance(external), 1200);
 });
 
+test("cash reversal entries preserve history while offsetting balances", () => {
+  const company: CompanyCashTransaction[] = [
+    { id: "deposit", organizationId: "org-1", type: "company_cash_added", amount: 10000, date: "2026-01-01", createdAt: "2026-01-01", createdBy: "user-1" },
+    { id: "withdrawal", organizationId: "org-1", type: "company_cash_withdrawn", amount: 2000, date: "2026-01-02", createdAt: "2026-01-02", createdBy: "user-1", reversedTransactionId: "withdrawal-reversal", voidedAt: "2026-01-03", voidReason: "Wrong amount" },
+    { id: "withdrawal-reversal", organizationId: "org-1", type: "company_cash_added", amount: 2000, date: "2026-01-03", createdAt: "2026-01-03", createdBy: "user-2", correctionOfTransactionId: "withdrawal" },
+  ];
+  const external: ExternalCashTransaction[] = [
+    { id: "commission", organizationId: "org-1", type: "external_commission_earned", amount: 1500, date: "2026-01-01", createdAt: "2026-01-01", createdBy: "user-1", reversedTransactionId: "commission-reversal", voidedAt: "2026-01-04" },
+    { id: "commission-reversal", organizationId: "org-1", type: "external_cash_personally_removed", amount: 1500, date: "2026-01-04", createdAt: "2026-01-04", createdBy: "user-2", correctionOfTransactionId: "commission" },
+  ];
+
+  assert.equal(calculateCompanyCashBalance(company), 10000);
+  assert.equal(calculateExternalCashBalance(external), 0);
+});
+
+test("deposit and commission reversals can reveal invalid negative balances", () => {
+  const company: CompanyCashTransaction[] = [
+    { id: "deposit", organizationId: "org-1", type: "company_cash_added", amount: 10000, date: "2026-01-01", createdAt: "2026-01-01", createdBy: "user-1" },
+    { id: "spent", organizationId: "org-1", type: "company_cash_withdrawn", amount: 8000, date: "2026-01-02", createdAt: "2026-01-02", createdBy: "user-1" },
+    { id: "deposit-reversal", organizationId: "org-1", type: "company_cash_withdrawn", amount: 10000, date: "2026-01-03", createdAt: "2026-01-03", createdBy: "user-2", correctionOfTransactionId: "deposit" },
+  ];
+  const external: ExternalCashTransaction[] = [
+    { id: "commission", organizationId: "org-1", type: "external_commission_earned", amount: 1500, date: "2026-01-01", createdAt: "2026-01-01", createdBy: "user-1" },
+    { id: "transfer", organizationId: "org-1", type: "external_cash_transferred_to_company", amount: 1000, date: "2026-01-02", createdAt: "2026-01-02", createdBy: "user-1" },
+    { id: "commission-reversal", organizationId: "org-1", type: "external_cash_personally_removed", amount: 1500, date: "2026-01-03", createdAt: "2026-01-03", createdBy: "user-2", correctionOfTransactionId: "commission" },
+  ];
+
+  assert.equal(calculateCompanyCashBalance(company), -8000);
+  assert.equal(calculateExternalCashBalance(external), -1000);
+});
+
+test("cash reversal migration blocks invalid and system-generated reversals", () => {
+  const sql = readFileSync(join(process.cwd(), "supabase/migrations/20260516_cash_ledger_reversal_integrity.sql"), "utf8");
+  const repository = readFileSync(join(process.cwd(), "src/lib/supabase/repository.ts"), "utf8");
+
+  assert.match(sql, /add column if not exists reversed_transaction_id uuid/i);
+  assert.match(sql, /add column if not exists correction_of_transaction_id uuid/i);
+  assert.match(sql, /add column if not exists voided_at timestamptz/i);
+  assert.match(sql, /create or replace function reverse_company_cash_transaction/i);
+  assert.match(sql, /create or replace function reverse_external_cash_transaction/i);
+  assert.match(sql, /perform 1 from organizations where id = p_organization_id for update/i);
+  assert.match(sql, /source_vehicle_id is not null or original\.source_expense_id is not null/i);
+  assert.match(sql, /organization_company_cash_balance\(p_organization_id\) \+ reversal_effect < 0/i);
+  assert.match(sql, /organization_external_cash_balance\(p_organization_id\) \+ reversal_effect < 0/i);
+  assert.match(sql, /correction_of_transaction_id,\s*created_by/i);
+  assert.match(sql, /set reversed_transaction_id = reversal_id/i);
+  assert.match(sql, /void_reason = coalesce\(clean_reason/i);
+  assert.match(sql, /cash_transaction_reversed/i);
+  assert.match(sql, /grant execute on function reverse_company_cash_transaction/i);
+  assert.match(sql, /grant execute on function reverse_external_cash_transaction/i);
+
+  assert.match(repository, /rpc\(rpcName/i);
+  assert.match(repository, /reverse_company_cash_transaction/i);
+  assert.match(repository, /reverse_external_cash_transaction/i);
+  assert.doesNotMatch(repository, /cash_transaction_deleted/);
+  assert.doesNotMatch(repository, /Deleted from cash management/);
+});
+
 test("vehicle purchase price expense does not duplicate the vehicle purchase price", () => {
   const tiguan: Vehicle = {
     ...vehicle,
