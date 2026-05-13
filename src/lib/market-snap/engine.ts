@@ -1,4 +1,5 @@
 import { calculateVehicleTotalCost, roundMoney } from "@/lib/domain/calculations";
+import { getPurchaseTaxRate, QUEBEC_EXPENSE_TAX_RATE } from "@/lib/domain/constants";
 import type { Vehicle, VehicleExpense } from "@/types/domain";
 import type {
   ComparableListing,
@@ -109,8 +110,8 @@ export function runComparableEstimator(input: ValuationInput & { expenses?: Vehi
   const estimatedTransportCost = roundMoney(input.estimatedTransportCost ?? 350);
   const estimatedInspectionCost = roundMoney(input.estimatedInspectionCost ?? 150);
   const estimatedHiddenFees = roundMoney(input.estimatedHiddenFees ?? 250);
-  const purchaseTaxRate = input.purchaseTaxRate ?? 0.05;
-  const feeTaxRate = input.feeTaxRate ?? 0.15;
+  const purchaseTaxRate = input.purchaseTaxRate ?? getPurchaseTaxRate(normalized.sourceName);
+  const feeTaxRate = input.feeTaxRate ?? QUEBEC_EXPENSE_TAX_RATE;
   const listedOrHammer = normalized.auctionHammerPrice || normalized.listedPrice || input.vehicle?.purchasePrice || 0;
   const estimatedTaxAmount = roundMoney(listedOrHammer * purchaseTaxRate + auctionFees * feeTaxRate);
   const currentCostBasis = input.vehicle ? calculateVehicleTotalCost(input.vehicle, input.expenses ?? []) : listedOrHammer;

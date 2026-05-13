@@ -16,6 +16,7 @@ import {
   calculateVehicleTotalCost,
 } from "../src/lib/domain/calculations";
 import { generateBackupExport, generateTaxReportExport, restoreBackupDryRun, verifyBackupExport } from "../src/lib/backup/export";
+import { getPurchaseTaxRate, PURCHASE_SOURCES } from "../src/lib/domain/constants";
 import { calculateTimeDecayWeight, extractConditionFeaturesFromText, inferMarketType, normalizeListing, runComparableEstimator, shouldRefreshVehicle, shouldStoreValuationSnapshot } from "../src/lib/market-snap/engine";
 import { processTemporaryListingImages } from "../src/lib/market-snap/image-features";
 import { convertDealRadarListingToInventory } from "../src/lib/market-snap/repository";
@@ -47,7 +48,24 @@ const vehicle: Vehicle = {
   createdBy: "user-1",
 };
 
-test("OpenLane tax rules are applied", () => {
+test("purchase tax rules are source-aware and OpenLane-only", () => {
+  for (const source of PURCHASE_SOURCES) {
+    const expectedTaxRate = source === "OpenLane" ? 0.05 : 0;
+    assert.equal(getPurchaseTaxRate(source), expectedTaxRate);
+    assert.deepEqual(
+      calculateExpenseTax({
+        purchaseSource: source,
+        category: "vehicle_purchase_price",
+        amountBeforeTax: 10000,
+      }),
+      {
+        taxRate: expectedTaxRate,
+        taxAmount: expectedTaxRate * 10000,
+        totalAmount: 10000 + expectedTaxRate * 10000,
+      },
+    );
+  }
+
   assert.deepEqual(
     calculateExpenseTax({
       purchaseSource: "OpenLane",
@@ -58,11 +76,36 @@ test("OpenLane tax rules are applied", () => {
   );
   assert.deepEqual(
     calculateExpenseTax({
+      purchaseSource: "FacebookMarketplace",
+      category: "vehicle_purchase_price",
+      amountBeforeTax: 10000,
+    }),
+    { taxRate: 0, taxAmount: 0, totalAmount: 10000 },
+  );
+  assert.deepEqual(
+    calculateExpenseTax({
       purchaseSource: "OpenLane",
       category: "auction_fee",
       amountBeforeTax: 1000,
     }),
     { taxRate: 0.15, taxAmount: 150, totalAmount: 1150 },
+  );
+  assert.deepEqual(
+    calculateExpenseTax({
+      purchaseSource: "OpenLane",
+      category: "repair",
+      amountBeforeTax: 100,
+      addFifteenPercentTax: true,
+    }),
+    { taxRate: 0.15, taxAmount: 15, totalAmount: 115 },
+  );
+  assert.deepEqual(
+    calculateExpenseTax({
+      purchaseSource: "OpenLane",
+      category: "repair",
+      amountBeforeTax: 100,
+    }),
+    { taxRate: 0, taxAmount: 0, totalAmount: 100 },
   );
 });
 
@@ -1021,6 +1064,19 @@ test("P0 migration adds atomic vehicle and sale RPCs", () => {
   assert.match(sql, /for update/i);
   assert.match(sql, /return new_vehicle_id/i);
   assert.match(sql, /return sale_id/i);
+});
+
+test("purchase tax consistency migration makes SQL source-aware", () => {
+  const sql = readFileSync(join(process.cwd(), "supabase/migrations/20260514_purchase_tax_consistency.sql"), "utf8");
+
+  assert.match(sql, /create or replace function calculate_purchase_tax_rate\(p_purchase_source purchase_source\)/i);
+  assert.match(sql, /when p_purchase_source = 'OpenLane'::purchase_source then 0\.05::numeric/i);
+  assert.match(sql, /else 0::numeric/i);
+  assert.match(sql, /purchase_tax_rate := calculate_purchase_tax_rate\(purchase_source\)/i);
+  assert.match(sql, /tax_rate,\s*tax_amount,\s*total_amount/i);
+  assert.match(sql, /purchase_tax_rate,\s*purchase_tax,\s*purchase_total/i);
+  assert.doesNotMatch(sql, /p_purchase_price \* 0\.05/i);
+  assert.doesNotMatch(sql, /'Automatic 5% purchase tax'/i);
 });
 
 test("recurring expense migration replaces hardcoded plate commission with templates", () => {

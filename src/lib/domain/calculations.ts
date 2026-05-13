@@ -1,5 +1,5 @@
 import {
-  OPENLANE_PURCHASE_TAX_RATE,
+  getPurchaseTaxRate,
   QUEBEC_EXPENSE_TAX_RATE,
   TAXABLE_PROFIT_TAX_RATE,
 } from "@/lib/domain/constants";
@@ -42,11 +42,12 @@ export function calculateExpenseTax(input: {
     };
   }
 
-  const isOpenLanePurchase =
-    input.purchaseSource === "OpenLane" && input.category === "vehicle_purchase_price";
+  const purchaseTaxRate = input.category === "vehicle_purchase_price"
+    ? getPurchaseTaxRate(input.purchaseSource)
+    : 0;
   const isOpenLaneFee = input.purchaseSource === "OpenLane" && input.category === "auction_fee";
-  const taxRate = isOpenLanePurchase
-    ? OPENLANE_PURCHASE_TAX_RATE
+  const taxRate = purchaseTaxRate > 0
+    ? purchaseTaxRate
     : isOpenLaneFee || input.addFifteenPercentTax
       ? QUEBEC_EXPENSE_TAX_RATE
       : 0;

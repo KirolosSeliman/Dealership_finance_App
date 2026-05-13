@@ -38,6 +38,19 @@ export const EXPENSE_TAX_BEHAVIORS: ExpenseTaxBehavior[] = ["no_tax", "add_15_pe
 export const TAXABLE_PROFIT_TAX_RATE = 0.22;
 export const OPENLANE_PURCHASE_TAX_RATE = 0.05;
 export const QUEBEC_EXPENSE_TAX_RATE = 0.15;
+export const PURCHASE_TAX_RATE_BY_SOURCE: Record<PurchaseSource, number> = {
+  OpenLane: OPENLANE_PURCHASE_TAX_RATE,
+  dealerAuction: 0,
+  IAA: 0,
+  Copart: 0,
+  FacebookMarketplace: 0,
+  trade: 0,
+  other: 0,
+};
 
 export const TAX_DISCLAIMER =
   "These calculations are estimates and must be validated by an accountant or tax professional.";
+
+export function getPurchaseTaxRate(purchaseSource?: string) {
+  return PURCHASE_TAX_RATE_BY_SOURCE[purchaseSource as PurchaseSource] ?? 0;
+}
