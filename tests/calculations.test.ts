@@ -1168,12 +1168,24 @@ test("high-risk mutation domains have dedicated route entrypoints", () => {
     assert.equal(existsSync(join(process.cwd(), route)), true, `${route} should exist`);
   }
   const bridge = readFileSync(join(process.cwd(), "src/lib/server/mutation-route-bridge.ts"), "utf8");
-  const app = readFileSync(join(process.cwd(), "src/components/dealer-flow-app.tsx"), "utf8");
+  const mutations = readFileSync(join(process.cwd(), "src/features/app/mutations.ts"), "utf8");
   assert.match(bridge, /forwardDomainMutation/i);
   assert.match(bridge, /checkRateLimit/i);
-  assert.match(app, /function mutationEndpoint/i);
-  assert.match(app, /\/api\/vehicles\/\$\{vehicleId\}\/archive/i);
-  assert.match(app, /\/api\/cash\/\$\{account\}\/\$\{transactionId\}\/reverse/i);
+  assert.match(mutations, /function mutationEndpoint/i);
+  assert.match(mutations, /\/api\/vehicles\/\$\{vehicleId\}\/archive/i);
+  assert.match(mutations, /\/api\/cash\/\$\{account\}\/\$\{transactionId\}\/reverse/i);
+});
+
+test("DealerFlowApp shell delegates app plumbing to feature modules", () => {
+  const app = readFileSync(join(process.cwd(), "src/components/dealer-flow-app.tsx"), "utf8");
+  assert.match(app, /@\/features\/app\/navigation/i);
+  assert.match(app, /@\/features\/app\/permissions/i);
+  assert.match(app, /@\/features\/app\/mutations/i);
+  assert.equal(app.includes("function getRouteState"), false);
+  assert.equal(app.includes("function mutationEndpoint"), false);
+  assert.equal(existsSync(join(process.cwd(), "src/features/app/navigation.ts")), true);
+  assert.equal(existsSync(join(process.cwd(), "src/features/app/permissions.ts")), true);
+  assert.equal(existsSync(join(process.cwd(), "src/features/app/mutations.ts")), true);
 });
 
 test("backup and tax export request schemas reject invalid payloads", () => {

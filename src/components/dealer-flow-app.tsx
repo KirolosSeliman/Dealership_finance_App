@@ -57,6 +57,9 @@ import {
   isActiveSale,
 } from "@/lib/domain/calculations";
 import { verifyBackupExport } from "@/lib/backup/export";
+import { serverMutation } from "@/features/app/mutations";
+import { getRouteState, pathForView, type VehicleMode, type VehicleTab, type View } from "@/features/app/navigation";
+import { getPermissions, type Permissions } from "@/features/app/permissions";
 import { getDictionary } from "@/lib/i18n";
 import { runComparableEstimator, shouldRefreshVehicle } from "@/lib/market-snap/engine";
 import { activeVehiclesOnly, isValidVehicleDeleteConfirmation } from "@/lib/vehicle-delete";
@@ -85,12 +88,8 @@ import type {
   VehicleStatus,
 } from "@/types/domain";
 
-type View = "dashboard" | "vehicles" | "marketSnap" | "dealRadar" | "marketData" | "cash" | "contacts" | "taxes" | "backups" | "settings";
-type VehicleMode = "list" | "new" | "detail";
-type VehicleTab = "overview" | "details" | "expenses" | "documents" | "sale" | "timeline";
 type CashAccount = "company" | "external";
 type CashTransaction = CompanyCashTransaction | ExternalCashTransaction;
-type Permissions = ReturnType<typeof getPermissions>;
 type VehiclePrefill = Partial<Pick<Vehicle, "year" | "make" | "model" | "trim" | "mileage" | "purchasePrice" | "purchaseSource" | "notes">>;
 
 const languageKey = "dealer-flow-language";
@@ -116,47 +115,6 @@ const vehicleTabs: Array<[VehicleTab, string]> = [
   ["sale", "sale"],
   ["timeline", "timeline"],
 ];
-
-function getRouteState(pathname: string, searchParams: string) {
-  const params = new URLSearchParams(searchParams);
-  const parts = pathname.split("/").filter(Boolean);
-  const root = parts[0] as View | undefined;
-  if (root === "vehicles") {
-    if (parts[1] === "new") return { view: "vehicles" as View, mode: "new" as VehicleMode };
-    if (parts[1]) {
-      return {
-        view: "vehicles" as View,
-        mode: "detail" as VehicleMode,
-        vehicleId: parts[1],
-        tab: ((params.get("tab") as VehicleTab) || "overview") as VehicleTab,
-      };
-    }
-    return { view: "vehicles" as View, mode: "list" as VehicleMode };
-  }
-  const routeMap: Record<string, View> = {
-    dashboard: "dashboard",
-    cash: "cash",
-    contacts: "contacts",
-    taxes: "taxes",
-    backups: "backups",
-    settings: "settings",
-    "market-snap": "marketSnap",
-    "deal-radar": "dealRadar",
-    "market-data": "marketData",
-  };
-  if (root && routeMap[root]) {
-    return { view: routeMap[root], mode: "list" as VehicleMode };
-  }
-  return { view: "dashboard" as View, mode: "list" as VehicleMode };
-}
-
-function pathForView(view: View) {
-  if (view === "dashboard") return "/dashboard";
-  if (view === "marketSnap") return "/market-snap";
-  if (view === "dealRadar") return "/deal-radar";
-  if (view === "marketData") return "/market-data";
-  return `/${view}`;
-}
 
 export function DealerFlowApp() {
   const [hydrated, setHydrated] = useState(false);
@@ -3506,28 +3464,6 @@ function today() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function getPermissions(role?: string) {
-  const owner = role === "owner";
-  const admin = role === "admin";
-  const member = role === "member";
-  const accountant = role === "accountant";
-  return {
-    manageVehicles: owner || admin || member,
-    deleteVehicles: owner || admin,
-    manageExpenses: owner || admin || member,
-    manageSales: owner || admin || member,
-    manageAttachments: owner || admin || member,
-    manageContacts: owner || admin || member,
-    manageCash: owner || admin,
-    manageBackups: owner || admin,
-    exportBackups: owner || admin,
-    manageReports: owner || admin || accountant,
-    manageRoles: owner,
-    manageSettings: owner,
-    manageRecurringExpenses: owner || admin,
-  };
-}
-
 function getDownloadFileName(response: Response, fallback: string) {
   const disposition = response.headers.get("content-disposition") || "";
   const match = disposition.match(/filename="([^"]+)"/);
@@ -3536,39 +3472,6 @@ function getDownloadFileName(response: Response, fallback: string) {
 
 function showClientError(error: unknown) {
   window.alert(error instanceof Error ? error.message : "Action failed.");
-}
-
-async function serverMutation(operation: string, formData: FormData) {
-  const endpoint = mutationEndpoint(operation, formData);
-  if (!endpoint) formData.set("operation", operation);
-  const response = await fetch(endpoint?.url ?? "/api/mutations", { method: endpoint?.method ?? "POST", body: formData });
-  const result = (await response.json()) as { ok?: boolean; message?: string; [key: string]: unknown };
-  if (!response.ok || !result.ok) throw new Error(result.message || "Action failed.");
-  return result;
-}
-
-function mutationEndpoint(operation: string, formData: FormData): { url: string; method: string } | undefined {
-  const vehicleId = encodeURIComponent(String(formData.get("vehicleId") || ""));
-  const expenseId = encodeURIComponent(String(formData.get("expenseId") || ""));
-  const saleId = encodeURIComponent(String(formData.get("saleId") || ""));
-  const account = encodeURIComponent(String(formData.get("account") || ""));
-  const transactionId = encodeURIComponent(String(formData.get("transactionId") || ""));
-  if (operation === "createVehicle") return { url: "/api/vehicles", method: "POST" };
-  if (operation === "updateVehicle" && vehicleId) return { url: `/api/vehicles/${vehicleId}`, method: "PATCH" };
-  if (operation === "deleteVehicle" && vehicleId) return { url: `/api/vehicles/${vehicleId}/archive`, method: "POST" };
-  if (operation === "createExpense" && vehicleId) return { url: `/api/vehicles/${vehicleId}/expenses`, method: "POST" };
-  if (operation === "updateExpense" && vehicleId && expenseId) return { url: `/api/vehicles/${vehicleId}/expenses/${expenseId}`, method: "PATCH" };
-  if (operation === "deleteExpense" && vehicleId && expenseId) return { url: `/api/vehicles/${vehicleId}/expenses/${expenseId}`, method: "DELETE" };
-  if (operation === "recordSale" && vehicleId) return { url: `/api/vehicles/${vehicleId}/sale`, method: "POST" };
-  if (operation === "voidSale" && saleId) return { url: `/api/sales/${saleId}/void`, method: "POST" };
-  if (operation === "correctSale" && saleId) return { url: `/api/sales/${saleId}/correct`, method: "POST" };
-  if (operation === "createCashTransaction") {
-    const type = String(formData.get("type") || "");
-    return { url: `/api/cash/${type.startsWith("external_") ? "external" : "company"}`, method: "POST" };
-  }
-  if (operation === "updateCashTransaction" && account && transactionId) return { url: `/api/cash/${account}/${transactionId}`, method: "PATCH" };
-  if (operation === "deleteCashTransaction" && account && transactionId) return { url: `/api/cash/${account}/${transactionId}/reverse`, method: "POST" };
-  return undefined;
 }
 
 function cloneFormData(source: FormData, extra: Record<string, string>) {
