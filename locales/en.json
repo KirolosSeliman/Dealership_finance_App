@@ -168,6 +168,7 @@
   },
   "marketSnap": {
     "subtitle": "Market valuation and buying-decision intelligence for active inventory.",
+    "estimateDisclaimer": "Market Snap outputs are estimates, not appraisals or guaranteed offers. Review confidence, comparable count, missing data, and warnings before acting.",
     "totalRetailValue": "Total Estimated Retail Value",
     "totalCostBasis": "Total Cost Basis",
     "potentialGrossProfit": "Potential Gross Profit",
@@ -194,6 +195,7 @@
     "profitScore": "Profit Score",
     "riskScore": "Risk Score",
     "confidence": "Confidence",
+    "comparableCount": "Comparables",
     "recommendation": "Recommendation",
     "source": "Source",
     "actions": "Actions",

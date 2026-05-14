@@ -168,6 +168,7 @@
   },
   "marketSnap": {
     "subtitle": "Intelligence de valorisation du marche et de decision d'achat pour l'inventaire actif.",
+    "estimateDisclaimer": "Les resultats Market Snap sont des estimations, pas des evaluations officielles ni des offres garanties. Verifiez la confiance, le nombre de comparables, les donnees manquantes et les avertissements avant d'agir.",
     "totalRetailValue": "Valeur marchande retail totale estimee",
     "totalCostBasis": "Base de cout totale",
     "potentialGrossProfit": "Profit brut potentiel",
@@ -194,6 +195,7 @@
     "profitScore": "Score de profit",
     "riskScore": "Score de risque",
     "confidence": "Confiance",
+    "comparableCount": "Comparables",
     "recommendation": "Recommandation",
     "source": "Source",
     "actions": "Actions",

@@ -15,6 +15,8 @@ import type {
 } from "@/types/market-snap";
 
 const MODEL_VERSION = "market-snap-foundation-v1";
+const MIN_STRONG_BUY_COMPARABLES = 3;
+const MIN_STRONG_BUY_CONFIDENCE = 60;
 const CLEAN_TITLE_STATUSES = new Set(["", "clean", "normal", "clear", "unknown"]);
 const SALVAGE_TERMS = ["salvage", "non repairable", "non-repairable", "parts only", "parts-only", "flood", "fire"];
 const REBUILT_TERMS = ["rebuilt", "reconstructed"];
@@ -123,12 +125,16 @@ export function runComparableEstimator(input: ValuationInput & { expenses?: Vehi
   const maxRecommendedBid = roundMoney(Math.max(0, maxRecommendedPurchasePrice - auctionFees - estimatedTaxAmount - estimatedTransportCost - estimatedInspectionCost - estimatedHiddenFees));
   const potentialGrossProfit = roundMoney(estimatedRetailMarketValue - currentCostBasis);
   const potentialNetProfit = roundMoney(estimatedRetailMarketValue - estimatedTotalAcquisitionCost);
+  const fallbackUsed = scored.length === 0;
+  const lowComparableCount = scored.length > 0 && scored.length < MIN_STRONG_BUY_COMPARABLES;
   const riskScore = scoreRisk(normalized);
   const profitScore = clamp(Math.round((potentialNetProfit / Math.max(estimatedRetailMarketValue, 1)) * 180), 0, 100);
   const confidencePenalty = conditionConfidencePenalty(normalized.conditionFeatures, normalized.imageFeatures, normalized.diagnosticFeatures);
-  const confidenceScore = clamp(Math.round((scored.length >= 6 ? 80 : 48 + scored.length * 6) * (normalized.dataQualityScore / 100) - confidencePenalty), 10, 95);
+  const rawConfidenceScore = clamp(Math.round((scored.length >= 6 ? 80 : 48 + scored.length * 6) * (normalized.dataQualityScore / 100) - confidencePenalty), 10, 95);
+  const confidenceScore = fallbackUsed ? Math.min(rawConfidenceScore, 35) : lowComparableCount ? Math.min(rawConfidenceScore, 55) : rawConfidenceScore;
   const dealScore = clamp(Math.round(profitScore * 0.45 + confidenceScore * 0.3 + (100 - riskScore) * 0.25), 0, 100);
-  const recommendationBadge = recommend({ dealScore, profitScore, riskScore, confidenceScore });
+  const recommendationBadge = recommend({ dealScore, profitScore, riskScore, confidenceScore, comparableCount: scored.length });
+  const guardrailWarnings = marketSnapGuardrailWarnings(scored.length, fallbackUsed, lowComparableCount);
 
   return {
     organizationId: input.organizationId,
@@ -164,15 +170,20 @@ export function runComparableEstimator(input: ValuationInput & { expenses?: Vehi
     recommendationBadge,
     explanation: scored.length > 0
       ? `Comparable estimator used ${scored.length} ${formatMarketType(normalized.marketType)} comparables with time decay and condition risk adjustments.`
-      : "Comparable estimator used fallback pricing because no close comparables were available.",
-    warnings: normalized.warnings,
+      : "Comparable estimator used fallback pricing because no close comparables were available. Treat this as a low-confidence estimate, not an appraisal or offer.",
+    warnings: [...normalized.warnings, ...guardrailWarnings],
     missingData: normalized.missingData,
     valuationExplanation: {
       comparable_count: scored.length,
       market_type: normalized.marketType,
       sample_weight: normalized.sampleWeight,
       confidence_penalty: confidencePenalty,
+      raw_confidence_score: rawConfidenceScore,
+      fallback_used: fallbackUsed,
+      low_comparable_count: lowComparableCount,
       condition_risk: conditionRiskImpact(normalized.conditionFeatures, normalized.diagnosticFeatures),
+      catboost_status: "candidate_only_not_used",
+      guardrail_version: "market-snap-production-guardrails-v1",
     },
     modelVersion: MODEL_VERSION,
     estimatorType: "comparable_estimator",
@@ -293,6 +304,58 @@ function estimateReconditioningCost(listing: NormalizedMarketListing) {
   return cost;
 }
 
+export interface MarketSnapCalibrationOutcome {
+  estimatedRetailMarketValue: number;
+  actualSalePrice: number;
+  confidenceScore?: number;
+  comparableCount?: number;
+  make?: string;
+  model?: string;
+  sourceName?: string;
+}
+
+export interface MarketSnapCalibrationSummary {
+  outcomeCount: number;
+  averageAbsoluteError: number;
+  medianAbsoluteError: number;
+  averagePercentageError: number;
+  errorByMakeModel: Array<{ makeModel: string; outcomeCount: number; averageAbsoluteError: number }>;
+  errorBySource: Array<{ sourceName: string; outcomeCount: number; averageAbsoluteError: number }>;
+  confidenceVsError: Array<{ confidenceBand: string; outcomeCount: number; averageAbsoluteError: number }>;
+}
+
+export function summarizeValuationCalibration(outcomes: MarketSnapCalibrationOutcome[]): MarketSnapCalibrationSummary {
+  const valid = outcomes
+    .map((outcome) => ({
+      ...outcome,
+      absoluteError: Math.abs(outcome.actualSalePrice - outcome.estimatedRetailMarketValue),
+      percentageError: outcome.actualSalePrice > 0 ? Math.abs(outcome.actualSalePrice - outcome.estimatedRetailMarketValue) / outcome.actualSalePrice : 0,
+    }))
+    .filter((outcome) => Number.isFinite(outcome.absoluteError) && outcome.actualSalePrice > 0 && outcome.estimatedRetailMarketValue > 0);
+
+  return {
+    outcomeCount: valid.length,
+    averageAbsoluteError: roundMoney(average(valid.map((outcome) => outcome.absoluteError))),
+    medianAbsoluteError: roundMoney(median(valid.map((outcome) => outcome.absoluteError))),
+    averagePercentageError: roundScore(average(valid.map((outcome) => outcome.percentageError))),
+    errorByMakeModel: summarizeGroup(valid, (outcome) => [outcome.make, outcome.model].filter(Boolean).join(" ") || "Unknown").map(([makeModel, group]) => ({
+      makeModel,
+      outcomeCount: group.length,
+      averageAbsoluteError: roundMoney(average(group.map((outcome) => outcome.absoluteError))),
+    })),
+    errorBySource: summarizeGroup(valid, (outcome) => outcome.sourceName || "Unknown").map(([sourceName, group]) => ({
+      sourceName,
+      outcomeCount: group.length,
+      averageAbsoluteError: roundMoney(average(group.map((outcome) => outcome.absoluteError))),
+    })),
+    confidenceVsError: summarizeGroup(valid, (outcome) => confidenceBand(outcome.confidenceScore ?? 0)).map(([confidenceBand, group]) => ({
+      confidenceBand,
+      outcomeCount: group.length,
+      averageAbsoluteError: roundMoney(average(group.map((outcome) => outcome.absoluteError))),
+    })),
+  };
+}
+
 function scoreRisk(listing: NormalizedMarketListing) {
   let risk = 100 - listing.dataQualityScore;
   if (listing.marketType === "salvage_auction_market") risk += 38;
@@ -303,11 +366,20 @@ function scoreRisk(listing: NormalizedMarketListing) {
   return clamp(Math.round(risk), 0, 100);
 }
 
-function recommend(input: { dealScore: number; profitScore: number; riskScore: number; confidenceScore: number }): RecommendationBadge {
+function recommend(input: { dealScore: number; profitScore: number; riskScore: number; confidenceScore: number; comparableCount: number }): RecommendationBadge {
   if (input.riskScore >= 75) return "High Risk";
-  if (input.dealScore >= 72 && input.profitScore >= 55 && input.confidenceScore >= 45) return "Strong Buy";
+  if (input.comparableCount < MIN_STRONG_BUY_COMPARABLES) return input.dealScore >= 45 && input.riskScore < 70 ? "Negotiate" : "Avoid";
+  if (input.dealScore >= 72 && input.profitScore >= 55 && input.confidenceScore >= MIN_STRONG_BUY_CONFIDENCE) return "Strong Buy";
   if (input.dealScore >= 45 && input.riskScore < 70) return "Negotiate";
   return "Avoid";
+}
+
+function marketSnapGuardrailWarnings(comparableCount: number, fallbackUsed: boolean, lowComparableCount: boolean) {
+  const warnings = ["Market Snap values are estimates, not appraisals, offers, or guaranteed sale prices."];
+  if (fallbackUsed) warnings.push("No close comparables were available; fallback pricing was used and confidence is capped.");
+  if (lowComparableCount) warnings.push(`Only ${comparableCount} close comparable${comparableCount === 1 ? "" : "s"} supported this estimate; confidence is capped and Strong Buy is blocked.`);
+  warnings.push("CatBoost is candidate-only and was not used for this production estimate.");
+  return warnings;
 }
 
 function dataFreshnessDays(values: string[]) {
@@ -326,6 +398,34 @@ function clamp(value: number, min: number, max: number) {
 
 function roundScore(value: number) {
   return Math.round(value * 1000) / 1000;
+}
+
+function average(values: number[]) {
+  if (values.length === 0) return 0;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function median(values: number[]) {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2 : sorted[middle] ?? 0;
+}
+
+function summarizeGroup<T>(values: T[], keyFor: (value: T) => string) {
+  const groups = new Map<string, T[]>();
+  for (const value of values) {
+    const key = keyFor(value);
+    groups.set(key, [...(groups.get(key) ?? []), value]);
+  }
+  return Array.from(groups.entries()).sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
+}
+
+function confidenceBand(score: number) {
+  if (score >= 80) return "80-100";
+  if (score >= 60) return "60-79";
+  if (score >= 40) return "40-59";
+  return "0-39";
 }
 
 function formatMarketType(value: MarketType) {

@@ -2777,6 +2777,7 @@ function MarketSnapDashboard({
           )}
         </div>
       </div>
+      <div className="message-banner border border-amber-300/20 bg-amber-300/10 text-amber-100">{t.marketSnap.estimateDisclaimer}</div>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard label={t.marketSnap.totalRetailValue} value={money(totalRetail)} icon={<BarChart3 size={18} />} />
         <MetricCard label={t.marketSnap.totalCostBasis} value={money(totalCostBasis)} icon={<Receipt size={18} />} />
@@ -2812,13 +2813,16 @@ function MarketSnapDashboard({
                   t.marketSnap.profitScore,
                   t.marketSnap.riskScore,
                   t.marketSnap.confidence,
+                  t.marketSnap.comparableCount,
+                  t.marketSnap.warnings,
+                  t.marketSnap.missingData,
                   t.marketSnap.recommendation,
                 ].map((header) => <th key={header}>{header}</th>)}
               </tr>
             </thead>
             <tbody>
               {valuations.length === 0 && (
-                <tr><td colSpan={17}><EmptyState title={t.marketSnap.noValuations} copy={t.marketSnap.noValuationsCopy} /></td></tr>
+                <tr><td colSpan={20}><EmptyState title={t.marketSnap.noValuations} copy={t.marketSnap.noValuationsCopy} /></td></tr>
               )}
               {valuations.map((valuation) => {
                 const vehicle = activeVehicles.find((item) => item.id === valuation.vehicleId);
@@ -2840,6 +2844,9 @@ function MarketSnapDashboard({
                     <td>{valuation.profitScore}</td>
                     <td>{valuation.riskScore}</td>
                     <td>{valuation.confidenceScore}</td>
+                    <td>{valuation.comparableCount}</td>
+                    <td>{valuation.warnings.length}</td>
+                    <td>{valuation.missingData.length}</td>
                     <td><RecommendationBadgeView badge={valuation.recommendationBadge} /></td>
                   </tr>
                 );
@@ -2920,6 +2927,7 @@ function DealRadarPage({
   return (
     <div className="space-y-4">
       {message && <div className="message-banner border border-amber-300/20 bg-amber-300/10 text-amber-100">{message}</div>}
+      <div className="message-banner border border-amber-300/20 bg-amber-300/10 text-amber-100">{t.marketSnap.estimateDisclaimer}</div>
       <div className="surface-muted flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <p className="text-sm text-slate-400">{t.marketSnap.dealRadarSubtitle}</p>
@@ -3076,7 +3084,7 @@ function DealRadarTable({ t, items, canManage, onView, onRemove, onConvert }: { 
       <table className="data-table">
         <thead>
           <tr>
-            {[t.marketSnap.vehicle, t.marketSnap.source, t.fields.listedPrice, t.marketSnap.retailValue, t.marketSnap.maxBid, t.marketSnap.potentialProfit, t.marketSnap.confidence, t.marketSnap.recommendation, t.marketSnap.actions].map((header) => <th key={header}>{header}</th>)}
+            {[t.marketSnap.vehicle, t.marketSnap.source, t.fields.listedPrice, t.marketSnap.retailValue, t.marketSnap.maxBid, t.marketSnap.potentialProfit, t.marketSnap.confidence, t.marketSnap.comparableCount, t.marketSnap.warnings, t.marketSnap.recommendation, t.marketSnap.actions].map((header) => <th key={header}>{header}</th>)}
           </tr>
         </thead>
         <tbody>
@@ -3088,7 +3096,9 @@ function DealRadarTable({ t, items, canManage, onView, onRemove, onConvert }: { 
               <td>{money(Number((item.valuation_snapshot as Record<string, unknown> | undefined)?.estimatedRetailMarketValue ?? 0))}</td>
               <td>{money(Number((item.valuation_snapshot as Record<string, unknown> | undefined)?.maxRecommendedBid ?? 0))}</td>
               <td>{money(Number(item.potential_profit ?? 0))}</td>
-              <td>{String(item.confidence_score ?? 0)}</td>
+              <td>{String((item.valuation_snapshot as Record<string, unknown> | undefined)?.confidenceScore ?? item.confidence_score ?? 0)}</td>
+              <td>{String((item.valuation_snapshot as Record<string, unknown> | undefined)?.comparableCount ?? 0)}</td>
+              <td>{Array.isArray((item.valuation_snapshot as Record<string, unknown> | undefined)?.warnings) ? ((item.valuation_snapshot as Record<string, unknown>).warnings as unknown[]).length : 0}</td>
               <td><RecommendationBadgeView badge={String(item.recommendation_badge ?? "Negotiate")} /></td>
               <td>
                 <div className="flex flex-wrap gap-2">

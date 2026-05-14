@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
 import {
   calculateTimeDecayWeight,
@@ -7,6 +9,7 @@ import {
   runComparableEstimator,
   shouldRefreshVehicle,
   shouldStoreValuationSnapshot,
+  summarizeValuationCalibration,
 } from "../src/lib/market-snap/engine";
 import type { Vehicle } from "../src/types/domain";
 
@@ -64,6 +67,38 @@ test("Market Snap comparable estimator does not mix clean retail comparables int
   assert.equal(valuation.recommendationBadge, "High Risk");
 });
 
+test("Market Snap fallback estimates are low confidence and cannot be Strong Buy", () => {
+  const valuation = runComparableEstimator({
+    organizationId: "org-1",
+    vehicle: { ...activeVehicle, purchasePrice: 9000, listedPrice: 18500 },
+    comparables: [],
+  });
+
+  assert.equal(valuation.comparableCount, 0);
+  assert.ok(valuation.confidenceScore <= 35);
+  assert.notEqual(valuation.recommendationBadge, "Strong Buy");
+  assert.ok(valuation.warnings.some((warning) => warning.includes("fallback pricing")));
+  assert.equal(valuation.valuationExplanation?.fallback_used, true);
+  assert.equal(valuation.valuationExplanation?.catboost_status, "candidate_only_not_used");
+});
+
+test("Market Snap low comparable estimates cap confidence and block Strong Buy", () => {
+  const valuation = runComparableEstimator({
+    organizationId: "org-1",
+    vehicle: { ...activeVehicle, purchaseSource: "other", purchasePrice: 9000, listedPrice: 15000 },
+    comparables: [
+      { sourceName: "AutoTrader", marketType: "clean_retail_market", year: 2020, make: "Toyota", model: "Corolla", mileageKm: 80500, listedPrice: 19000, capturedAt: new Date().toISOString(), dataQualityScore: 100 },
+      { sourceName: "AutoTrader", marketType: "clean_retail_market", year: 2020, make: "Toyota", model: "Corolla", mileageKm: 81000, listedPrice: 19500, capturedAt: new Date().toISOString(), dataQualityScore: 100 },
+    ],
+  });
+
+  assert.equal(valuation.comparableCount, 2);
+  assert.ok(valuation.confidenceScore <= 55);
+  assert.notEqual(valuation.recommendationBadge, "Strong Buy");
+  assert.ok(valuation.warnings.some((warning) => warning.includes("Only 2 close comparables")));
+  assert.equal(valuation.valuationExplanation?.low_comparable_count, true);
+});
+
 test("Market Snap refresh skips sold vehicles and avoids meaningless duplicate snapshots", () => {
   const soldVehicle: Vehicle = { ...activeVehicle, status: "sold" };
   const first = runComparableEstimator({ organizationId: "org-1", vehicle: activeVehicle, comparables: [] });
@@ -74,6 +109,31 @@ test("Market Snap refresh skips sold vehicles and avoids meaningless duplicate s
   assert.equal(shouldRefreshVehicle(soldVehicle), false);
   assert.equal(shouldStoreValuationSnapshot(first, duplicate), false);
   assert.equal(shouldStoreValuationSnapshot(first, changed), true);
+});
+
+test("Market Snap calibration summary compares predictions to actual sale outcomes", () => {
+  const summary = summarizeValuationCalibration([
+    { estimatedRetailMarketValue: 18000, actualSalePrice: 20000, confidenceScore: 82, make: "Toyota", model: "Corolla", sourceName: "AutoTrader" },
+    { estimatedRetailMarketValue: 15000, actualSalePrice: 12000, confidenceScore: 45, make: "Toyota", model: "Corolla", sourceName: "OpenLane" },
+    { estimatedRetailMarketValue: 9000, actualSalePrice: 10000, confidenceScore: 30, make: "Honda", model: "Civic", sourceName: "AutoTrader" },
+  ]);
+
+  assert.equal(summary.outcomeCount, 3);
+  assert.equal(summary.averageAbsoluteError, 2000);
+  assert.equal(summary.medianAbsoluteError, 2000);
+  assert.ok(summary.errorByMakeModel.some((row) => row.makeModel === "Toyota Corolla" && row.outcomeCount === 2));
+  assert.ok(summary.errorBySource.some((row) => row.sourceName === "AutoTrader" && row.outcomeCount === 2));
+  assert.ok(summary.confidenceVsError.some((row) => row.confidenceBand === "80-100"));
+});
+
+test("Market Snap migration stores sold outcome errors and exposes calibration report", () => {
+  const sql = readFileSync(join(process.cwd(), "supabase/migrations/20260521_market_snap_calibration_guardrails.sql"), "utf8");
+
+  assert.match(sql, /create or replace function apply_market_snap_sale_outcome\(\)/i);
+  assert.match(sql, /new\.market_snap_prediction_error/i);
+  assert.match(sql, /create trigger apply_market_snap_sale_outcome_before_insert/i);
+  assert.match(sql, /create or replace function market_snap_calibration_report\(p_organization_id uuid\)/i);
+  assert.match(sql, /average_percentage_error/i);
 });
 
 test("Market Snap does not invent missing condition, diagnostic, or image findings", () => {
