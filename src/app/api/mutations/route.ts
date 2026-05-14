@@ -54,6 +54,8 @@ import {
 import type { Role } from "@/types/domain";
 import type { CompanyCashTransactionType, ExternalCashTransactionType } from "@/types/domain";
 
+const LEGACY_MUTATION_HEADERS = { "x-dealer-flow-deprecated-route": "/api/mutations" };
+
 type Operation =
   | "createOrganization"
   | "joinOrganization"
@@ -360,7 +362,7 @@ export async function POST(request: Request) {
 }
 
 function ok(extra?: Record<string, unknown>) {
-  return NextResponse.json({ ok: true, ...extra });
+  return NextResponse.json({ ok: true, ...extra }, { headers: LEGACY_MUTATION_HEADERS });
 }
 
 async function requireRole(client: Awaited<ReturnType<typeof createSupabaseServerClient>>, userId: string, organizationId: string, roles: Role[]) {

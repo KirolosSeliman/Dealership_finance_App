@@ -1150,6 +1150,32 @@ test("persistent rate limit migration uses an atomic Supabase bucket", () => {
   assert.match(security, /RATE_LIMIT_BACKEND/i);
 });
 
+test("high-risk mutation domains have dedicated route entrypoints", () => {
+  const routes = [
+    "src/app/api/vehicles/route.ts",
+    "src/app/api/vehicles/[vehicleId]/route.ts",
+    "src/app/api/vehicles/[vehicleId]/archive/route.ts",
+    "src/app/api/vehicles/[vehicleId]/expenses/route.ts",
+    "src/app/api/vehicles/[vehicleId]/expenses/[expenseId]/route.ts",
+    "src/app/api/vehicles/[vehicleId]/sale/route.ts",
+    "src/app/api/sales/[saleId]/void/route.ts",
+    "src/app/api/sales/[saleId]/correct/route.ts",
+    "src/app/api/cash/[account]/route.ts",
+    "src/app/api/cash/[account]/[transactionId]/route.ts",
+    "src/app/api/cash/[account]/[transactionId]/reverse/route.ts",
+  ];
+  for (const route of routes) {
+    assert.equal(existsSync(join(process.cwd(), route)), true, `${route} should exist`);
+  }
+  const bridge = readFileSync(join(process.cwd(), "src/lib/server/mutation-route-bridge.ts"), "utf8");
+  const app = readFileSync(join(process.cwd(), "src/components/dealer-flow-app.tsx"), "utf8");
+  assert.match(bridge, /forwardDomainMutation/i);
+  assert.match(bridge, /checkRateLimit/i);
+  assert.match(app, /function mutationEndpoint/i);
+  assert.match(app, /\/api\/vehicles\/\$\{vehicleId\}\/archive/i);
+  assert.match(app, /\/api\/cash\/\$\{account\}\/\$\{transactionId\}\/reverse/i);
+});
+
 test("backup and tax export request schemas reject invalid payloads", () => {
   assert.equal(backupRequestSchema.safeParse({ organizationId: "not-a-uuid" }).success, false);
   assert.equal(taxExportSchema.safeParse({
