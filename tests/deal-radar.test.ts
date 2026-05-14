@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
 import { convertDealRadarListingToInventory } from "../src/lib/market-snap/repository";
 
@@ -26,4 +28,14 @@ test("Deal Radar convert-to-inventory prefills only confidently extracted vehicl
   assert.equal("color" in prefill, false);
   assert.equal("transmission" in prefill, false);
   assert.equal("drivetrain" in prefill, false);
+});
+
+test("Deal Radar UI surfaces saved OpenLane Carfax and media metadata", () => {
+  const app = readFileSync(join(process.cwd(), "src/components/dealer-flow-app.tsx"), "utf8");
+
+  assert.match(app, /carfax_url/);
+  assert.match(app, /photos_json/);
+  assert.match(app, /videos_json/);
+  assert.match(app, /openlane_metadata/);
+  assert.match(app, /dealRadarMediaSummary/);
 });

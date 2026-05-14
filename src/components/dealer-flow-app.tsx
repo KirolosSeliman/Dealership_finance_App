@@ -3084,7 +3084,7 @@ function DealRadarTable({ t, items, canManage, onView, onRemove, onConvert }: { 
       <table className="data-table">
         <thead>
           <tr>
-            {[t.marketSnap.vehicle, t.marketSnap.source, t.fields.listedPrice, t.marketSnap.retailValue, t.marketSnap.maxBid, t.marketSnap.potentialProfit, t.marketSnap.confidence, t.marketSnap.comparableCount, t.marketSnap.warnings, t.marketSnap.recommendation, t.marketSnap.actions].map((header) => <th key={header}>{header}</th>)}
+            {[t.marketSnap.vehicle, t.marketSnap.source, "Media", t.fields.listedPrice, t.marketSnap.retailValue, t.marketSnap.maxBid, t.marketSnap.potentialProfit, t.marketSnap.confidence, t.marketSnap.comparableCount, t.marketSnap.warnings, t.marketSnap.recommendation, t.marketSnap.actions].map((header) => <th key={header}>{header}</th>)}
           </tr>
         </thead>
         <tbody>
@@ -3092,6 +3092,7 @@ function DealRadarTable({ t, items, canManage, onView, onRemove, onConvert }: { 
             <tr key={String(item.id)}>
               <td>{dealRadarLabel(item)}</td>
               <td>{String(item.source_name ?? "-")}</td>
+              <td>{dealRadarMediaSummary(item)}</td>
               <td>{money(Number(item.listed_price ?? 0))}</td>
               <td>{money(Number((item.valuation_snapshot as Record<string, unknown> | undefined)?.estimatedRetailMarketValue ?? 0))}</td>
               <td>{money(Number((item.valuation_snapshot as Record<string, unknown> | undefined)?.maxRecommendedBid ?? 0))}</td>
@@ -3130,6 +3131,8 @@ function DealRadarCard({ t, item, canManage, onView, onRemove, onConvert }: { t:
         [t.marketSnap.potentialProfit, money(Number(item.potential_profit ?? 0))],
         [t.marketSnap.dealScore, String(item.deal_score ?? 0)],
         [t.marketSnap.riskScore, String(item.risk_score ?? 0)],
+        ["Carfax", dealRadarCarfaxLabel(item)],
+        ["Media", dealRadarMediaSummary(item)],
       ]} />
       <div className="mt-4 flex flex-wrap gap-2">
         <button className="secondary-button" type="button" onClick={onView}>{t.marketSnap.viewAnalysis}</button>
@@ -3144,6 +3147,7 @@ function DealRadarAnalysis({ t, item }: { t: ReturnType<typeof getDictionary>; i
   const valuation = (item.valuation_snapshot as Record<string, unknown> | null) ?? {};
   const warnings = Array.isArray(valuation.warnings) ? valuation.warnings : [];
   const missing = Array.isArray(valuation.missingData) ? valuation.missingData : [];
+  const openlaneMetadata = dealRadarOpenLaneMetadata(item);
   return (
     <div className="mt-4 grid gap-4 xl:grid-cols-2">
       <InfoGrid rows={[
@@ -3153,6 +3157,12 @@ function DealRadarAnalysis({ t, item }: { t: ReturnType<typeof getDictionary>; i
         [t.marketSnap.maxBid, money(Number(valuation.maxRecommendedBid ?? 0))],
         [t.marketSnap.potentialProfit, money(Number(valuation.potentialNetProfit ?? item.potential_profit ?? 0))],
         [t.marketSnap.confidence, String(valuation.confidenceScore ?? item.confidence_score ?? 0)],
+        ["Open listing", String(item.listing_url ?? "-")],
+        ["Carfax", dealRadarCarfaxLabel(item)],
+        ["Photos", String(dealRadarArrayCount(item.photos_json))],
+        ["Videos", String(dealRadarArrayCount(item.videos_json))],
+        ["Run / lane / lot", [openlaneMetadata.runNumber, openlaneMetadata.lane, openlaneMetadata.lotNumber].filter(Boolean).join(" / ") || "-"],
+        ["Stock", String(openlaneMetadata.stockNumber ?? "-")],
       ]} />
       <div className="rounded-md border border-slate-800 bg-slate-950/35 p-4">
         <p className="text-sm font-semibold text-white">{t.marketSnap.explanation}</p>
@@ -3164,6 +3174,24 @@ function DealRadarAnalysis({ t, item }: { t: ReturnType<typeof getDictionary>; i
       </div>
     </div>
   );
+}
+
+function dealRadarArrayCount(value: unknown) {
+  return Array.isArray(value) ? value.length : 0;
+}
+
+function dealRadarCarfaxLabel(item: Record<string, unknown>) {
+  if (item.carfax_url) return "Link visible";
+  return item.carfax_available ? "Visible" : "-";
+}
+
+function dealRadarMediaSummary(item: Record<string, unknown>) {
+  return `${dealRadarArrayCount(item.photos_json)} photos / ${dealRadarArrayCount(item.videos_json)} videos`;
+}
+
+function dealRadarOpenLaneMetadata(item: Record<string, unknown>) {
+  const metadata = item.openlane_metadata;
+  return metadata && typeof metadata === "object" && !Array.isArray(metadata) ? metadata as Record<string, unknown> : {};
 }
 
 function MetricCard({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
