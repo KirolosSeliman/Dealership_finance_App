@@ -339,11 +339,12 @@ function objectOrUndefined(value: unknown) {
 
 function capRawVisibleText(value?: string) {
   const text = String(value ?? "").trim();
-  return text ? text.slice(0, 20_000) : null;
+  return text ? text.slice(0, 12_000) : null;
 }
 
 function openLaneMetadata(input: MarketListingInput) {
   return {
+    ...(input.openlaneMetadata ?? {}),
     currentBid: input.currentBid,
     buyNowPrice: input.buyNowPrice,
     reservePrice: input.reservePrice,

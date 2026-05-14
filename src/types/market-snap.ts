@@ -169,13 +169,14 @@ export interface MarketListingInput {
   structuralAnnouncements?: string[];
   odometerAnnouncements?: string[];
   tireCondition?: string;
-  keysAvailable?: string;
+  keysAvailable?: string | boolean;
   carfaxUrl?: string;
   carfaxAvailable?: boolean;
   photos?: MarketListingPhoto[];
   videos?: MarketListingVideo[];
   videoCount?: number;
   rawVisibleText?: string;
+  openlaneMetadata?: Record<string, unknown>;
   extractedFields?: Record<string, unknown>;
   missingData?: string[];
   warnings?: string[];

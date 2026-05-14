@@ -14,6 +14,7 @@ export const marketSourceTypes = ["retail", "wholesale", "auction", "salvage", "
 const optionalText = z.string().trim().max(4000).optional().or(z.literal(""));
 const shortText = z.string().trim().max(240).optional().or(z.literal(""));
 const urlText = z.string().trim().url().optional().or(z.literal(""));
+const httpUrl = z.string().trim().url().refine((value) => ["http:", "https:"].includes(new URL(value).protocol), "URL must use http or https");
 const money = z.coerce.number().finite().min(0).max(99_999_999).optional();
 const score = z.coerce.number().finite().min(0).max(100).optional();
 const conditionSeverity = z.enum(["none", "light", "moderate", "severe", "unknown"]);
@@ -22,16 +23,16 @@ const diagnosticSeverity = z.enum(["low", "medium", "high", "critical"]);
 const textList = z.array(z.string().trim().min(1).max(80)).max(30).optional();
 const longerTextList = z.array(z.string().trim().min(1).max(240)).max(50).optional();
 const marketListingPhotoSchema = z.object({
-  url: z.string().trim().url(),
-  thumbnailUrl: z.string().trim().url().optional(),
+  url: httpUrl,
+  thumbnailUrl: httpUrl.optional(),
   alt: z.string().trim().max(240).optional(),
   width: z.coerce.number().int().min(0).max(20000).optional(),
   height: z.coerce.number().int().min(0).max(20000).optional(),
   source: z.enum(["img", "srcset", "picture", "background-image", "link"]).optional(),
 }).strict();
 const marketListingVideoSchema = z.object({
-  url: z.string().trim().url(),
-  posterUrl: z.string().trim().url().optional(),
+  url: httpUrl,
+  posterUrl: httpUrl.optional(),
   title: z.string().trim().max(240).optional(),
   type: z.string().trim().max(80).optional(),
   source: z.enum(["video", "source", "iframe", "link"]).optional(),
@@ -166,13 +167,14 @@ export const marketListingPayloadSchema = z.object({
   structuralAnnouncements: longerTextList,
   odometerAnnouncements: longerTextList,
   tireCondition: shortText,
-  keysAvailable: shortText,
+  keysAvailable: z.union([z.boolean(), z.string().trim().max(240)]).optional().or(z.literal("")),
   carfaxUrl: urlText,
   carfaxAvailable: z.boolean().optional(),
-  photos: z.array(marketListingPhotoSchema).max(120).optional(),
-  videos: z.array(marketListingVideoSchema).max(30).optional(),
+  photos: z.array(marketListingPhotoSchema).max(200).optional(),
+  videos: z.array(marketListingVideoSchema).max(50).optional(),
   videoCount: z.coerce.number().int().min(0).max(100).optional(),
-  rawVisibleText: z.string().trim().max(20_000).optional().or(z.literal("")),
+  rawVisibleText: z.string().trim().max(12_000).optional().or(z.literal("")),
+  openlaneMetadata: z.record(z.string(), z.unknown()).optional(),
   extractedFields: z.record(z.string(), z.unknown()).optional(),
   missingData: z.array(z.string().trim().min(1).max(80)).max(50).optional(),
   warnings: z.array(z.string().trim().min(1).max(240)).max(50).optional(),

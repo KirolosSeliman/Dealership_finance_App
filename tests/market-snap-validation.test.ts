@@ -56,11 +56,34 @@ test("Market Snap validation accepts rich OpenLane extension payloads", () => {
     missingData: ["diagnostic_codes_unknown"],
     warnings: ["Carfax link was visible."],
     rawVisibleText: "Visible OpenLane page text",
+    openlaneMetadata: { runNumber: "42", lane: "A" },
     extractedFields: { lane: "A", runNumber: "42" },
     extractionConfidenceScore: 88,
   });
 
   assert.equal(result.success, true);
+});
+
+test("Market Snap validation rejects unsafe OpenLane media URLs and oversized raw text", () => {
+  assert.equal(marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    year: 2021,
+    make: "Toyota",
+    model: "RAV4",
+    photos: [{ url: "data:image/png;base64,AAA", source: "img" }],
+  }).success, false);
+
+  assert.equal(marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    year: 2021,
+    make: "Toyota",
+    model: "RAV4",
+    rawVisibleText: "x".repeat(12_001),
+  }).success, false);
 });
 
 test("Market Snap validation rejects unsafe or malformed listing payloads", () => {
