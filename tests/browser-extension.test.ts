@@ -47,8 +47,13 @@ test("Market Snap extension uses in-page OpenLane widget instead of popup-only a
   assert.match(widget, /dealer-flow-market-snap-widget/);
   assert.match(widget, /Wholesale sell/);
   assert.match(widget, /Max bid/);
+  assert.match(widget, /data-action="settings"/);
+  assert.match(widget, /showDisconnected/);
+  assert.match(widget, /showValuation/);
+  assert.match(widget, /destroy/);
   assert.match(widget, /Copy JSON/);
   assert.match(widget, /attachShadow/);
+  assert.match(contentScript, /openOptionsPage/);
 });
 
 test("Market Snap analyze and save routes support extension CORS preflight", () => {

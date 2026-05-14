@@ -75,12 +75,13 @@
       onSave: () => saveToDealRadar(),
       onCopy: () => copyExtractedJson(),
       onOpenDealerFlow: () => openDealerFlow(),
+      onOpenSettings: () => openSettings(),
     });
     return STATE.widget;
   }
 
   function removeWidget() {
-    STATE.widget?.host?.remove();
+    STATE.widget?.destroy?.();
     STATE.widget = null;
     STATE.listing = null;
     STATE.valuation = null;
@@ -217,6 +218,14 @@
     } catch (error) {
       STATE.widget?.render({ status: "error", listing: STATE.listing, valuation: STATE.valuation, message: formatError(error) });
     }
+  }
+
+  function openSettings() {
+    if (chrome.runtime.openOptionsPage) {
+      chrome.runtime.openOptionsPage();
+      return;
+    }
+    window.open(chrome.runtime.getURL("options.html"), "_blank", "noopener,noreferrer");
   }
 
   function settingsProblem(settings) {

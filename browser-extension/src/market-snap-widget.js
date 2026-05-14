@@ -32,6 +32,7 @@
             <button type="button" data-action="save">Save</button>
             <button type="button" data-action="copy">Copy JSON</button>
             <button type="button" data-action="open">Open Dealer Flow</button>
+            <button type="button" data-action="settings" hidden>Settings</button>
           </div>
         </div>
       </section>
@@ -51,6 +52,24 @@
       getState() {
         return { ...state };
       },
+      showLoading(message) {
+        api.render({ status: "loading", message });
+      },
+      showDisconnected(message) {
+        api.render({ status: "disconnected", message });
+      },
+      showExtraction(listing) {
+        api.render({ status: "extracting", listing });
+      },
+      showValuation(listing, valuation) {
+        api.render({ status: "ready", listing, valuation });
+      },
+      showError(message) {
+        api.render({ status: "error", message });
+      },
+      destroy() {
+        host.remove();
+      },
     };
 
     shadow.querySelector(".collapse").addEventListener("click", () => api.setCollapsed(!state.collapsed));
@@ -58,6 +77,7 @@
     shadow.querySelector("[data-action='save']").addEventListener("click", () => callbacks.onSave?.());
     shadow.querySelector("[data-action='copy']").addEventListener("click", () => callbacks.onCopy?.());
     shadow.querySelector("[data-action='open']").addEventListener("click", () => callbacks.onOpenDealerFlow?.());
+    shadow.querySelector("[data-action='settings']").addEventListener("click", () => callbacks.onOpenSettings?.());
 
     host.__dealerFlowWidget = api;
     renderState(shadow, state);
@@ -73,9 +93,10 @@
     shadow.querySelector(".collapse").textContent = state.collapsed ? "+" : "-";
     shadow.querySelector(".status").textContent = statusText(state);
     shadow.querySelector(".vehicle").textContent = vehicleLabel(state.listing);
-    shadow.querySelector(".metrics").innerHTML = state.valuation ? metricsHtml(state.valuation) : detectedHtml(state.listing);
+    shadow.querySelector(".metrics").innerHTML = state.valuation ? `${detectedHtml(state.listing)}${metricsHtml(state.valuation)}` : detectedHtml(state.listing);
     shadow.querySelector(".meta").innerHTML = metaHtml(state.listing, state.valuation);
     shadow.querySelector(".messages").innerHTML = messagesHtml(state.listing, state.valuation, state.message);
+    shadow.querySelector("[data-action='settings']").hidden = state.status !== "disconnected";
   }
 
   function statusText(state) {
@@ -193,13 +214,55 @@
       .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
       .actions button { min-height: 31px; border: 1px solid rgba(103,183,199,.32); border-radius: 7px; background: #67b7c7; color: #041018; cursor: pointer; font-weight: 800; }
       .actions button:nth-child(3), .actions button:nth-child(4) { background: #111827; color: #e5eef8; }
+      .actions button[hidden] { display: none; }
       .error header { border-bottom-color: rgba(251,113,133,.32); }
       .warning header { border-bottom-color: rgba(251,191,36,.32); }
       .saved header { border-bottom-color: rgba(52,211,153,.32); }
     `;
   }
 
+  function mount(callbacks) {
+    return createMarketSnapWidget(callbacks);
+  }
+
+  function updateState(state) {
+    return createMarketSnapWidget().render(state);
+  }
+
+  function showLoading(message) {
+    return createMarketSnapWidget().showLoading(message);
+  }
+
+  function showDisconnected(message) {
+    return createMarketSnapWidget().showDisconnected(message);
+  }
+
+  function showExtraction(listing) {
+    return createMarketSnapWidget().showExtraction(listing);
+  }
+
+  function showValuation(listing, valuation) {
+    return createMarketSnapWidget().showValuation(listing, valuation);
+  }
+
+  function showError(message) {
+    return createMarketSnapWidget().showError(message);
+  }
+
+  function destroy() {
+    const host = document.getElementById(HOST_ID);
+    host?.__dealerFlowWidget?.destroy();
+  }
+
   window.DealerFlowMarketSnapWidget = {
     createMarketSnapWidget,
+    mount,
+    updateState,
+    showLoading,
+    showDisconnected,
+    showExtraction,
+    showValuation,
+    showError,
+    destroy,
   };
 })();
