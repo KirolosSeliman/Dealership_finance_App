@@ -27,7 +27,7 @@ const marketListingPhotoSchema = z.object({
   alt: z.string().trim().max(240).optional(),
   width: z.coerce.number().int().min(0).max(20000).optional(),
   height: z.coerce.number().int().min(0).max(20000).optional(),
-  source: z.enum(["img", "srcset", "background-image", "link"]).optional(),
+  source: z.enum(["img", "srcset", "picture", "background-image", "link"]).optional(),
 }).strict();
 const marketListingVideoSchema = z.object({
   url: z.string().trim().url(),

@@ -6,9 +6,11 @@ import test from "node:test";
 
 const repoRoot = process.cwd();
 const require = createRequire(import.meta.url);
-const { extractOpenLaneFixture } = require("../browser-extension/src/openlane-extractor.js") as {
+const openLaneExtractor = require("../browser-extension/src/openlane-extractor.js") as {
   extractOpenLaneFixture: (html: string, href?: string) => Record<string, unknown>;
+  extractVisibleText: (doc: { body?: { innerText?: string; textContent?: string } }) => string;
 };
+const { extractOpenLaneFixture } = openLaneExtractor;
 
 test("Market Snap extension injects on OpenLane Canada vehicle pages", () => {
   const manifest = JSON.parse(readFileSync(join(repoRoot, "browser-extension/manifest.json"), "utf8"));
@@ -85,6 +87,35 @@ test("OpenLane extractor captures core vehicle, price, and auction fields", () =
   assert.equal(listing.imageCount, 1);
 });
 
+test("OpenLane extractor exposes the dedicated helper contract", () => {
+  for (const helper of [
+    "extractOpenLaneListing",
+    "isOpenLaneVehiclePage",
+    "extractVisibleText",
+    "extractLabelValueMap",
+    "extractMoneyByLabels",
+    "extractMileage",
+    "extractVin",
+    "extractYearMakeModelTrim",
+    "extractCarfaxLink",
+    "extractPhotos",
+    "extractVideos",
+    "normalizeAbsoluteUrl",
+    "dedupeMedia",
+    "calculateExtractionConfidence",
+    "buildMissingData",
+  ]) {
+    assert.equal(typeof openLaneExtractor[helper], "function", `${helper} should be exported`);
+  }
+});
+
+test("OpenLane extractor caps raw visible text at the prompt limit", () => {
+  const longText = `2022 Honda Civic VIN 2HGFE2F52NH123456 Mileage 41000 km Buy Now $21000 ${"x".repeat(14000)}`;
+  const text = openLaneExtractor.extractVisibleText({ body: { innerText: longText } });
+
+  assert.equal(text.length, 12000);
+});
+
 test("OpenLane extractor captures visible Carfax links without fetching reports", () => {
   const html = readFileSync(join(repoRoot, "tests/fixtures/openlane/openlane-with-carfax.html"), "utf8");
   const listing = extractOpenLaneFixture(html);
@@ -103,6 +134,7 @@ test("OpenLane extractor captures and deduplicates visible photos and videos", (
   assert.ok(Number(listing.imageCount) >= 3);
   assert.ok(Number(listing.videoCount) >= 2);
   assert.ok((listing.photos as Array<{ url: string }>).some((photo) => photo.url.endsWith("/photos/f150-front.jpg")));
+  assert.ok((listing.photos as Array<{ source?: string }>).some((photo) => photo.source === "picture"));
   assert.ok((listing.videos as Array<{ url: string }>).some((video) => video.url.includes("f150-walkaround.mp4")));
 });
 

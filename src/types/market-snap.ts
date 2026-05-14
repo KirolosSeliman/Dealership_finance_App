@@ -195,7 +195,7 @@ export interface MarketListingPhoto {
   alt?: string;
   width?: number;
   height?: number;
-  source?: "img" | "srcset" | "background-image" | "link";
+  source?: "img" | "srcset" | "picture" | "background-image" | "link";
 }
 
 export interface MarketListingVideo {

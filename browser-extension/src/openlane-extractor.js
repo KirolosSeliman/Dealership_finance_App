@@ -1,5 +1,5 @@
 (function (root) {
-  const RAW_TEXT_LIMIT = 20000;
+  const RAW_TEXT_LIMIT = 12000;
   const OPENLANE_LABELS = {
     vin: ["VIN", "Vehicle Identification Number"],
     mileageKm: ["Mileage", "Odometer", "Kilometers", "KM"],
@@ -29,18 +29,18 @@
   };
 
   function extractOpenLaneListing(doc = document, href = location.href, options = {}) {
-    const rawVisibleText = normalizeSpace(doc.body?.innerText || doc.body?.textContent || "");
-    const labelValues = extractLabelValues(doc, rawVisibleText);
+    const rawVisibleText = extractVisibleText(doc);
+    const labelValues = extractLabelValueMap(doc, rawVisibleText);
     const title = bestTitle(doc, rawVisibleText);
-    const decodedTitle = parseTitle(title || rawVisibleText);
+    const decodedTitle = extractYearMakeModelTrim(title || rawVisibleText);
     const media = options.includeMediaUrls === false ? { photos: [], videos: [] } : extractMedia(doc, href);
-    const carfaxUrl = findCarfaxUrl(doc, href);
+    const carfaxUrl = extractCarfaxLink(doc, href);
     const conditionReportText = extractConditionText(rawVisibleText, labelValues);
-    const currentBid = moneyFrom(firstLabel(labelValues, OPENLANE_LABELS.currentBid));
-    const buyNowPrice = moneyFrom(firstLabel(labelValues, OPENLANE_LABELS.buyNowPrice));
+    const currentBid = extractMoneyByLabels(labelValues, OPENLANE_LABELS.currentBid);
+    const buyNowPrice = extractMoneyByLabels(labelValues, OPENLANE_LABELS.buyNowPrice);
     const listedPrice = buyNowPrice || currentBid || moneyFrom(rawVisibleText.match(/\$\s?[\d,]+(?:\.\d{2})?/)?.[0]);
-    const mileageKm = numberFrom(firstLabel(labelValues, OPENLANE_LABELS.mileageKm)) || numberFrom(rawVisibleText.match(/([\d,.\s]+)\s?(km|kilometres|kilometers)\b/i)?.[1]);
-    const vin = vinFrom(firstLabel(labelValues, OPENLANE_LABELS.vin) || rawVisibleText);
+    const mileageKm = extractMileage(firstLabel(labelValues, OPENLANE_LABELS.mileageKm)) || extractMileage(rawVisibleText);
+    const vin = extractVin(firstLabel(labelValues, OPENLANE_LABELS.vin) || rawVisibleText);
     const province = provinceFrom(firstLabel(labelValues, OPENLANE_LABELS.location) || rawVisibleText);
     const declarations = splitAnnouncements(labelValues.get("declarations") || findSectionText(rawVisibleText, "Declarations"));
     const damageAnnouncements = splitAnnouncements(findSectionText(rawVisibleText, "Damage"));
@@ -110,21 +110,19 @@
       extractionConfidenceScore: 0,
     };
 
-    for (const [field, value] of Object.entries({ vin: listing.vin, year: listing.year, make: listing.make, model: listing.model, mileageKm: listing.mileageKm, listedPrice: listing.listedPrice })) {
-      if (!value) missingData.push(field);
-    }
+    missingData.push(...buildMissingData(listing));
     if (!listing.carfaxAvailable) warnings.push("Carfax link was not visible on this OpenLane page.");
     if (listing.imageCount === 0) warnings.push("No visible OpenLane photos were found in the page DOM.");
     if (!conditionReportText) warnings.push("Condition report text was not visible or could not be isolated.");
 
-    listing.extractionConfidenceScore = scoreExtraction(listing);
+    listing.extractionConfidenceScore = calculateExtractionConfidence(listing);
     return compact(listing);
   }
 
-  function isLikelyOpenLaneVehiclePage(doc = document, href = location.href) {
+  function isOpenLaneVehiclePage(doc = document, href = location.href) {
     const host = new URL(href).hostname.toLowerCase();
     if (!host.includes("openlane.")) return false;
-    const text = normalizeSpace(doc.body?.innerText || doc.body?.textContent || "");
+    const text = extractVisibleText(doc);
     const markers = [
       /\bVIN\b/i.test(text) || /[A-HJ-NPR-Z0-9]{17}/i.test(text),
       /\b(odometer|mileage|kilometres|kilometers|km)\b/i.test(text),
@@ -134,6 +132,10 @@
       doc.images.length >= 2,
     ];
     return markers.filter(Boolean).length >= 2;
+  }
+
+  function isLikelyOpenLaneVehiclePage(doc = document, href = location.href) {
+    return isOpenLaneVehiclePage(doc, href);
   }
 
   function extractOpenLaneFixture(html, href = "https://www.openlane.ca/vehicle/fixture") {
@@ -156,6 +158,14 @@
       carfaxUrl: listing.carfaxUrl || (html.match(/href=["']([^"']*carfax[^"']*)["']/i)?.[1] ? absoluteUrl(html.match(/href=["']([^"']*carfax[^"']*)["']/i)?.[1], href) : undefined),
       carfaxAvailable: listing.carfaxAvailable || /carfax/i.test(html),
     };
+  }
+
+  function extractVisibleText(doc = document) {
+    return normalizeSpace(doc.body?.innerText || doc.body?.textContent || "").slice(0, RAW_TEXT_LIMIT);
+  }
+
+  function extractLabelValueMap(doc = document, text = extractVisibleText(doc)) {
+    return extractLabelValues(doc, text);
   }
 
   function extractLabelValues(doc, text) {
@@ -195,6 +205,67 @@
     };
   }
 
+  function extractYearMakeModelTrim(value) {
+    return parseTitle(String(value || ""));
+  }
+
+  function extractMileage(value) {
+    const text = String(value || "");
+    return numberFrom(text.match(/([\d,.\s]+)\s?(km|kilometres|kilometers)\b/i)?.[1] || text);
+  }
+
+  function extractVin(value) {
+    return vinFrom(value);
+  }
+
+  function extractMoneyByLabels(labels, labelNames = []) {
+    const values = labels instanceof Map ? labels : new Map(Object.entries(labels || {}));
+    const searchLabels = labelNames.length ? labelNames : [
+      ...OPENLANE_LABELS.buyNowPrice,
+      ...OPENLANE_LABELS.currentBid,
+      ...OPENLANE_LABELS.reservePrice,
+    ];
+    return moneyFrom(firstLabel(values, searchLabels));
+  }
+
+  function extractCarfaxLink(doc = document, href = safeCurrentHref()) {
+    return findCarfaxUrl(doc, href);
+  }
+
+  function extractPhotos(doc = document, href = safeCurrentHref()) {
+    return extractMedia(doc, href).photos;
+  }
+
+  function extractVideos(doc = document, href = safeCurrentHref()) {
+    return extractMedia(doc, href).videos;
+  }
+
+  function normalizeAbsoluteUrl(url, href = safeCurrentHref()) {
+    return absoluteUrl(url, href);
+  }
+
+  function dedupeMedia(items) {
+    return dedupeByUrl(items || []);
+  }
+
+  function calculateExtractionConfidence(listing) {
+    return scoreExtraction(listing);
+  }
+
+  function buildMissingData(listing) {
+    const requiredFields = {
+      vin: listing.vin,
+      year: listing.year,
+      make: listing.make,
+      model: listing.model,
+      mileageKm: listing.mileageKm,
+      listedPrice: listing.listedPrice,
+    };
+    return Object.entries(requiredFields)
+      .filter(([, value]) => value === undefined || value === null || value === "")
+      .map(([field]) => field);
+  }
+
   function extractMedia(doc, href) {
     const photos = [];
     const videos = [];
@@ -203,7 +274,7 @@
       for (const candidate of parseSrcset(img.srcset)) addPhoto(photos, { url: candidate, thumbnailUrl: img.src, alt: img.alt, source: "srcset" }, href);
     }
     for (const source of Array.from(doc.querySelectorAll?.("picture source[srcset]") || [])) {
-      for (const candidate of parseSrcset(source.getAttribute("srcset"))) addPhoto(photos, { url: candidate, source: "srcset" }, href);
+      for (const candidate of parseSrcset(source.getAttribute("srcset"))) addPhoto(photos, { url: candidate, source: "picture" }, href);
     }
     for (const node of Array.from(doc.querySelectorAll?.("[style*='background']") || [])) {
       const style = node.getAttribute("style") || "";
@@ -233,7 +304,7 @@
       for (const candidate of parseSrcset(attr(match[0], "srcset"))) addPhoto(photos, { url: candidate, alt: attr(match[0], "alt"), source: "srcset" }, href);
     }
     for (const match of html.matchAll(/<source\b[^>]*srcset=["']([^"']+)["'][^>]*>/gi)) {
-      for (const candidate of parseSrcset(match[1])) addPhoto(photos, { url: candidate, source: "srcset" }, href);
+      for (const candidate of parseSrcset(match[1])) addPhoto(photos, { url: candidate, source: "picture" }, href);
     }
     for (const match of html.matchAll(/background-image\s*:\s*url\((['"]?)(.*?)\1\)/gi)) {
       addPhoto(photos, { url: match[2], source: "background-image" }, href);
@@ -337,6 +408,10 @@
     }
   }
 
+  function safeCurrentHref() {
+    return typeof location !== "undefined" ? location.href : "https://www.openlane.ca/";
+  }
+
   function normalizeSpace(value) {
     return String(value || "").replace(/\u00a0/g, " ").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
   }
@@ -378,7 +453,25 @@
     return Object.fromEntries(Object.entries(object).filter(([, value]) => value !== undefined && value !== "" && !(Array.isArray(value) && value.length === 0)));
   }
 
-  const api = { extractOpenLaneListing, extractOpenLaneFixture, isLikelyOpenLaneVehiclePage };
+  const api = {
+    extractOpenLaneListing,
+    extractOpenLaneFixture,
+    isOpenLaneVehiclePage,
+    isLikelyOpenLaneVehiclePage,
+    extractVisibleText,
+    extractLabelValueMap,
+    extractMoneyByLabels,
+    extractMileage,
+    extractVin,
+    extractYearMakeModelTrim,
+    extractCarfaxLink,
+    extractPhotos,
+    extractVideos,
+    normalizeAbsoluteUrl,
+    dedupeMedia,
+    calculateExtractionConfidence,
+    buildMissingData,
+  };
   root.DealerFlowOpenLaneExtractor = api;
   if (typeof module !== "undefined") module.exports = api;
 })(typeof window !== "undefined" ? window : globalThis);
