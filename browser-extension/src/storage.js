@@ -15,6 +15,10 @@
     return { ...DEFAULT_SETTINGS, ...stored };
   }
 
+  async function getMarketSnapSettings() {
+    return getSettings();
+  }
+
   async function saveSettings(values) {
     const normalized = {
       dealerFlowBaseUrl: String(values.dealerFlowBaseUrl || DEFAULT_SETTINGS.dealerFlowBaseUrl).trim().replace(/\/$/, ""),
@@ -30,9 +34,15 @@
     return normalized;
   }
 
+  async function saveMarketSnapSettings(settings) {
+    return saveSettings(settings);
+  }
+
   window.DealerFlowMarketSnapStorage = {
     DEFAULT_SETTINGS,
     getSettings,
     saveSettings,
+    getMarketSnapSettings,
+    saveMarketSnapSettings,
   };
 })();

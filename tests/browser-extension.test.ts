@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 
@@ -66,6 +66,36 @@ test("Market Snap analyze and save routes support extension CORS preflight", () 
   assert.match(api, /MARKET_SNAP_EXTENSION_ORIGINS/);
   assert.match(api, /access-control-allow-credentials/);
   assert.match(api, /requireOrganizationRole/);
+});
+
+test("Market Snap extension settings and API client are shared and secret-free", () => {
+  const storage = readFileSync(join(repoRoot, "browser-extension/src/storage.js"), "utf8");
+  const apiClient = readFileSync(join(repoRoot, "browser-extension/src/api-client.js"), "utf8");
+  const popupHtml = readFileSync(join(repoRoot, "browser-extension/popup.html"), "utf8");
+  const optionsHtml = readFileSync(join(repoRoot, "browser-extension/options.html"), "utf8");
+  const options = readFileSync(join(repoRoot, "browser-extension/src/options.js"), "utf8");
+  const popup = readFileSync(join(repoRoot, "browser-extension/src/popup.js"), "utf8");
+
+  for (const setting of ["dealerFlowBaseUrl", "organizationId", "autoAnalyze", "autoSave", "widgetCollapsed", "debugMode", "includeMediaUrls", "includeRawVisibleText"]) {
+    assert.match(storage, new RegExp(setting));
+  }
+  for (const fn of ["getMarketSnapSettings", "saveMarketSnapSettings", "validateMarketSnapSettings", "analyzeListing", "saveListing", "buildDealerFlowUrl", "formatApiError"]) {
+    assert.match(apiClient, new RegExp(fn));
+  }
+  assert.match(apiClient, /credentials:\s*"include"/);
+  assert.match(apiClient, /\/api\/market-snap\/analyze-listing/);
+  assert.match(apiClient, /\/api\/market-snap\/save-listing/);
+  assert.match(popupHtml, /src\/storage\.js/);
+  assert.match(popupHtml, /src\/api-client\.js/);
+  assert.match(optionsHtml, /src\/storage\.js/);
+  assert.doesNotMatch(options, /chrome\.storage\.sync\.(get|set)/);
+  assert.doesNotMatch(popup, /chrome\.storage\.sync\.(get|set)/);
+
+  const extensionText = readExtensionText(join(repoRoot, "browser-extension"));
+  assert.doesNotMatch(extensionText, /SUPABASE_SERVICE_ROLE|service_role_key|supabase_service_role/i);
+  assert.doesNotMatch(extensionText, /eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/);
+  assert.doesNotMatch(extensionText, /sk_(live|test|proj)_[A-Za-z0-9_-]{16,}/);
+  assert.doesNotMatch(extensionText, /password\s*[:=]|openlane credentials\s*[:=]|carfax credentials\s*[:=]/i);
 });
 
 test("Market Snap repository persists OpenLane media and Carfax metadata", () => {
@@ -165,3 +195,12 @@ test("OpenLane extractor feeds condition report and announcements into payload",
   assert.match(String(listing.conditionReportText), /Transmission hesitation/);
   assert.ok((listing.declarations as string[]).some((item) => /Structural/i.test(item)));
 });
+
+function readExtensionText(path: string): string {
+  const stats = statSync(path);
+  if (stats.isDirectory()) {
+    return readdirSync(path).map((entry) => readExtensionText(join(path, entry))).join("\n");
+  }
+  if (!/\.(js|json|html|css|md)$/i.test(path)) return "";
+  return readFileSync(path, "utf8");
+}

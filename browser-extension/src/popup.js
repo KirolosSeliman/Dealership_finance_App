@@ -18,12 +18,13 @@ async function currentTab() {
 
 async function renderStatus() {
   try {
+    const settings = await window.DealerFlowMarketSnapApi.getMarketSnapSettings();
     const tab = await currentTab();
     const response = await chrome.tabs.sendMessage(tab.id, { type: "MARKET_SNAP_STATUS" }).catch(() => null);
     if (!response?.supported) {
       resultEl.className = "empty";
       resultEl.textContent = "Open an OpenLane vehicle page. Market Snap will appear inside the page automatically.";
-      statusEl.textContent = "Popup is a status/settings helper; analysis happens in-page.";
+      statusEl.textContent = connectionStatus(settings);
       return;
     }
     resultEl.className = "";
@@ -35,7 +36,7 @@ async function renderStatus() {
         <dt>Confidence</dt><dd>${escapeHtml(response.valuation?.confidenceScore ?? "-")}</dd>
       </dl>
     `;
-    statusEl.textContent = "The in-page widget is active.";
+    statusEl.textContent = connectionStatus(settings);
   } catch (error) {
     statusEl.textContent = formatExtensionError(error, "Could not read this tab.");
   }
@@ -54,9 +55,12 @@ async function analyzeCurrentPage() {
 }
 
 async function openDealerFlow() {
-  const settings = await chrome.storage.sync.get(["dealerFlowBaseUrl"]);
-  const url = settings.dealerFlowBaseUrl || "http://localhost:3000";
-  chrome.tabs.create({ url: `${url.replace(/\/$/, "")}/market-snap` });
+  try {
+    const settings = await window.DealerFlowMarketSnapApi.getMarketSnapSettings();
+    chrome.tabs.create({ url: window.DealerFlowMarketSnapApi.buildDealerFlowUrl("/market-snap", settings) });
+  } catch (error) {
+    statusEl.textContent = window.DealerFlowMarketSnapApi.formatApiError(error);
+  }
 }
 
 function vehicleLabel(listing) {
@@ -74,4 +78,13 @@ function formatExtensionError(error, fallback) {
     return "This tab is not connected to Market Snap. Open or refresh an OpenLane vehicle page.";
   }
   return message;
+}
+
+function connectionStatus(settings) {
+  try {
+    window.DealerFlowMarketSnapApi.validateMarketSnapSettings(settings);
+    return "Dealer Flow settings are configured. Analysis happens in-page.";
+  } catch (error) {
+    return window.DealerFlowMarketSnapApi.formatApiError(error);
+  }
 }
