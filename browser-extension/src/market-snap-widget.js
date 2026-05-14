@@ -68,6 +68,7 @@
     const panel = shadow.querySelector(".panel");
     panel.classList.toggle("collapsed", Boolean(state.collapsed));
     panel.classList.toggle("error", state.status === "error");
+    panel.classList.toggle("warning", state.status === "warning" || state.status === "disconnected");
     panel.classList.toggle("saved", state.status === "saved");
     shadow.querySelector(".collapse").textContent = state.collapsed ? "+" : "-";
     shadow.querySelector(".status").textContent = statusText(state);
@@ -78,7 +79,11 @@
   }
 
   function statusText(state) {
-    if (state.status === "loading") return "Analyzing visible OpenLane page...";
+    if (state.status === "detecting") return "OpenLane vehicle detected.";
+    if (state.status === "extracting") return "Extracting visible OpenLane data...";
+    if (state.status === "loading" || state.status === "analyzing") return "Analyzing visible OpenLane page...";
+    if (state.status === "disconnected") return state.message || "Connect Dealer Flow in Market Snap settings.";
+    if (state.status === "warning") return state.message || "Vehicle data is incomplete.";
     if (state.status === "error") return state.message || "Market Snap could not analyze this page.";
     if (state.status === "saved") return "Saved to Deal Radar.";
     if (state.valuation) return "Analysis ready.";
@@ -189,6 +194,7 @@
       .actions button { min-height: 31px; border: 1px solid rgba(103,183,199,.32); border-radius: 7px; background: #67b7c7; color: #041018; cursor: pointer; font-weight: 800; }
       .actions button:nth-child(3), .actions button:nth-child(4) { background: #111827; color: #e5eef8; }
       .error header { border-bottom-color: rgba(251,113,133,.32); }
+      .warning header { border-bottom-color: rgba(251,191,36,.32); }
       .saved header { border-bottom-color: rgba(52,211,153,.32); }
     `;
   }

@@ -35,7 +35,13 @@ test("Market Snap extension uses in-page OpenLane widget instead of popup-only a
   const contentScript = readFileSync(join(repoRoot, "browser-extension/src/content-script.js"), "utf8");
   const widget = readFileSync(join(repoRoot, "browser-extension/src/market-snap-widget.js"), "utf8");
 
+  assert.match(contentScript, /__dealerFlowMarketSnapRuntime/);
+  assert.match(contentScript, /waitForVehiclePage/);
+  assert.match(contentScript, /MAX_READY_RETRIES/);
   assert.match(contentScript, /MutationObserver/);
+  assert.match(contentScript, /pushState/);
+  assert.match(contentScript, /replaceState/);
+  assert.match(contentScript, /disconnected/);
   assert.match(contentScript, /createMarketSnapWidget/);
   assert.match(contentScript, /MARKET_SNAP_ANALYZE/);
   assert.match(widget, /dealer-flow-market-snap-widget/);
