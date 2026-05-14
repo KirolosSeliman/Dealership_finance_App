@@ -12,6 +12,7 @@ export const marketTypes = [
 export const marketSourceTypes = ["retail", "wholesale", "auction", "salvage", "import", "extension"] as const;
 
 const optionalText = z.string().trim().max(4000).optional().or(z.literal(""));
+const shortText = z.string().trim().max(240).optional().or(z.literal(""));
 const urlText = z.string().trim().url().optional().or(z.literal(""));
 const money = z.coerce.number().finite().min(0).max(99_999_999).optional();
 const score = z.coerce.number().finite().min(0).max(100).optional();
@@ -19,6 +20,22 @@ const conditionSeverity = z.enum(["none", "light", "moderate", "severe", "unknow
 const rustSeverity = z.enum(["none", "light", "moderate", "severe", "structural", "unknown"]);
 const diagnosticSeverity = z.enum(["low", "medium", "high", "critical"]);
 const textList = z.array(z.string().trim().min(1).max(80)).max(30).optional();
+const longerTextList = z.array(z.string().trim().min(1).max(240)).max(50).optional();
+const marketListingPhotoSchema = z.object({
+  url: z.string().trim().url(),
+  thumbnailUrl: z.string().trim().url().optional(),
+  alt: z.string().trim().max(240).optional(),
+  width: z.coerce.number().int().min(0).max(20000).optional(),
+  height: z.coerce.number().int().min(0).max(20000).optional(),
+  source: z.enum(["img", "srcset", "background-image", "link"]).optional(),
+}).strict();
+const marketListingVideoSchema = z.object({
+  url: z.string().trim().url(),
+  posterUrl: z.string().trim().url().optional(),
+  title: z.string().trim().max(240).optional(),
+  type: z.string().trim().max(80).optional(),
+  source: z.enum(["video", "source", "iframe", "link"]).optional(),
+}).strict();
 
 export const conditionFeaturesSchema = z.object({
   rust: z.object({
@@ -115,13 +132,51 @@ export const marketListingPayloadSchema = z.object({
   make: optionalText,
   model: optionalText,
   trim: optionalText,
+  vin: z.string().trim().regex(/^[A-HJ-NPR-Z0-9]{17}$/i).transform((value) => value.toUpperCase()).optional(),
   mileageKm: z.coerce.number().int().min(0).max(2_000_000).optional(),
+  exteriorColor: shortText,
+  interiorColor: shortText,
+  drivetrain: shortText,
+  transmission: shortText,
+  engine: shortText,
+  fuelType: shortText,
+  bodyStyle: shortText,
+  doors: z.coerce.number().int().min(0).max(10).optional(),
+  cylinders: z.coerce.number().int().min(0).max(24).optional(),
   listedPrice: money,
+  currentBid: money,
+  buyNowPrice: money,
+  reservePrice: money,
+  estimatedAuctionFees: money,
   auctionHammerPrice: money,
   location: optionalText,
   province: optionalText,
+  sellerName: shortText,
   sellerType: optionalText,
+  auctionStatus: shortText,
+  saleDate: shortText,
+  runNumber: shortText,
+  lane: shortText,
+  lotNumber: shortText,
+  stockNumber: shortText,
   titleStatus: optionalText,
+  declarations: longerTextList,
+  damageAnnouncements: longerTextList,
+  mechanicalAnnouncements: longerTextList,
+  structuralAnnouncements: longerTextList,
+  odometerAnnouncements: longerTextList,
+  tireCondition: shortText,
+  keysAvailable: shortText,
+  carfaxUrl: urlText,
+  carfaxAvailable: z.boolean().optional(),
+  photos: z.array(marketListingPhotoSchema).max(120).optional(),
+  videos: z.array(marketListingVideoSchema).max(30).optional(),
+  videoCount: z.coerce.number().int().min(0).max(100).optional(),
+  rawVisibleText: z.string().trim().max(20_000).optional().or(z.literal("")),
+  extractedFields: z.record(z.string(), z.unknown()).optional(),
+  missingData: z.array(z.string().trim().min(1).max(80)).max(50).optional(),
+  warnings: z.array(z.string().trim().min(1).max(240)).max(50).optional(),
+  extractionConfidenceScore: score,
   conditionReportText: optionalText,
   imageCount: z.coerce.number().int().min(0).max(500).optional(),
   conditionFeatures: conditionFeaturesSchema,

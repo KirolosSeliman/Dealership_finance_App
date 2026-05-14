@@ -135,13 +135,51 @@ export interface MarketListingInput {
   make?: string;
   model?: string;
   trim?: string;
+  vin?: string;
   mileageKm?: number;
+  exteriorColor?: string;
+  interiorColor?: string;
+  drivetrain?: string;
+  transmission?: string;
+  engine?: string;
+  fuelType?: string;
+  bodyStyle?: string;
+  doors?: number;
+  cylinders?: number;
   listedPrice?: number;
+  currentBid?: number;
+  buyNowPrice?: number;
+  reservePrice?: number;
+  estimatedAuctionFees?: number;
   auctionHammerPrice?: number;
   location?: string;
   province?: string;
+  sellerName?: string;
   sellerType?: string;
+  auctionStatus?: string;
+  saleDate?: string;
+  runNumber?: string;
+  lane?: string;
+  lotNumber?: string;
+  stockNumber?: string;
   titleStatus?: string;
+  declarations?: string[];
+  damageAnnouncements?: string[];
+  mechanicalAnnouncements?: string[];
+  structuralAnnouncements?: string[];
+  odometerAnnouncements?: string[];
+  tireCondition?: string;
+  keysAvailable?: string;
+  carfaxUrl?: string;
+  carfaxAvailable?: boolean;
+  photos?: MarketListingPhoto[];
+  videos?: MarketListingVideo[];
+  videoCount?: number;
+  rawVisibleText?: string;
+  extractedFields?: Record<string, unknown>;
+  missingData?: string[];
+  warnings?: string[];
+  extractionConfidenceScore?: number;
   conditionReportText?: string;
   imageCount?: number;
   conditionFeatures?: ConditionFeatures;
@@ -149,6 +187,23 @@ export interface MarketListingInput {
   diagnosticFeatures?: DiagnosticFeatures;
   capturedAt?: string;
   marketType?: MarketType;
+}
+
+export interface MarketListingPhoto {
+  url: string;
+  thumbnailUrl?: string;
+  alt?: string;
+  width?: number;
+  height?: number;
+  source?: "img" | "srcset" | "background-image" | "link";
+}
+
+export interface MarketListingVideo {
+  url: string;
+  posterUrl?: string;
+  title?: string;
+  type?: string;
+  source?: "video" | "source" | "iframe" | "link";
 }
 
 export interface NormalizedMarketListing extends MarketListingInput {

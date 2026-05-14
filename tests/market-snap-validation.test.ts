@@ -28,6 +28,41 @@ test("Market Snap validation accepts visible extension listing data with conditi
   assert.equal(parsed.success, true);
 });
 
+test("Market Snap validation accepts rich OpenLane extension payloads", () => {
+  const result = marketListingPayloadSchema.safeParse({
+    organizationId: "63c47786-fb41-40c1-a573-71346969b9e0",
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    marketType: "auction_market",
+    listingUrl: "https://www.openlane.ca/vehicle/123",
+    title: "2021 Toyota RAV4 XLE AWD",
+    year: 2021,
+    make: "Toyota",
+    model: "RAV4",
+    trim: "XLE AWD",
+    vin: "2T3R1RFV5MW123456",
+    mileageKm: 52300,
+    currentBid: 18500,
+    buyNowPrice: 22900,
+    listedPrice: 22900,
+    carfaxUrl: "https://www.carfax.ca/report/ABC123",
+    carfaxAvailable: true,
+    photos: [{ url: "https://img.openlane.ca/vehicle/front.jpg", source: "img", width: 800, height: 600 }],
+    videos: [{ url: "https://media.openlane.ca/walkaround.mp4", source: "video", type: "video/mp4" }],
+    imageCount: 1,
+    videoCount: 1,
+    declarations: ["Accident repair"],
+    conditionReportText: "Minor scratches on rear bumper.",
+    missingData: ["diagnostic_codes_unknown"],
+    warnings: ["Carfax link was visible."],
+    rawVisibleText: "Visible OpenLane page text",
+    extractedFields: { lane: "A", runNumber: "42" },
+    extractionConfidenceScore: 88,
+  });
+
+  assert.equal(result.success, true);
+});
+
 test("Market Snap validation rejects unsafe or malformed listing payloads", () => {
   const parsed = marketListingPayloadSchema.safeParse({
     organizationId: "not-an-org",

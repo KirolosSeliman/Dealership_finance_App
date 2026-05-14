@@ -25,20 +25,54 @@ export async function withMarketSnapAuth(
   bucket: string,
   handler: (context: { client: Client; userId: string; body: unknown }) => Promise<Response>,
 ) {
+  const headers = marketSnapCorsHeaders(request);
   try {
-    assertSameOrigin(request);
+    assertAllowedMarketSnapOrigin(request);
     await checkRateLimit(request, bucket, { limit: 80, windowMs: 60_000 });
     const client = await createSupabaseServerClient();
-    if (!client) return NextResponse.json({ ok: false, message: "Supabase is not configured." }, { status: 503 });
+    if (!client) return NextResponse.json({ ok: false, message: "Supabase is not configured." }, { status: 503, headers });
     const { data, error } = await client.auth.getUser();
-    if (error || !data.user) return NextResponse.json({ ok: false, message: "Authentication required." }, { status: 401 });
+    if (error || !data.user) return NextResponse.json({ ok: false, message: "Authentication required." }, { status: 401, headers });
     await checkRateLimit(request, `${bucket}-user`, { limit: 60, windowMs: 60_000, userId: data.user.id });
     const body = await readBody(request);
-    return handler({ client, userId: data.user.id, body });
+    const response = await handler({ client, userId: data.user.id, body });
+    for (const [key, value] of headers.entries()) response.headers.set(key, value);
+    return response;
   } catch (error) {
     const response = routeErrorResponse(error);
-    return NextResponse.json(response.body, { status: response.status });
+    return NextResponse.json(response.body, { status: response.status, headers });
   }
+}
+
+export async function marketSnapOptions(request: Request) {
+  return new Response(null, { status: 204, headers: marketSnapCorsHeaders(request) });
+}
+
+function assertAllowedMarketSnapOrigin(request: Request) {
+  const origin = request.headers.get("origin");
+  if (!origin) return;
+  if (allowedExtensionOrigins().includes(origin)) return;
+  assertSameOrigin(request);
+}
+
+function marketSnapCorsHeaders(request: Request) {
+  const origin = request.headers.get("origin");
+  const headers = new Headers();
+  if (origin && allowedExtensionOrigins().includes(origin)) {
+    headers.set("access-control-allow-origin", origin);
+    headers.set("access-control-allow-credentials", "true");
+    headers.set("access-control-allow-methods", "POST, OPTIONS");
+    headers.set("access-control-allow-headers", "content-type");
+    headers.set("vary", "Origin");
+  }
+  return headers;
+}
+
+function allowedExtensionOrigins() {
+  return (process.env.MARKET_SNAP_EXTENSION_ORIGINS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
 }
 
 export async function analyzeListing(request: Request) {
@@ -300,7 +334,7 @@ export async function dataQuality(request: Request) {
     await requireOrganizationRole(client, userData.user.id, organizationId, ["owner", "admin"]);
     const { data, error } = await client
       .from("market_listings")
-      .select("listing_url, mileage_km, listed_price, trim, data_quality_score, captured_at, image_features")
+      .select("source_name, listing_url, mileage_km, listed_price, trim, data_quality_score, captured_at, image_features")
       .or(`organization_id.eq.${organizationId},organization_id.is.null`)
       .limit(1000);
     if (error) throw error;
@@ -317,6 +351,11 @@ export async function dataQuality(request: Request) {
       ok: true,
       metrics: {
         totalListings: rows.length,
+        sourceCounts: rows.reduce<Record<string, number>>((acc, row) => {
+          const sourceName = String((row as Record<string, unknown>).source_name ?? "Unknown");
+          acc[sourceName] = (acc[sourceName] ?? 0) + 1;
+          return acc;
+        }, {}),
         validListings: rows.filter((row) => row.mileage_km !== null && row.listed_price !== null).length,
         invalidListings: rows.filter((row) => row.mileage_km === null || row.listed_price === null).length,
         duplicateListings: Math.max(0, rows.filter((row) => row.listing_url).length - uniqueKeys.size),

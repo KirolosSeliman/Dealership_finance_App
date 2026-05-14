@@ -99,6 +99,79 @@ test("Market Snap low comparable estimates cap confidence and block Strong Buy",
   assert.equal(valuation.valuationExplanation?.low_comparable_count, true);
 });
 
+test("Market Snap OpenLane payload with Carfax and photos improves data quality but keeps fallback cap", () => {
+  const sparse = runComparableEstimator({
+    organizationId: "org-1",
+    listing: {
+      organizationId: "org-1",
+      sourceName: "OpenLane",
+      sourceType: "auction",
+      marketType: "auction_market",
+      year: 2021,
+      make: "Toyota",
+      model: "RAV4",
+      mileageKm: 52300,
+      currentBid: 18500,
+      conditionReportText: "Minor scratches",
+    },
+    comparables: [],
+  });
+  const rich = runComparableEstimator({
+    organizationId: "org-1",
+    listing: {
+      organizationId: "org-1",
+      sourceName: "OpenLane",
+      sourceType: "auction",
+      marketType: "auction_market",
+      year: 2021,
+      make: "Toyota",
+      model: "RAV4",
+      mileageKm: 52300,
+      currentBid: 18500,
+      carfaxUrl: "https://www.carfax.ca/report/ABC123",
+      carfaxAvailable: true,
+      imageCount: 12,
+      videoCount: 1,
+      conditionReportText: "Minor scratches",
+    },
+    comparables: [],
+  });
+
+  assert.ok(Number(rich.valuationExplanation?.sample_weight) > Number(sparse.valuationExplanation?.sample_weight));
+  assert.ok(rich.confidenceScore <= 35);
+  assert.notEqual(rich.recommendationBadge, "Strong Buy");
+  assert.equal(rich.valuationExplanation?.carfax_visible, true);
+});
+
+test("Market Snap OpenLane condition text materially increases risk", () => {
+  const clean = runComparableEstimator({
+    organizationId: "org-1",
+    listing: { organizationId: "org-1", sourceName: "OpenLane", sourceType: "auction", marketType: "auction_market", year: 2020, make: "Honda", model: "Civic", mileageKm: 60000, buyNowPrice: 18000, imageCount: 8 },
+    comparables: [],
+  });
+  const risky = runComparableEstimator({
+    organizationId: "org-1",
+    listing: {
+      organizationId: "org-1",
+      sourceName: "OpenLane",
+      sourceType: "auction",
+      marketType: "auction_market",
+      year: 2020,
+      make: "Honda",
+      model: "Civic",
+      mileageKm: 60000,
+      buyNowPrice: 18000,
+      imageCount: 8,
+      conditionReportText: "Severe rust on frame, P0700 transmission code, structural announcement",
+      diagnosticFeatures: { diagnosticCodesAvailable: true, obdCodes: [{ code: "P0700", severity: "high" }] },
+    },
+    comparables: [],
+  });
+
+  assert.ok(risky.riskScore > clean.riskScore);
+  assert.ok(risky.estimatedReconditioningCost > clean.estimatedReconditioningCost);
+});
+
 test("Market Snap refresh skips sold vehicles and avoids meaningless duplicate snapshots", () => {
   const soldVehicle: Vehicle = { ...activeVehicle, status: "sold" };
   const first = runComparableEstimator({ organizationId: "org-1", vehicle: activeVehicle, comparables: [] });

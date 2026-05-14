@@ -1,146 +1,77 @@
 const statusEl = document.getElementById("status");
 const resultEl = document.getElementById("result");
-const saveButton = document.getElementById("save");
 const settingsButton = document.getElementById("settings");
-let lastListing;
-let lastValuation;
-let lastExtraction;
+const analyzeButton = document.getElementById("analyze");
+const openDealerFlowButton = document.getElementById("openDealerFlow");
 
 settingsButton.addEventListener("click", () => chrome.runtime.openOptionsPage());
+analyzeButton.addEventListener("click", analyzeCurrentPage);
+openDealerFlowButton.addEventListener("click", openDealerFlow);
 
-document.getElementById("extract").addEventListener("click", extractListing);
-document.getElementById("analyze").addEventListener("click", analyzeListing);
+renderStatus();
 
-async function readPageExtraction() {
+async function currentTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const response = await chrome.tabs.sendMessage(tab.id, { type: "MARKET_SNAP_EXTRACT" }).catch((error) => {
-    throw new Error(error?.message || "Market Snap extension could not connect to this tab. Refresh the listing page after reloading the extension.");
-  });
-  if (!response?.ok) throw new Error(response?.message || "Could not extract listing.");
-  return response;
+  if (!tab?.id) throw new Error("No active tab.");
+  return tab;
 }
 
-async function extractListing() {
+async function renderStatus() {
   try {
-    statusEl.textContent = "Extracting visible listing data...";
-    const response = await readPageExtraction();
-    lastListing = response.listing;
-    lastExtraction = response.extraction;
-    const settings = await chrome.storage.sync.get(["dealerFlowBaseUrl", "organizationId"]);
-    if (!settings.dealerFlowBaseUrl || !settings.organizationId) {
-      renderPreview(lastListing, { warnings: ["Open Settings to connect Dealer Flow before server-side Scrapling extraction."] });
-      statusEl.textContent = "Listing extracted locally. Open Settings to connect Dealer Flow.";
+    const tab = await currentTab();
+    const response = await chrome.tabs.sendMessage(tab.id, { type: "MARKET_SNAP_STATUS" }).catch(() => null);
+    if (!response?.supported) {
+      resultEl.className = "empty";
+      resultEl.textContent = "Open an OpenLane vehicle page. Market Snap will appear inside the page automatically.";
+      statusEl.textContent = "Popup is a status/settings helper; analysis happens in-page.";
       return;
     }
-    if (settings.dealerFlowBaseUrl.startsWith("http://localhost") || settings.dealerFlowBaseUrl.startsWith("http://127.0.0.1")) {
-      lastExtraction.permissionBasis = `${lastExtraction.permissionBasis} Local development capture.`;
-    }
-    const apiResponse = await fetch(`${settings.dealerFlowBaseUrl}/api/market-snap/extract-authorized-listing`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ organizationId: settings.organizationId, ...lastExtraction }),
-    });
-    const payload = await apiResponse.json();
-    if (!apiResponse.ok || !payload.ok) throw new Error(payload.message || payload.warnings?.[0] || "Market Snap extraction failed.");
-    lastListing = payload.listing;
-    renderPreview(lastListing, payload);
-    statusEl.textContent = "Extraction complete. Review, then analyze or save.";
+    resultEl.className = "";
+    resultEl.innerHTML = `
+      <div class="badge">OpenLane supported</div>
+      <dl>
+        <dt>Vehicle</dt><dd>${escapeHtml(vehicleLabel(response.listing))}</dd>
+        <dt>Recommendation</dt><dd>${escapeHtml(response.valuation?.recommendationBadge || "-")}</dd>
+        <dt>Confidence</dt><dd>${escapeHtml(response.valuation?.confidenceScore ?? "-")}</dd>
+      </dl>
+    `;
+    statusEl.textContent = "The in-page widget is active.";
   } catch (error) {
-    statusEl.textContent = formatExtensionError(error, "Extraction failed.");
+    statusEl.textContent = formatExtensionError(error, "Could not read this tab.");
   }
 }
 
-async function analyzeListing() {
+async function analyzeCurrentPage() {
   try {
-    if (!lastListing) await extractListing();
-    if (!lastListing) throw new Error("Extract a listing first.");
-    statusEl.textContent = "Analyzing listing...";
-    const settings = await chrome.storage.sync.get(["dealerFlowBaseUrl", "organizationId"]);
-    if (!settings.dealerFlowBaseUrl || !settings.organizationId) throw new Error("Open Settings and connect Dealer Flow first.");
-    const apiResponse = await fetch(`${settings.dealerFlowBaseUrl}/api/market-snap/analyze-listing`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ ...lastListing, organizationId: settings.organizationId }),
-    });
-    const payload = await apiResponse.json();
-    if (!apiResponse.ok || !payload.ok) throw new Error(payload.message || "Market Snap API failed.");
-    lastValuation = payload.valuation;
-    renderResult(lastValuation);
-    statusEl.textContent = "Analysis complete.";
+    statusEl.textContent = "Refreshing in-page widget...";
+    const tab = await currentTab();
+    const response = await chrome.tabs.sendMessage(tab.id, { type: "MARKET_SNAP_ANALYZE" });
+    if (!response?.ok) throw new Error(response?.message || "OpenLane page analysis failed.");
+    await renderStatus();
   } catch (error) {
     statusEl.textContent = formatExtensionError(error, "Analysis failed.");
   }
 }
 
-saveButton.addEventListener("click", async () => {
-  try {
-    if (!lastListing) throw new Error("Analyze a listing first.");
-    const settings = await chrome.storage.sync.get(["dealerFlowBaseUrl", "organizationId"]);
-    if (!settings.dealerFlowBaseUrl || !settings.organizationId) throw new Error("Open Settings and connect Dealer Flow first.");
-    const response = await fetch(`${settings.dealerFlowBaseUrl}/api/market-snap/save-listing`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      credentials: "include",
-      body: JSON.stringify({ organizationId: settings.organizationId, listing: lastListing, valuation: lastValuation }),
-    });
-    const payload = await response.json();
-    if (!response.ok || !payload.ok) throw new Error(payload.message || "Could not save listing.");
-    statusEl.textContent = "Saved to Deal Radar.";
-  } catch (error) {
-    statusEl.textContent = formatExtensionError(error, "Save failed.");
-  }
-});
-
-function renderPreview(listing, meta = {}) {
-  resultEl.className = "";
-  resultEl.innerHTML = `
-    <div class="badge">${listing.sourceName || "Listing preview"}</div>
-    <dl>
-      <dt>Vehicle</dt><dd>${[listing.year, listing.make, listing.model, listing.trim].filter(Boolean).join(" ") || "Unknown"}</dd>
-      <dt>Price</dt><dd>${money(listing.listedPrice || listing.auctionHammerPrice)}</dd>
-      <dt>Mileage</dt><dd>${listing.mileageKm ? `${listing.mileageKm} km` : "-"}</dd>
-      <dt>Quality</dt><dd>${meta.extractionQualityScore || 0}</dd>
-    </dl>
-    <p>${(meta.warnings || []).join("; ")}</p>
-  `;
+async function openDealerFlow() {
+  const settings = await chrome.storage.sync.get(["dealerFlowBaseUrl"]);
+  const url = settings.dealerFlowBaseUrl || "http://localhost:3000";
+  chrome.tabs.create({ url: `${url.replace(/\/$/, "")}/market-snap` });
 }
 
-function renderResult(valuation) {
-  resultEl.className = "";
-  resultEl.innerHTML = `
-    <div class="badge">${valuation.recommendationBadge}</div>
-    <div class="scores">
-      <span>Deal ${valuation.dealScore}</span>
-      <span>Profit ${valuation.profitScore}</span>
-      <span>Risk ${valuation.riskScore}</span>
-    </div>
-    <dl>
-      <dt>Retail</dt><dd>${money(valuation.estimatedRetailMarketValue)}</dd>
-      <dt>Wholesale buy</dt><dd>${money(valuation.estimatedWholesaleBuyValue)}</dd>
-      <dt>Max bid</dt><dd>${money(valuation.maxRecommendedBid)}</dd>
-      <dt>Profit</dt><dd>${money(valuation.potentialNetProfit)}</dd>
-      <dt>Confidence</dt><dd>${valuation.confidenceScore}</dd>
-    </dl>
-    <p>${valuation.explanation || ""}</p>
-  `;
+function vehicleLabel(listing) {
+  if (!listing) return "-";
+  return [listing.year, listing.make, listing.model, listing.trim].filter(Boolean).join(" ") || listing.title || "OpenLane vehicle";
 }
 
-function money(value) {
-  return new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD" }).format(value || 0);
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[char]));
 }
 
 function formatExtensionError(error, fallback) {
   const message = error?.message || fallback;
   if (message.includes("Receiving end does not exist") || message.includes("Could not establish connection")) {
-    return "This listing tab is not connected to Market Snap. Reload the extension, refresh the OpenLane tab, then try Extract again.";
-  }
-  if (message.includes("Invalid request origin")) {
-    return "Dealer Flow blocked the extension origin. Add this extension origin to MARKET_SNAP_EXTENSION_ORIGINS and restart Next.js.";
-  }
-  if (message.includes("Authentication required")) {
-    return "Dealer Flow needs you signed in on the same browser profile before extracting.";
+    return "This tab is not connected to Market Snap. Open or refresh an OpenLane vehicle page.";
   }
   return message;
 }

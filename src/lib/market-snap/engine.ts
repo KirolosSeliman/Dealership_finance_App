@@ -34,11 +34,14 @@ export function normalizeListing(input: MarketListingInput): NormalizedMarketLis
   const warnings: string[] = [];
   if (marketType === "salvage_auction_market") warnings.push("Salvage or non-repairable context is separated from clean retail data.");
   if (missingData.length > 0) warnings.push("Some important listing fields are missing, lowering confidence.");
+  if (input.carfaxAvailable || input.carfaxUrl) warnings.push("Carfax link was visible; Market Snap does not fetch or interpret paid report content.");
   const conditionMissing = importantConditionGaps(conditionFeatures, imageFeatures, diagnosticFeatures);
   if (conditionMissing.length > 0) missingData.push(...conditionMissing);
   const riskWarnings = conditionWarnings(conditionFeatures, diagnosticFeatures);
   warnings.push(...riskWarnings);
-  const dataQualityScore = clamp(100 - missingData.length * 8 - (imageFeatures.imageCount ? 0 : 8), 20, 100);
+  const carfaxBonus = input.carfaxAvailable || input.carfaxUrl ? 4 : 0;
+  const mediaBonus = input.videoCount ? 2 : 0;
+  const dataQualityScore = clamp(100 - missingData.length * 8 - (imageFeatures.imageCount ? 0 : 8) + carfaxBonus + mediaBonus, 20, 100);
   const sourceReliabilityScore = sourceQuality(input.sourceName, input.sourceType);
   const timeDecayWeight = calculateTimeDecayWeight(input.capturedAt);
   const marketTypeWeight = marketType === "clean_retail_market" || marketType === "clean_wholesale_market" ? 1 : 0.86;
@@ -95,7 +98,7 @@ export function runComparableEstimator(input: ValuationInput & { expenses?: Vehi
     .sort((a, b) => b.similarity * b.weight - a.similarity * a.weight)
     .slice(0, 12);
 
-  const basePrice = normalized.listedPrice || normalized.auctionHammerPrice || input.vehicle?.listedPrice || input.vehicle?.purchasePrice || 0;
+  const basePrice = normalized.buyNowPrice || normalized.currentBid || normalized.listedPrice || normalized.auctionHammerPrice || input.vehicle?.listedPrice || input.vehicle?.purchasePrice || 0;
   const retailValue = estimateValue(scored.map((item) => ({
     value: item.adjustedPrice,
     weight: item.similarity * item.weight,
@@ -107,14 +110,14 @@ export function runComparableEstimator(input: ValuationInput & { expenses?: Vehi
   const suggestedListingPrice = roundMoney(estimatedRetailMarketValue * 1.03);
   const quickSalePrice = roundMoney(estimatedRetailMarketValue * 0.94);
 
-  const auctionFees = roundMoney(input.auctionFee ?? estimateAuctionFees(basePrice, normalized.marketType));
+  const auctionFees = roundMoney(input.auctionFee ?? normalized.estimatedAuctionFees ?? estimateAuctionFees(basePrice, normalized.marketType));
   const estimatedReconditioningCost = roundMoney(input.estimatedReconditioningCost ?? estimateReconditioningCost(normalized));
   const estimatedTransportCost = roundMoney(input.estimatedTransportCost ?? 350);
   const estimatedInspectionCost = roundMoney(input.estimatedInspectionCost ?? 150);
   const estimatedHiddenFees = roundMoney(input.estimatedHiddenFees ?? 250);
   const purchaseTaxRate = input.purchaseTaxRate ?? getPurchaseTaxRate(normalized.sourceName);
   const feeTaxRate = input.feeTaxRate ?? QUEBEC_EXPENSE_TAX_RATE;
-  const listedOrHammer = normalized.auctionHammerPrice || normalized.listedPrice || input.vehicle?.purchasePrice || 0;
+  const listedOrHammer = normalized.buyNowPrice || normalized.currentBid || normalized.auctionHammerPrice || normalized.listedPrice || input.vehicle?.purchasePrice || 0;
   const estimatedTaxAmount = roundMoney(listedOrHammer * purchaseTaxRate + auctionFees * feeTaxRate);
   const currentCostBasis = input.vehicle ? calculateVehicleTotalCost(input.vehicle, input.expenses ?? []) : listedOrHammer;
   const estimatedTotalAcquisitionCost = roundMoney(
@@ -182,6 +185,9 @@ export function runComparableEstimator(input: ValuationInput & { expenses?: Vehi
       fallback_used: fallbackUsed,
       low_comparable_count: lowComparableCount,
       condition_risk: conditionRiskImpact(normalized.conditionFeatures, normalized.diagnosticFeatures),
+      carfax_visible: Boolean(normalized.carfaxAvailable || normalized.carfaxUrl),
+      photo_count: normalized.imageCount ?? normalized.photos?.length ?? normalized.imageFeatures?.imageCount ?? 0,
+      video_count: normalized.videoCount ?? normalized.videos?.length ?? 0,
       catboost_status: "candidate_only_not_used",
       guardrail_version: "market-snap-production-guardrails-v1",
     },
@@ -263,7 +269,7 @@ function requiredListingFields(input: MarketListingInput) {
   if (!input.make) missing.push("make");
   if (!input.model) missing.push("model");
   if (!input.mileageKm) missing.push("mileage");
-  if (!input.listedPrice && !input.auctionHammerPrice) missing.push("price");
+  if (!input.listedPrice && !input.auctionHammerPrice && !input.currentBid && !input.buyNowPrice) missing.push("price");
   return missing;
 }
 

@@ -17,6 +17,12 @@
         Organization ID
         <input id="organizationId" type="text" placeholder="Supabase organization UUID" />
       </label>
+      <label class="checkbox"><input id="autoAnalyze" type="checkbox" /> Auto-analyze supported OpenLane pages</label>
+      <label class="checkbox"><input id="autoSave" type="checkbox" /> Auto-save to Deal Radar after analysis</label>
+      <label class="checkbox"><input id="widgetCollapsed" type="checkbox" /> Start widget collapsed</label>
+      <label class="checkbox"><input id="debugMode" type="checkbox" /> Debug mode</label>
+      <label class="checkbox"><input id="includeMediaUrls" type="checkbox" /> Include visible media URLs</label>
+      <label class="checkbox"><input id="includeRawVisibleText" type="checkbox" /> Include capped visible page text</label>
       <p class="muted">Use only authorized/user-assisted listing capture. This extension does not bypass login walls, CAPTCHAs, rate limits, access controls, or platform restrictions.</p>
       <button id="saveSettings">Save settings</button>
       <p id="status" class="muted"></p>

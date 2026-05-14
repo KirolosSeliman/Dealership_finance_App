@@ -88,6 +88,26 @@ Complete in a fresh desktop browser session:
 16. Open Market Snap and Deal Radar; confirm estimates show confidence, comparable counts, missing data, and warnings.
 17. Refresh Dashboard, Vehicles, Cash, Contacts, Taxes, Backups, Market Snap, Deal Radar, and Settings routes.
 
+## Market Snap OpenLane Extension Checklist
+
+Complete in Chrome and Brave before shipping the extension:
+
+1. Load `browser-extension` as an unpacked extension.
+2. Configure Dealer Flow base URL and organization ID.
+3. Confirm auto-analyze is on, auto-save is off, include media URLs is on, and raw visible text is capped.
+4. Sign into Dealer Flow in the same browser profile.
+5. Sign into OpenLane normally without bypassing login, CAPTCHA, paywalls, anti-bot controls, or rate limits.
+6. Open an authorized OpenLane vehicle detail page.
+7. Confirm the Market Snap widget appears automatically without opening the popup.
+8. Confirm the widget does not block OpenLane controls and no duplicate widgets appear after page updates.
+9. Confirm extracted data includes VIN, mileage, year/make/model/trim, bid/buy-now price, location, condition text, Carfax link if visible, photos, and videos if visible.
+10. Confirm valuation shows retail value, wholesale buy value, wholesale sell value, max bid, total acquisition cost, auction fees, taxes, reconditioning, net profit, confidence, comparable count, recommendation, warnings, and missing data.
+11. Confirm Refresh analysis updates the same widget.
+12. Confirm Copy JSON copies listing and valuation data without media blobs or secrets.
+13. Confirm Save to Deal Radar creates a saved listing in Dealer Flow.
+14. Confirm unsupported OpenLane pages do not show an intrusive widget.
+15. Confirm dynamic OpenLane navigation updates extraction after content loads.
+
 ## Manual Mobile Checklist
 
 Complete on an iPhone-sized viewport or real iPhone:

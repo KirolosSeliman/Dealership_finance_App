@@ -47,6 +47,17 @@ input {
   padding: 0 10px;
 }
 
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.checkbox input {
+  min-height: auto;
+  width: 16px;
+}
+
 button {
   min-height: 36px;
   border: 1px solid rgba(103, 183, 199, 0.35);
@@ -56,17 +67,12 @@ button {
   font-weight: 700;
 }
 
-#save {
+#openDealerFlow {
   background: rgba(15, 23, 42, 0.9);
   color: #f8fafc;
 }
 
 #settings {
-  background: rgba(15, 23, 42, 0.9);
-  color: #f8fafc;
-}
-
-#extract {
   background: rgba(15, 23, 42, 0.9);
   color: #f8fafc;
 }

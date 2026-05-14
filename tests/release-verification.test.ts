@@ -55,6 +55,7 @@ test("all hardening migrations required for release are present in filename orde
     "20260519_validation_domain_integrity.sql",
     "20260520_persistent_rate_limiting.sql",
     "20260521_market_snap_calibration_guardrails.sql",
+    "20260522_openlane_extension_payload.sql",
   ];
 
   for (const name of required) {
