@@ -8,6 +8,7 @@ Run from the repository root:
 
 ```powershell
 npm install
+npm run verify:extension
 npm run verify:release
 ```
 
@@ -16,6 +17,8 @@ npm run verify:release
 1. `npm run lint`
 2. `npm test`
 3. `npm run build`
+
+`npm run verify:extension` runs the extension manifest/runtime and OpenLane extractor suites without building the full app.
 
 The automated suite must remain deterministic and must not require production Supabase, Vercel, R2, or private credentials.
 
@@ -92,21 +95,39 @@ Complete in a fresh desktop browser session:
 
 Complete in Chrome and Brave before shipping the extension:
 
-1. Load `browser-extension` as an unpacked extension.
-2. Configure Dealer Flow base URL and organization ID.
-3. Confirm auto-analyze is on, auto-save is off, include media URLs is on, and raw visible text is capped.
-4. Sign into Dealer Flow in the same browser profile.
-5. Sign into OpenLane normally without bypassing login, CAPTCHA, paywalls, anti-bot controls, or rate limits.
-6. Open an authorized OpenLane vehicle detail page.
-7. Confirm the Market Snap widget appears automatically without opening the popup.
-8. Confirm the widget does not block OpenLane controls and no duplicate widgets appear after page updates.
-9. Confirm extracted data includes VIN, mileage, year/make/model/trim, bid/buy-now price, location, condition text, Carfax link if visible, photos, and videos if visible.
-10. Confirm valuation shows retail value, wholesale buy value, wholesale sell value, max bid, total acquisition cost, auction fees, taxes, reconditioning, net profit, confidence, comparable count, recommendation, warnings, and missing data.
-11. Confirm Refresh analysis updates the same widget.
-12. Confirm Copy JSON copies listing and valuation data without media blobs or secrets.
-13. Confirm Save to Deal Radar creates a saved listing in Dealer Flow.
-14. Confirm unsupported OpenLane pages do not show an intrusive widget.
-15. Confirm dynamic OpenLane navigation updates extraction after content loads.
+1. Run Dealer Flow locally.
+2. Apply migrations if needed.
+3. Log into Dealer Flow.
+4. Configure extension with base URL and organization ID.
+5. Load extension unpacked in Chrome from `chrome://extensions`.
+6. Load extension unpacked in Brave from `brave://extensions`.
+7. Open OpenLane `.ca` vehicle detail page.
+8. Open OpenLane `.com` vehicle detail page if accessible.
+9. Confirm widget appears automatically.
+10. Confirm retail value appears.
+11. Confirm wholesale buy value appears.
+12. Confirm max bid appears.
+13. Confirm confidence and comparable count appear.
+14. Confirm Carfax link is detected if visible.
+15. Confirm photo count and URLs are extracted.
+16. Confirm video count and URLs are extracted when visible.
+17. Confirm Save to Deal Radar works.
+18. Confirm unsupported pages do not show intrusive widget.
+19. Confirm no duplicate widget after refresh/dynamic navigation.
+20. Confirm popup remains usable for settings/status.
+
+Before signing off, also confirm auto-analyze is on, auto-save is off by default, include media URLs is on, raw visible text is capped, Refresh analysis updates the same widget, Copy JSON copies listing and valuation data without media blobs or secrets, and dynamic OpenLane navigation updates extraction after content loads.
+
+## Market Snap OpenLane Packaging Checklist
+
+- `browser-extension/manifest.json` loads without errors as an unpacked Manifest V3 extension.
+- No extension compilation step is required; the deployable folder is `browser-extension/`.
+- Required scripts are present in manifest content script order: `storage.js`, `api-client.js`, `openlane-extractor.js`, `market-snap-widget.js`, and `content-script.js`.
+- Widget CSS is loaded from `browser-extension/styles/widget.css`.
+- Dealer Flow extension origins are configured in deployed environments with `MARKET_SNAP_EXTENSION_ORIGINS`.
+- The extension is tested against visible, authorized OpenLane pages only.
+- No CAPTCHA bypass, login bypass, hidden crawling, proxy evasion, Carfax paywall bypass, or secret token storage is present.
+- Remaining real-browser findings are recorded before private beta approval.
 
 ## Manual Mobile Checklist
 

@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "tsx --test tests/*.test.ts",
+    "verify:extension": "tsx --test tests/browser-extension.test.ts tests/openlane-extractor.test.ts",
     "verify:release": "npm run lint && npm test && npm run build"
   },
   "dependencies": {
