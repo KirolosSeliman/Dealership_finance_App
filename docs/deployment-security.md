@@ -94,6 +94,8 @@ Before production launch, do one browser pass on desktop and an iPhone-sized vie
 
 ## Final Launch Checklist
 
+The canonical launch gate is `docs/release-checklist.md`. Use this section as the security-focused companion checklist.
+
 Run this checklist before entering real business data:
 
 1. Supabase database
@@ -158,10 +160,9 @@ Recommended repository settings:
 Run:
 
 ```powershell
+npm install
+npm run verify:release
 npm audit
-npm run lint
-npm test
-npm run build
 ```
 
 Manually verify:
