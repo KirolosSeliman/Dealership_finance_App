@@ -80,11 +80,18 @@ export async function analyzeListing(request: Request) {
   return withMarketSnapAuth(request, "market-snap-analyze", async ({ client, userId, body }) => {
     const listing = marketListingPayloadSchema.parse(body);
     await requireOrganizationRole(client, userId, listing.organizationId, ["owner", "admin", "member"]);
-    const captureStorage = await persistOpenLaneCapture(client, listing, userId);
     const comparables = await fetchMarketComparables(client, listing.organizationId, listing);
     const valuation = runComparableEstimator({ organizationId: listing.organizationId, listing, comparables });
-    const marketListingId = await upsertMarketListingFromAnalysis(client, listing, valuation);
-    return NextResponse.json({ ok: true, marketListingId, captureStorage, valuation });
+    return NextResponse.json({ ok: true, marketListingId: null, valuation });
+  });
+}
+
+export async function captureListing(request: Request) {
+  return withMarketSnapAuth(request, "market-snap-capture-listing", async ({ client, userId, body }) => {
+    const listing = marketListingPayloadSchema.parse(body);
+    await requireOrganizationRole(client, userId, listing.organizationId, ["owner", "admin", "member"]);
+    const captureStorage = await persistOpenLaneCapture(client, listing, userId);
+    return NextResponse.json({ ok: true, captureStorage });
   });
 }
 
@@ -93,12 +100,11 @@ export async function saveListing(request: Request) {
     const payload = saveListingSchema.parse(body);
     await requireOrganizationRole(client, userId, payload.organizationId, ["owner", "admin", "member"]);
     const listing: MarketListingInput = { ...payload.listing, organizationId: payload.organizationId };
-    const captureStorage = await persistOpenLaneCapture(client, listing, userId);
     const comparables = await fetchMarketComparables(client, payload.organizationId, listing);
     const valuation = runComparableEstimator({ organizationId: payload.organizationId, listing, comparables });
     const marketListingId = await upsertMarketListingFromAnalysis(client, listing, valuation);
     const id = await saveListingToDealRadar(client, listing, valuation);
-    return NextResponse.json({ ok: true, id, marketListingId, captureStorage, valuation });
+    return NextResponse.json({ ok: true, id, marketListingId, valuation });
   });
 }
 

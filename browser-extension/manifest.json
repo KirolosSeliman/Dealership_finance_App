@@ -19,6 +19,7 @@
         "src/openlane-page-classifier.js",
         "src/openlane-extractor.js",
         "src/market-snap-widget.js",
+        "src/capture-runtime.js",
         "src/content-script.js"
       ],
       "css": ["styles/widget.css"],

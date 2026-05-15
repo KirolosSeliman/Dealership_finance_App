@@ -71,7 +71,9 @@ Configure these values from the extension Options page:
 - Dealer Flow base URL
 - Organization ID
 - Auto-analyze on supported pages
+- Capture observations and outcomes
 - Auto-save to Deal Radar, off by default
+- Model improvement opt-in, off by default
 - Widget default collapsed
 - Debug mode
 - Include media URLs
@@ -94,6 +96,7 @@ The widget should appear automatically. The popup is only a compact status/setti
 ## Capture And Training Status
 
 - Active listing bids are observations only.
+- Widget analysis and capture storage are separate: analysis updates the in-page valuation, while the capture queue stores only meaningful observation/outcome changes.
 - Purchase fee details and invoices can provide verified acquisition economics when the page visibly shows accepted, paid, completed, or purchase-confirmed evidence.
 - Post-sale sold prices, pending counters, rejected counters, and ambiguous sold-price text are stored as candidate outcomes and must not be used as training labels by default.
 - Accepted post-sale negotiations store the visible accepted amount separately from the original sold-price candidate, with evidence and price semantics marking only the accepted/negotiated amount as a verified wholesale label.

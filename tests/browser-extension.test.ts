@@ -60,10 +60,12 @@ test("Market Snap extension uses in-page OpenLane widget instead of popup-only a
 
 test("Market Snap analyze and save routes support extension CORS preflight", () => {
   const analyzeRoute = readFileSync(join(repoRoot, "src/app/api/market-snap/analyze-listing/route.ts"), "utf8");
+  const captureRoute = readFileSync(join(repoRoot, "src/app/api/market-snap/capture-listing/route.ts"), "utf8");
   const saveRoute = readFileSync(join(repoRoot, "src/app/api/market-snap/save-listing/route.ts"), "utf8");
   const api = readFileSync(join(repoRoot, "src/lib/server/market-snap-api.ts"), "utf8");
 
   assert.match(analyzeRoute, /OPTIONS = marketSnapOptions/);
+  assert.match(captureRoute, /OPTIONS = marketSnapOptions/);
   assert.match(saveRoute, /OPTIONS = marketSnapOptions/);
   assert.match(api, /MARKET_SNAP_EXTENSION_ORIGINS/);
   assert.match(api, /access-control-allow-credentials/);
@@ -78,7 +80,7 @@ test("Market Snap extension settings and API client are shared and secret-free",
   const options = readFileSync(join(repoRoot, "browser-extension/src/options.js"), "utf8");
   const popup = readFileSync(join(repoRoot, "browser-extension/src/popup.js"), "utf8");
 
-  for (const setting of ["dealerFlowBaseUrl", "organizationId", "autoAnalyze", "autoSave", "widgetCollapsed", "debugMode", "includeMediaUrls", "includeRawVisibleText"]) {
+  for (const setting of ["dealerFlowBaseUrl", "organizationId", "autoAnalyze", "autoCapture", "autoSave", "modelImprovementOptIn", "widgetCollapsed", "debugMode", "includeMediaUrls", "includeRawVisibleText"]) {
     assert.match(storage, new RegExp(setting));
   }
   for (const fn of ["getMarketSnapSettings", "saveMarketSnapSettings", "validateMarketSnapSettings", "analyzeListing", "saveListing", "buildDealerFlowUrl", "formatApiError"]) {
@@ -86,6 +88,7 @@ test("Market Snap extension settings and API client are shared and secret-free",
   }
   assert.match(apiClient, /credentials:\s*"include"/);
   assert.match(apiClient, /\/api\/market-snap\/analyze-listing/);
+  assert.match(apiClient, /\/api\/market-snap\/capture-listing/);
   assert.match(apiClient, /\/api\/market-snap\/save-listing/);
   assert.match(popupHtml, /src\/storage\.js/);
   assert.match(popupHtml, /src\/api-client\.js/);

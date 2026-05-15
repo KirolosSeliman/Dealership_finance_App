@@ -72,6 +72,15 @@
     });
   }
 
+  async function captureListing(first, second) {
+    const { settings, listing } = await requestArgs(first, second);
+    validateMarketSnapSettings(settings);
+    return requestJson(settings, "/api/market-snap/capture-listing", {
+      ...listing,
+      organizationId: settings.organizationId,
+    });
+  }
+
   async function requestArgs(first, second, third) {
     if (first?.dealerFlowBaseUrl || first?.organizationId) {
       return { settings: first, listing: second, valuation: third };
@@ -95,6 +104,7 @@
     validateSettings: validateMarketSnapSettings,
     analyzeListing,
     saveListing,
+    captureListing,
     buildDealerFlowUrl,
     dealerFlowMarketSnapUrl,
     formatApiError,

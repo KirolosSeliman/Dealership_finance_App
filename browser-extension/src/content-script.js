@@ -11,6 +11,7 @@
     phase: "idle",
     widget: null,
     settings: null,
+    captureRuntime: null,
     listing: null,
     valuation: null,
     lastSignature: "",
@@ -26,6 +27,10 @@
   async function boot() {
     await waitForBody();
     STATE.settings = await window.DealerFlowMarketSnapStorage.getSettings();
+    STATE.captureRuntime = window.DealerFlowMarketSnapCaptureRuntime.createMarketSnapCaptureRuntime({
+      api: window.DealerFlowMarketSnapApi,
+      now: () => Date.now(),
+    });
     observeDynamicPage();
     await runRuntime({ force: false, reason: "boot" });
   }
@@ -144,6 +149,7 @@
       STATE.widget?.render({ status: "disconnected", listing, valuation: STATE.valuation, message: settingsError });
       return;
     }
+    queueCapture(listing, { force });
 
     const signature = listingSignature(listing);
     if (!force && signature === STATE.lastSignature) return;
@@ -164,6 +170,13 @@
     } finally {
       STATE.running = false;
     }
+  }
+
+  function queueCapture(listing, { force = false } = {}) {
+    STATE.captureRuntime?.enqueueCapture(listing, STATE.settings, { force }).catch((error) => {
+      if (STATE.settings?.debugMode) console.warn("Market Snap capture queue failed", error);
+      STATE.widget?.render({ status: "warning", listing, valuation: STATE.valuation, message: formatError(error) });
+    });
   }
 
   function updateListingOnly() {
@@ -251,7 +264,7 @@
   }
 
   function listingSignature(listing) {
-    return [listing.vin, listing.listingUrl, listing.currentBid, listing.buyNowPrice, listing.mileageKm, listing.imageCount, listing.videoCount].join("|");
+    return STATE.captureRuntime?.captureSignature(listing) || [listing.vin, listing.listingUrl, listing.currentBid, listing.buyNowPrice, listing.mileageKm, listing.imageCount, listing.videoCount].join("|");
   }
 
   function formatError(error) {
