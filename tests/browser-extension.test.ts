@@ -74,6 +74,9 @@ test("Market Snap widget exposes draggable, settings, and data-quality controls"
     "Price state",
     "pageType",
     "captureKind",
+    "carfaxUrlStatus",
+    "VIN evidence",
+    "Price evidence",
     "Sold candidate",
     "Buy price auction",
     "Invoice total",
@@ -93,6 +96,10 @@ test("Market Snap copy JSON includes classification evidence and backend respons
 
   assert.match(contentScript, /classification/);
   assert.match(contentScript, /outcomeEvidence/);
+  assert.match(contentScript, /debug/);
+  assert.match(contentScript, /logExtractionDebug/);
+  assert.match(contentScript, /ignored evidence/);
+  assert.match(contentScript, /media filtering stats/);
   assert.match(contentScript, /backendResponse/);
   assert.match(contentScript, /captureResponse/);
   assert.match(contentScript, /JSON\.stringify\(\{ listing, valuation/);

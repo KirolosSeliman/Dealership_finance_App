@@ -44,6 +44,19 @@ test("Market Snap capture runtime treats current bid changes as meaningful obser
   assert.notEqual(runtime.captureSignature(activeListing({ currentBid: 18_500 })), runtime.captureSignature(activeListing({ currentBid: 18_750 })));
 });
 
+test("Market Snap capture runtime treats offer count changes as meaningful observations", () => {
+  const runtime = runtimeModule.createMarketSnapCaptureRuntime({
+    now: () => Date.UTC(2026, 4, 15, 12, 0, 0),
+    api: { captureListing: async () => undefined },
+  });
+
+  const before = runtime.captureSignature(activeListing({ openlaneMetadata: { disclosureCount: 2, offerCount: 1 } }));
+  const after = runtime.captureSignature(activeListing({ openlaneMetadata: { disclosureCount: 2, offerCount: 2 } }));
+
+  assert.notEqual(before, after);
+});
+
+
 test("Market Snap capture runtime treats fee total changes as meaningful outcomes", async () => {
   const calls: Array<Record<string, unknown>> = [];
   const runtime = runtimeModule.createMarketSnapCaptureRuntime({

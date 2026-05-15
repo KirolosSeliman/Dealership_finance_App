@@ -20,7 +20,8 @@
     lane: ["Lane"],
     lotNumber: ["Lot", "Lot Number"],
     stockNumber: ["Stock", "Stock Number"],
-    currentBid: ["Current Bid", "Bid"],
+    trim: ["Trim"],
+    currentBid: ["Current Bid", "Current Offer", "Best Offer", "Offer", "My Offer", "Top Bid", "Offre actuelle", "Meilleure offre", "Mise actuelle", "Bid"],
     buyNowPrice: ["Buy Now", "Buy It Now"],
     reservePrice: ["Reserve", "Reserve Price"],
     titleStatus: ["Title", "Title Status"],
@@ -29,31 +30,36 @@
   };
 
   function extractOpenLaneListing(doc = document, href = location.href, options = {}) {
-    const rawVisibleText = extractVisibleText(doc);
+    const textRegions = extractTextRegions(doc);
+    const rawVisibleText = textRegions.allText;
+    const mainVisibleText = textRegions.mainText || rawVisibleText;
     const classification = classifyOpenLanePage(doc, href);
-    const labelValues = extractLabelValueMap(doc, rawVisibleText);
-    const title = bestTitle(doc, rawVisibleText);
-    const decodedTitle = extractYearMakeModelTrim(title || rawVisibleText);
+    const labelValues = extractLabelValueMap(doc, mainVisibleText);
+    const titleResult = bestTitle(doc, mainVisibleText);
+    const title = titleResult.title;
+    const decodedTitle = extractYearMakeModelTrim(title || mainVisibleText);
+    const vinResult = extractBestVin(doc, rawVisibleText, mainVisibleText);
     const media = options.includeMediaUrls === false ? { photos: [], videos: [] } : extractMedia(doc, href);
-    const mediaCounts = extractMediaCounts(rawVisibleText);
-    const carfaxUrl = extractCarfaxLink(doc, href);
-    const conditionReportText = extractConditionText(rawVisibleText, labelValues);
-    const purchaseEconomics = extractPurchaseEconomics(rawVisibleText, classification);
-    const postSaleOutcome = extractPostSaleOutcome(rawVisibleText, classification);
+    const mediaRejected = [...(media.rejected || []), ...(doc.__openlaneMediaRejected || [])];
+    const mediaCounts = extractMediaCounts(mainVisibleText);
+    const carfax = extractCarfaxInfo(doc, href, rawVisibleText);
+    const conditionReportText = extractConditionText(mainVisibleText, labelValues);
+    const purchaseEconomics = extractPurchaseEconomics(mainVisibleText, classification);
+    const postSaleOutcome = extractPostSaleOutcome(mainVisibleText, classification);
     const isPurchaseOutcomePage = ["fee_details", "purchase_detail", "purchase_info", "purchase_list", "post_sale"].includes(classification.pageType);
     const currentBid = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(labelValues, OPENLANE_LABELS.currentBid);
     const buyNowPrice = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(labelValues, OPENLANE_LABELS.buyNowPrice);
-    const listedPrice = isPurchaseOutcomePage ? undefined : buyNowPrice || currentBid || moneyFrom(rawVisibleText.match(/\$\s?[\d,]+(?:\.\d{2})?/)?.[0]);
-    const mileageKm = extractMileage(firstLabel(labelValues, OPENLANE_LABELS.mileageKm)) || extractMileage(rawVisibleText);
-    const vin = extractVin(firstLabel(labelValues, OPENLANE_LABELS.vin)) || extractVinFromDom(doc) || extractVin(rawVisibleText);
-    const province = provinceFrom(firstLabel(labelValues, OPENLANE_LABELS.location) || rawVisibleText);
-    const disclosureText = findDisclosureText(rawVisibleText);
-    const declarations = splitAnnouncements(labelValues.get("declarations") || findSectionText(rawVisibleText, "Declarations") || disclosureText);
-    const damageAnnouncements = splitAnnouncements(findSectionText(rawVisibleText, "Damage"));
-    const mechanicalAnnouncements = splitAnnouncements(findSectionText(rawVisibleText, "Mechanical"));
-    const structuralAnnouncements = splitAnnouncements(findSectionText(rawVisibleText, "Structural"));
-    const odometerAnnouncements = splitAnnouncements(findSectionText(rawVisibleText, "Odometer"));
-    const disclosureCount = countNearLabel(rawVisibleText, "disclosures?");
+    const listedPrice = isPurchaseOutcomePage ? undefined : buyNowPrice || currentBid || moneyFrom(mainVisibleText.match(moneyRegex())?.[0]);
+    const mileageKm = extractMileage(firstLabel(labelValues, OPENLANE_LABELS.mileageKm)) || extractMileage(mainVisibleText) || extractMileage(rawVisibleText);
+    const vin = vinResult.vin;
+    const province = provinceFrom(firstLabel(labelValues, OPENLANE_LABELS.location) || mainVisibleText);
+    const disclosureText = findDisclosureText(mainVisibleText);
+    const declarations = splitAnnouncements(labelValues.get("declarations") || findSectionText(mainVisibleText, "Declarations") || disclosureText);
+    const damageAnnouncements = splitAnnouncements(findSectionText(mainVisibleText, "Damage"));
+    const mechanicalAnnouncements = splitAnnouncements(findSectionText(mainVisibleText, "Mechanical"));
+    const structuralAnnouncements = splitAnnouncements(findSectionText(mainVisibleText, "Structural"));
+    const odometerAnnouncements = splitAnnouncements(findSectionText(mainVisibleText, "Odometer"));
+    const disclosureCount = countNearLabel(mainVisibleText, "disclosures?");
     const warnings = [];
     const missingData = [];
 
@@ -64,14 +70,14 @@
       pageType: classification.pageType,
       captureKind: classification.captureKind,
       outcomeConfidence: classification.outcomeConfidence,
-      outcomeEvidence: classificationEvidence(classification),
+      outcomeEvidence: [...classificationEvidence(classification), ...(purchaseEconomics.outcomeEvidence || []), ...(postSaleOutcome.outcomeEvidence || [])],
       listingUrl: href,
       capturedAt: new Date().toISOString(),
       title,
       year: decodedTitle.year,
       make: decodedTitle.make,
       model: decodedTitle.model,
-      trim: decodedTitle.trim,
+      trim: decodedTitle.trim || firstLabel(labelValues, OPENLANE_LABELS.trim) || extractTrim(mainVisibleText),
       vin,
       mileageKm,
       exteriorColor: firstLabel(labelValues, OPENLANE_LABELS.exteriorColor),
@@ -123,8 +129,10 @@
       odometerAnnouncements,
       tireCondition: firstLabel(labelValues, OPENLANE_LABELS.tireCondition),
       keysAvailable: firstLabel(labelValues, OPENLANE_LABELS.keysAvailable),
-      carfaxUrl,
-      carfaxAvailable: Boolean(carfaxUrl || /carfax/i.test(rawVisibleText)),
+      carfaxMentioned: carfax.carfaxMentioned,
+      carfaxUrl: carfax.carfaxUrl,
+      carfaxAvailable: carfax.carfaxAvailable,
+      carfaxUrlStatus: carfax.carfaxUrlStatus,
       photos: media.photos,
       videos: media.videos,
       imageCount: Math.max(media.photos.length, mediaCounts.photoCount ?? 0),
@@ -135,6 +143,13 @@
         classification,
         disclosureCount,
         mediaCountEvidence: mediaCounts,
+        textRegions: {
+          mainTextSample: mainVisibleText.slice(0, 800),
+          ignoredSidebarSample: textRegions.sidebarText?.slice(0, 400),
+          ignoredFooterSample: textRegions.footerText?.slice(0, 300),
+          ignoredMarketGuideSample: textRegions.marketGuideText?.slice(0, 300),
+        },
+        mediaFiltering: { rejected: mediaRejected },
         purchaseStatus: purchaseEconomics.purchaseStatus,
         purchaseEconomics: purchaseEconomics.metadata,
         negotiation: postSaleOutcome.metadata,
@@ -142,8 +157,18 @@
       extractedFields: {
         ...Object.fromEntries(labelValues.entries()),
         classification,
-        vinEvidence: evidenceSnippet(rawVisibleText, /\bVIN\b.{0,80}|[A-HJ-NPR-Z0-9]{17}/i, "VIN"),
-        mileageEvidence: evidenceSnippet(rawVisibleText, /\b(Odometer|Mileage|Kilometers)\b.{0,80}/i, "Odometer"),
+        vinEvidence: vinResult.evidence,
+        mileageEvidence: evidenceSnippet(mainVisibleText, /\b(Odometer|Mileage|Kilometers)\b.{0,80}/i, "Odometer"),
+        debug: {
+          classifierDecision: classification,
+          decisiveEvidence: classification.decisiveEvidence || [],
+          ignoredEvidence: classification.ignoredEvidence || [],
+          titleCandidates: titleResult.candidates,
+          vinCandidates: vinResult.candidates,
+          priceCandidates: purchaseEconomics.priceCandidates || [],
+          mediaRejected,
+          mainTextSample: mainVisibleText.slice(0, 800),
+        },
       },
       missingData,
       warnings: [...warnings, ...(classification.warnings || []), ...(postSaleOutcome.warnings || [])],
@@ -208,12 +233,16 @@
   }
 
   function extractOpenLaneFixture(html, href = "https://www.openlane.ca/vehicle/fixture") {
-    const text = `${stripTags(html)}\n${extractAttributeText(html)}`;
+    const textRegions = extractHtmlTextRegions(html);
+    const text = textRegions.allText;
     const media = extractMediaFromHtml(html, href);
     const fakeDoc = {
       title: text.match(/\b(19|20)\d{2}[^\n<]{3,120}/)?.[0] || "OpenLane vehicle",
       body: { innerText: text, textContent: text },
       images: media.photos.map((photo) => ({ src: photo.url, alt: photo.alt || "", width: photo.width, height: photo.height })),
+      __openlaneHtml: html,
+      __openlaneTextRegions: textRegions,
+      __openlaneMediaRejected: media.rejected || [],
       querySelector: () => null,
       querySelectorAll: () => [],
     };
@@ -226,11 +255,27 @@
       videoCount: Math.max(Number(listing.videoCount || 0), media.videos.length),
       carfaxUrl: listing.carfaxUrl || (html.match(/href=["']([^"']*carfax[^"']*)["']/i)?.[1] ? absoluteUrl(html.match(/href=["']([^"']*carfax[^"']*)["']/i)?.[1], href) : undefined),
       carfaxAvailable: listing.carfaxAvailable || /carfax/i.test(html),
+      carfaxUrlStatus: listing.carfaxUrlStatus || (html.match(/href=["']([^"']*carfax[^"']*)["']/i) ? "url_found" : /carfax/i.test(html) ? "text_only" : "missing"),
     };
   }
 
   function extractVisibleText(doc = document) {
-    return normalizeSpace(doc.body?.innerText || doc.body?.textContent || "").slice(0, RAW_TEXT_LIMIT);
+    return extractTextRegions(doc).allText.slice(0, RAW_TEXT_LIMIT);
+  }
+
+  function extractTextRegions(doc = document) {
+    if (doc.__openlaneTextRegions) return doc.__openlaneTextRegions;
+    const classifierRegions = root.DealerFlowOpenLanePageClassifier?.extractDocumentRegions?.(doc);
+    if (classifierRegions) return classifierRegions;
+    const allText = normalizeSpace(doc.body?.innerText || doc.body?.textContent || "").slice(0, RAW_TEXT_LIMIT);
+    return { allText, mainText: allText, sidebarText: "", footerText: "", marketGuideText: "" };
+  }
+
+  function extractHtmlTextRegions(html) {
+    const classifierRegions = root.DealerFlowOpenLanePageClassifier?.extractHtmlRegions?.(html);
+    if (classifierRegions) return classifierRegions;
+    const text = `${stripTags(html)}\n${extractAttributeText(html)}`;
+    return { allText: text, mainText: text, sidebarText: "", footerText: "", marketGuideText: "" };
   }
 
   function extractLabelValueMap(doc = document, text = extractVisibleText(doc)) {
@@ -259,7 +304,36 @@
   }
 
   function bestTitle(doc, text) {
-    return normalizeSpace(doc.querySelector?.("h1")?.innerText || doc.querySelector?.("[data-testid*='title' i]")?.innerText || doc.title || text.match(/\b(19|20)\d{2}[^\n]{3,100}/)?.[0] || "OpenLane vehicle");
+    const candidates = [];
+    const h1 = normalizeSpace(doc.querySelector?.("h1")?.innerText || "");
+    if (h1) candidates.push({ text: h1, source: "h1" });
+    const testTitle = normalizeSpace(doc.querySelector?.("[data-testid*='title' i]")?.innerText || "");
+    if (testTitle) candidates.push({ text: testTitle, source: "data-testid-title" });
+    for (const match of String(doc.__openlaneHtml || "").matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi)) {
+      candidates.push({ text: stripTags(match[1]), source: "html-h1" });
+    }
+    const heroText = String(doc.__openlaneHtml || "").match(/<(?:section|div)\b[^>]*(?:vehicle-hero|vehicle-header|data-testid=["'][^"']*vehicle)[^>]*>[\s\S]{0,1200}?<\/(?:section|div)>/i)?.[0];
+    const heroTitle = stripTags(heroText || "").match(/\b(19|20)\d{2}[^\n]{3,90}/)?.[0];
+    if (heroTitle) candidates.push({ text: heroTitle, source: "hero" });
+    const docTitle = normalizeSpace(doc.title || "");
+    if (docTitle) candidates.push({ text: docTitle, source: "document-title" });
+    const ignoredTitleText = [
+      doc.__openlaneTextRegions?.marketGuideText,
+      doc.__openlaneTextRegions?.footerText,
+    ].filter(Boolean).join("\n");
+    for (const match of ignoredTitleText.matchAll(/[^\n]*(Sales history of similar vehicles|Market overview|OPENLANE wholesale sales data|Subscribe now|Other conditions)[^\n]*/gi)) {
+      candidates.push({ text: match[0], source: "ignored-region" });
+    }
+    for (const match of String(text || "").matchAll(/\b(19|20)\d{2}[^\n]{3,100}/g)) {
+      candidates.push({ text: match[0], source: "visible-text" });
+    }
+
+    const evaluated = candidates.map((candidate) => {
+      const clean = cleanTitleCandidate(candidate.text);
+      return { ...candidate, text: clean, rejectedReason: rejectedTitleReason(clean) };
+    }).filter((candidate) => candidate.text);
+    const accepted = evaluated.find((candidate) => !candidate.rejectedReason && /\b(19|20)\d{2}\b/.test(candidate.text));
+    return { title: accepted?.text || "OpenLane vehicle", candidates: evaluated.slice(0, 12) };
   }
 
   function parseTitle(title) {
@@ -278,6 +352,18 @@
     return parseTitle(String(value || ""));
   }
 
+  function cleanTitleCandidate(value) {
+    return normalizeSpace(String(value || "").replace(/\bVIN\b.*$/i, "").replace(/\bOdometer\b.*$/i, ""));
+  }
+
+  function rejectedTitleReason(value) {
+    if (!value) return "empty";
+    if (/\b(Sales history of similar vehicles|Market overview|OPENLANE wholesale sales data|Subscribe now|Other conditions|legal footer)\b/i.test(value)) return "non_vehicle_market_or_footer_text";
+    if (!/\b(19|20)\d{2}\b/.test(value)) return "missing_year";
+    if (value.split(/\s+/).length < 3) return "too_short";
+    return "";
+  }
+
   function extractMileage(value) {
     const text = String(value || "");
     const match = text.match(/(?:odometer|mileage|kilometers|kilometres)?\D*([\d,.\s]+)\s?(km|kilometres|kilometers)\b/i);
@@ -288,21 +374,32 @@
     return vinFrom(value);
   }
 
-  function extractVinFromDom(doc = document) {
-    const nodes = Array.from(doc.querySelectorAll?.("[data-vin], [aria-label], [data-testid], [title], button, [role='button']") || []);
-    for (const node of nodes) {
-      const text = [
-        node.getAttribute?.("data-vin"),
-        node.getAttribute?.("aria-label"),
-        node.getAttribute?.("data-testid"),
-        node.getAttribute?.("title"),
-        node.innerText,
-        node.textContent,
-      ].filter(Boolean).join(" ");
-      const vin = vinFrom(text);
-      if (vin) return vin;
+  function extractBestVin(doc, rawText, mainText) {
+    const candidates = [];
+    const addCandidates = (source, value, weight = 0) => {
+      for (const match of String(value || "").toUpperCase().matchAll(/\b[A-HJ-NPR-Z0-9]{17}\b/g)) {
+        candidates.push({ vin: match[0], source, sourceText: snippetAround(value, match[0]), weight });
+      }
+    };
+    addCandidates("main_text", mainText, 40);
+    addCandidates("visible_text", rawText, 10);
+    addCandidates("label_value", firstLabel(extractLabelValueMap(doc, mainText), OPENLANE_LABELS.vin), 55);
+    for (const node of Array.from(doc.querySelectorAll?.("[data-vin], [aria-label], [data-testid], [title], button, [role='button']") || [])) {
+      const attrs = ["data-vin", "aria-label", "data-testid", "title"].map((name) => node.getAttribute?.(name)).filter(Boolean).join(" ");
+      addCandidates("dom_attributes", attrs, 70);
+      addCandidates("dom_text", `${node.innerText || ""} ${node.textContent || ""}`, 60);
+      for (const attribute of Array.from(node.attributes || [])) {
+        if (attribute.name.startsWith("data-")) addCandidates(`attribute:${attribute.name}`, attribute.value, 65);
+      }
     }
-    return undefined;
+    addCandidates("html_attributes", extractAttributeText(doc.__openlaneHtml || ""), 75);
+    candidates.sort((a, b) => b.weight - a.weight);
+    const chosen = candidates[0];
+    return {
+      vin: chosen?.vin,
+      evidence: chosen ? { matchedLabel: chosen.source, sourceText: chosen.sourceText } : undefined,
+      candidates: candidates.slice(0, 10),
+    };
   }
 
   function extractMoneyByLabels(labels, labelNames = []) {
@@ -316,7 +413,7 @@
   }
 
   function extractCarfaxLink(doc = document, href = safeCurrentHref()) {
-    return findCarfaxUrl(doc, href);
+    return extractCarfaxInfo(doc, href, extractVisibleText(doc)).carfaxUrl;
   }
 
   function extractPhotos(doc = document, href = safeCurrentHref()) {
@@ -356,18 +453,19 @@
   function extractMedia(doc, href) {
     const photos = [];
     const videos = [];
+    const rejected = [];
     for (const img of Array.from(doc.images || [])) {
       const src = img.currentSrc || img.src || img.getAttribute?.("data-src") || img.getAttribute?.("data-original");
-      addPhoto(photos, { url: src, thumbnailUrl: img.src || src, alt: img.alt, width: img.naturalWidth || img.width, height: img.naturalHeight || img.height, source: "img" }, href);
-      for (const candidate of parseSrcset(img.srcset || img.getAttribute?.("srcset"))) addPhoto(photos, { url: candidate, thumbnailUrl: img.src || src, alt: img.alt, source: "srcset" }, href);
+      addPhoto(photos, { url: src, thumbnailUrl: img.src || src, alt: img.alt, width: img.naturalWidth || img.width, height: img.naturalHeight || img.height, source: "img" }, href, rejected);
+      for (const candidate of parseSrcset(img.srcset || img.getAttribute?.("srcset"))) addPhoto(photos, { url: candidate, thumbnailUrl: img.src || src, alt: img.alt, source: "srcset" }, href, rejected);
     }
     for (const source of Array.from(doc.querySelectorAll?.("picture source[srcset]") || [])) {
-      for (const candidate of parseSrcset(source.getAttribute("srcset"))) addPhoto(photos, { url: candidate, source: "picture" }, href);
+      for (const candidate of parseSrcset(source.getAttribute("srcset"))) addPhoto(photos, { url: candidate, source: "picture" }, href, rejected);
     }
     for (const node of Array.from(doc.querySelectorAll?.("[style*='background']") || [])) {
       const style = node.getAttribute("style") || "";
       const match = style.match(/url\((['"]?)(.*?)\1\)/i);
-      if (match?.[2]) addPhoto(photos, { url: match[2], alt: normalizeSpace(node.getAttribute("aria-label") || ""), source: "background-image" }, href);
+      if (match?.[2]) addPhoto(photos, { url: match[2], alt: normalizeSpace(node.getAttribute("aria-label") || ""), source: "background-image" }, href, rejected);
     }
     for (const video of Array.from(doc.querySelectorAll?.("video") || [])) {
       addVideo(videos, { url: video.getAttribute("src"), posterUrl: video.getAttribute("poster"), title: video.getAttribute("title") || video.getAttribute("aria-label"), type: "video/mp4", source: "video" }, href);
@@ -378,25 +476,26 @@
     for (const link of Array.from(doc.querySelectorAll?.("a[href], iframe[src]") || [])) {
       const url = link.getAttribute("href") || link.getAttribute("src");
       if (!url) continue;
-      if (looksLikeImage(url)) addPhoto(photos, { url, alt: normalizeSpace(link.innerText || link.getAttribute("aria-label") || ""), source: "link" }, href);
+      if (looksLikeImage(url)) addPhoto(photos, { url, alt: normalizeSpace(link.innerText || link.getAttribute("aria-label") || ""), source: "link" }, href, rejected);
       if (looksLikeVideo(url)) addVideo(videos, { url, title: normalizeSpace(link.innerText || link.getAttribute("title") || ""), type: link.tagName?.toLowerCase() === "iframe" ? "iframe" : undefined, source: link.tagName?.toLowerCase() === "iframe" ? "iframe" : "link" }, href);
     }
-    return { photos: dedupeByUrl(photos).slice(0, 80), videos: dedupeByUrl(videos).slice(0, 20) };
+    return { photos: dedupeByUrl(photos).slice(0, 80), videos: dedupeByUrl(videos).slice(0, 20), rejected };
   }
 
   function extractMediaFromHtml(html, href) {
     const photos = [];
     const videos = [];
+    const rejected = [];
     for (const match of html.matchAll(/<img\b[^>]*>/gi)) {
       const src = attr(match[0], "src") || attr(match[0], "currentSrc") || attr(match[0], "data-src") || attr(match[0], "data-original");
-      addPhoto(photos, { url: src, thumbnailUrl: src, alt: attr(match[0], "alt"), width: numberFrom(attr(match[0], "width")), height: numberFrom(attr(match[0], "height")), source: "img" }, href);
-      for (const candidate of parseSrcset(attr(match[0], "srcset"))) addPhoto(photos, { url: candidate, alt: attr(match[0], "alt"), source: "srcset" }, href);
+      addPhoto(photos, { url: src, thumbnailUrl: src, alt: attr(match[0], "alt"), width: numberFrom(attr(match[0], "width")), height: numberFrom(attr(match[0], "height")), source: "img" }, href, rejected);
+      for (const candidate of parseSrcset(attr(match[0], "srcset"))) addPhoto(photos, { url: candidate, alt: attr(match[0], "alt"), source: "srcset" }, href, rejected);
     }
     for (const match of html.matchAll(/<source\b[^>]*srcset=["']([^"']+)["'][^>]*>/gi)) {
-      for (const candidate of parseSrcset(match[1])) addPhoto(photos, { url: candidate, source: "picture" }, href);
+      for (const candidate of parseSrcset(match[1])) addPhoto(photos, { url: candidate, source: "picture" }, href, rejected);
     }
     for (const match of html.matchAll(/background-image\s*:\s*url\((['"]?)(.*?)\1\)/gi)) {
-      addPhoto(photos, { url: match[2], source: "background-image" }, href);
+      addPhoto(photos, { url: match[2], source: "background-image" }, href, rejected);
     }
     for (const match of html.matchAll(/<(video|source|iframe)\b[^>]*>/gi)) {
       const tag = match[1].toLowerCase();
@@ -404,15 +503,46 @@
       if (url && (tag === "video" || tag === "source" || looksLikeVideo(url))) addVideo(videos, { url, posterUrl: attr(match[0], "poster"), title: attr(match[0], "title"), type: attr(match[0], "type") || tag, source: tag === "iframe" ? "iframe" : tag }, href);
     }
     for (const match of html.matchAll(/href=["']([^"']+)["']/gi)) {
-      if (looksLikeImage(match[1])) addPhoto(photos, { url: match[1], source: "link" }, href);
+      if (looksLikeImage(match[1])) addPhoto(photos, { url: match[1], source: "link" }, href, rejected);
       if (looksLikeVideo(match[1])) addVideo(videos, { url: match[1], source: "link" }, href);
     }
-    return { photos: dedupeByUrl(photos), videos: dedupeByUrl(videos) };
+    return { photos: dedupeByUrl(photos), videos: dedupeByUrl(videos), rejected };
   }
 
-  function findCarfaxUrl(doc, href) {
-    const link = Array.from(doc.querySelectorAll?.("a[href]") || []).find((item) => /carfax/i.test(`${item.href} ${item.innerText || ""} ${item.getAttribute("aria-label") || ""}`));
-    return link ? absoluteUrl(link.getAttribute("href"), href) : undefined;
+  function extractCarfaxInfo(doc, href, text = "") {
+    const candidates = [];
+    const add = (source, value) => {
+      const raw = String(value || "");
+      if (!/carfax/i.test(raw)) return;
+      const urlMatch = raw.match(/https?:\/\/[^\s"'<>]*carfax[^\s"'<>]*/i);
+      candidates.push({ source, text: raw.slice(0, 240), url: urlMatch?.[0] });
+    };
+    for (const link of Array.from(doc.querySelectorAll?.("a[href]") || [])) {
+      add("link", `${link.getAttribute("href")} ${link.innerText || ""} ${link.getAttribute("aria-label") || ""} ${link.getAttribute("title") || ""}`);
+    }
+    for (const node of Array.from(doc.querySelectorAll?.("[aria-label], [title], [data-href], [data-url], button, [role='button']") || [])) {
+      add("dom_attribute", [
+        node.getAttribute?.("aria-label"),
+        node.getAttribute?.("title"),
+        node.getAttribute?.("data-href"),
+        node.getAttribute?.("data-url"),
+        node.getAttribute?.("onclick"),
+        node.innerText,
+        node.textContent,
+      ].filter(Boolean).join(" "));
+    }
+    add("html_attributes", extractAttributeText(doc.__openlaneHtml || ""));
+    add("visible_text", text);
+    const withUrl = candidates.find((candidate) => candidate.url);
+    const carfaxUrl = withUrl ? absoluteUrl(withUrl.url, href) : undefined;
+    const carfaxMentioned = candidates.length > 0 || /carfax/i.test(text);
+    return {
+      carfaxMentioned,
+      carfaxAvailable: Boolean(carfaxUrl || carfaxMentioned),
+      carfaxUrl,
+      carfaxUrlStatus: carfaxUrl ? "url_found" : carfaxMentioned ? "text_only" : "missing",
+      carfaxEvidence: candidates.slice(0, 8),
+    };
   }
 
   function extractConditionText(text, labels) {
@@ -458,16 +588,19 @@
 
   function extractPurchaseEconomics(text, classification) {
     if (!["fee_details", "purchase_detail", "purchase_info"].includes(classification.pageType)) return {};
-    const buyPriceAuction = moneyNearLabel(text, "Buy price - auction");
+    const priceCandidates = [];
+    const buyPriceAuction = moneyNearLabel(text, "Buy price - auction", priceCandidates) || moneyNearLabel(text, "Selling price", priceCandidates);
     const transactionFee = moneyNearLabel(text, "Transaction Fee");
     const vehicleHistoryFee = moneyNearLabel(text, "Vehicle history - auction") || moneyNearLabel(text, "Vehicle History Fee");
     const subtotal = moneyNearLabel(text, "Subtotal");
     const taxes = moneyNearLabel(text, "Taxes");
-    const totalInvoiceAmount = moneyNearLabel(text, "Total");
+    const totalInvoiceAmount = moneyNearLabel(text, "Total invoice") || moneyNearLabel(text, "Invoice total") || (classification.pageType === "fee_details" ? moneyNearLabel(text, "Total") : undefined);
     const finalAcquisitionCost = totalInvoiceAmount;
     const purchaseStatus = cleanStatusValue(valueNearTextLabel(text, "Status"));
+    const verifiedWholesale = /\b(retrieved|paid|final|finalized|completed|purchase confirmed)\b/i.test(`${purchaseStatus || ""} ${text}`);
+    const sellingPriceEvidence = buyPriceAuction ? purchaseEvidenceSnippet(text, "Selling price") || purchaseEvidenceSnippet(text, "Buy price - auction") : undefined;
     const priceSemantics = buyPriceAuction || transactionFee || vehicleHistoryFee || subtotal || taxes || totalInvoiceAmount ? compact({
-      buyPriceAuction: buyPriceAuction ? "verified_wholesale_label" : undefined,
+      buyPriceAuction: buyPriceAuction ? (verifiedWholesale ? "verified_wholesale_label" : "candidate_wholesale_label") : undefined,
       transactionFee: transactionFee ? "acquisition_cost_component" : undefined,
       vehicleHistoryFee: vehicleHistoryFee ? "acquisition_cost_component" : undefined,
       subtotal: subtotal ? "acquisition_cost_component" : undefined,
@@ -485,6 +618,13 @@
       finalAcquisitionCost,
       purchaseStatus,
       priceSemantics,
+      outcomeEvidence: sellingPriceEvidence ? [{
+        evidenceType: verifiedWholesale ? "purchase_document" : "visible_page_text",
+        sourceText: sellingPriceEvidence,
+        capturedAt: new Date().toISOString(),
+        confidenceScore: classification.confidenceScore,
+      }] : undefined,
+      priceCandidates,
       metadata: compact({
         currency: /\bCA\$|CAD\b/i.test(text) ? "CAD" : undefined,
         releaseFormStatus: cleanStatusValue(valueNearTextLabel(text, "Release Form")),
@@ -560,9 +700,13 @@
     return normalizeSpace(value || "").split(/\s*[•|;]\s*|\n+/).map((item) => item.trim()).filter(Boolean).slice(0, 30);
   }
 
-  function addPhoto(photos, photo, href) {
+  function addPhoto(photos, photo, href, rejected = []) {
     const url = absoluteUrl(photo.url, href);
-    if (!url || (photo.source === "link" && !looksLikeImage(url))) return;
+    const rejection = mediaRejectionReason(url, photo);
+    if (!url || (photo.source === "link" && !looksLikeImage(url)) || rejection) {
+      rejected.push({ url: url || String(photo.url || ""), reason: rejection || "not_image" });
+      return;
+    }
     photos.push(compact({ ...photo, url, thumbnailUrl: absoluteUrl(photo.thumbnailUrl, href) || url }));
   }
 
@@ -589,6 +733,17 @@
     return /\.(avif|webp|png|jpe?g)(\?|#|$)/i.test(url) || /image|photo|gallery|vehicle/i.test(url);
   }
 
+  function mediaRejectionReason(url, photo = {}) {
+    const value = String(url || "");
+    if (!value || /\bnull\b|undefined/i.test(value) || /\/vdp\/null(?:$|[?#])/i.test(value)) return "null_or_placeholder";
+    if (/\.svg(?:$|[?#])/i.test(value)) return "svg_ui_asset";
+    if (/openlane-logo|favicon|icon|sprite|fonts\.gstatic\.com|translate/i.test(value)) return "ui_logo_icon";
+    const width = Number(photo.width || 0);
+    const height = Number(photo.height || 0);
+    if (width && height && (width < 80 || height < 80) && !/pub-us\.kar-media\.com|kar-media|vehicle/i.test(value)) return "tiny_ui_asset";
+    return "";
+  }
+
   function looksLikeVideo(url) {
     return /\.(mp4|webm|mov|m3u8)(\?|#|$)/i.test(url) || /youtube|vimeo|video|walkaround/i.test(url);
   }
@@ -611,19 +766,46 @@
     return compact({ matchedLabel, sourceText: String(text).slice(index, index + 180).trim() });
   }
 
+  function snippetAround(text, needle) {
+    const value = String(text || "");
+    const index = value.toUpperCase().indexOf(String(needle || "").toUpperCase());
+    if (index < 0) return value.slice(0, 180);
+    return value.slice(Math.max(0, index - 60), index + String(needle || "").length + 80).trim();
+  }
+
+  function extractTrim(text) {
+    return normalizeSpace(String(text || "").match(/\bTrim\s*[:\n]?\s*([^\n]{2,80})/i)?.[1] || String(text || "").match(/\b(4dr\s+Sdn\.?|2dr\s+Coupe|Crew Cab|Extended Cab)[^\n]*/i)?.[0] || "") || undefined;
+  }
+
   function extractAttributeText(html) {
     return Array.from(String(html || "").matchAll(/\s(?:aria-label|data-[a-z0-9_-]+|title|alt)=["']([^"']+)["']/gi))
       .map((match) => match[1])
       .join("\n");
   }
 
-  function moneyNearLabel(text, label) {
+  function moneyNearLabel(text, label, candidates) {
     const regex = new RegExp(`(?:^|\\n)\\s*${escapeRegExp(label)}\\s*[:\\n]?\\s*([^\\n]*(?:\\n[^\\n]*){0,3})`, "ig");
     for (const match of String(text || "").matchAll(regex)) {
-      const money = moneyFrom(match[1]?.match(/(?:CA\$|CAD)?\s*\$\s?[\d,]+(?:\.\d{2})?|\bCAD\s*[\d,]+(?:\.\d{2})?/i)?.[0]);
-      if (money) return money;
+      const sourceText = normalizeSpace(`${label} ${match[1] || ""}`).slice(0, 240);
+      const money = moneyFrom(match[1]?.match(moneyRegex())?.[0]);
+      if (money) {
+        candidates?.push({ label, value: money, sourceText });
+        return money;
+      }
     }
-    return moneyFrom(valueNearTextLabel(text, label));
+    const fallback = moneyFrom(valueNearTextLabel(text, label));
+    if (fallback) candidates?.push({ label, value: fallback, sourceText: normalizeSpace(`${label} ${valueNearTextLabel(text, label)}`) });
+    return fallback;
+  }
+
+  function purchaseEvidenceSnippet(text, label) {
+    const match = String(text || "").match(new RegExp(`${escapeRegExp(label)}[\\s\\S]{0,160}`, "i"));
+    if (!match) return undefined;
+    return normalizeSpace(match[0]).replace(/\s+(Release Form|Title Status|Inspection|Transport)\b[\s\S]*$/i, "").slice(0, 300);
+  }
+
+  function moneyRegex() {
+    return /(?:CA\$|CAD|\$)\s*[\d][\d,.\s]*(?:\.\d{2})?|\b[\d][\d,.\s]*(?:\.\d{2})?\s*\$|\bCAD\s*[\d,]+(?:\.\d{2})?/i;
   }
 
   function valueNearTextLabel(text, label) {

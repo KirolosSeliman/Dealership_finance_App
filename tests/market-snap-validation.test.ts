@@ -46,7 +46,9 @@ test("Market Snap validation accepts rich OpenLane extension payloads", () => {
     buyNowPrice: 22900,
     listedPrice: 22900,
     carfaxUrl: "https://www.carfax.ca/report/ABC123",
+    carfaxMentioned: true,
     carfaxAvailable: true,
+    carfaxUrlStatus: "url_found",
     photos: [{ url: "https://img.openlane.ca/vehicle/front.jpg", source: "img", width: 800, height: 600 }],
     videos: [{ url: "https://media.openlane.ca/walkaround.mp4", source: "video", type: "video/mp4" }],
     imageCount: 1,
@@ -62,6 +64,7 @@ test("Market Snap validation accepts rich OpenLane extension payloads", () => {
   });
 
   assert.equal(result.success, true);
+  assert.equal(result.data?.carfaxUrlStatus, "url_found");
 });
 
 test("Market Snap validation rejects unsafe OpenLane media URLs and oversized raw text", () => {

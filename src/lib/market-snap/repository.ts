@@ -443,6 +443,8 @@ function openLaneMetadata(input: MarketListingInput) {
     odometerAnnouncements: input.odometerAnnouncements ?? [],
     tireCondition: input.tireCondition,
     keysAvailable: input.keysAvailable,
+    carfaxMentioned: input.carfaxMentioned,
+    carfaxUrlStatus: input.carfaxUrlStatus,
     extractedFields: input.extractedFields ?? {},
     missingData: input.missingData ?? [],
     videoCount: input.videoCount ?? input.videos?.length ?? 0,

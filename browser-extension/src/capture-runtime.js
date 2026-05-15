@@ -62,6 +62,8 @@
       listing.pageType || "",
       listing.captureKind || "",
       listing.currentBid ?? "",
+      listing.currentOffer ?? "",
+      listing.bestOffer ?? "",
       listing.buyNowPrice ?? "",
       listing.auctionStatus || listing.negotiationStatus || "",
       listing.soldPriceCandidate ?? "",
@@ -72,6 +74,8 @@
       listing.finalAcquisitionCost ?? "",
       listing.imageCount ?? "",
       metadata.disclosureCount ?? "",
+      metadata.bidCount ?? "",
+      metadata.offerCount ?? "",
     ].join("|");
   }
 

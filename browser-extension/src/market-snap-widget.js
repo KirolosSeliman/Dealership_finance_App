@@ -175,7 +175,7 @@
   function metaHtml(listing, valuation) {
     if (!listing && !valuation) return "";
     return [
-      pill("Carfax", listing?.carfaxAvailable ? "Visible" : "Missing"),
+      pill("Carfax", carfaxLabel(listing)),
       pill("Photos", String(listing?.imageCount ?? listing?.photos?.length ?? 0)),
       pill("Videos", String(listing?.videoCount ?? listing?.videos?.length ?? 0)),
       pill("Warnings", String((valuation?.warnings || listing?.warnings || []).length)),
@@ -198,10 +198,14 @@
     const warnings = valuation?.warnings || listing?.warnings || [];
     const missing = valuation?.missingData || listing?.missingData || [];
     const evidence = listing?.outcomeEvidence || listing?.openlaneMetadata?.classification?.evidence || [];
+    const debug = listing?.extractedFields?.debug || {};
     return [
       `<p>Confidence: ${escapeHtml(valuation?.confidenceScore ?? listing?.extractionConfidenceScore ?? "-")}</p>`,
       `<p>Warnings: ${escapeHtml(warnings.length)}</p>`,
       `<p>Missing: ${escapeHtml(missing.length)}</p>`,
+      `<p>Classifier: ${escapeHtml(listing?.pageType || "-")} / ${escapeHtml(listing?.captureKind || "-")}</p>`,
+      `<p>VIN evidence: ${escapeHtml(debug.vinCandidates?.[0]?.source || listing?.extractedFields?.vinEvidence?.matchedLabel || "-")}</p>`,
+      `<p>Price evidence: ${escapeHtml(debug.priceCandidates?.[0]?.label || "-")}</p>`,
       `<p>Evidence</p>`,
       `<ul>${evidence.slice(0, 4).map((item) => `<li>${escapeHtml(item.sourceText || item.marker || item.evidenceType || "visible_page_text")}</li>`).join("")}</ul>`,
     ].join("");
@@ -213,6 +217,14 @@
     if (semantics.soldPriceCandidate || listing.captureKind === "candidate_outcome") return "candidate outcome";
     if (semantics.currentBid || listing.captureKind === "observation") return "observation";
     return "unknown";
+  }
+
+  function carfaxLabel(listing) {
+    if (!listing) return "Missing";
+    if (listing.carfaxUrlStatus === "url_found") return "URL found";
+    if (listing.carfaxUrlStatus === "text_only") return "visible, URL missing";
+    if (listing.carfaxAvailable) return "Visible";
+    return "Missing";
   }
 
   async function loadWidgetSettings(shadow) {

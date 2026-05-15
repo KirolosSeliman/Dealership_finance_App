@@ -209,13 +209,15 @@
       includeMediaUrls: STATE.settings?.includeMediaUrls !== false,
       includeRawVisibleText: STATE.settings?.includeRawVisibleText !== false,
     });
-    return {
+    const merged = {
       ...listing,
       pageType: classification.pageType,
       captureKind: classification.captureKind,
       outcomeConfidence: classification.outcomeConfidence,
       openlaneMetadata: { ...(listing.openlaneMetadata || {}), classification },
     };
+    if (STATE.settings?.debugMode) logExtractionDebug(merged);
+    return merged;
   }
 
   function classifyOpenLanePage() {
@@ -248,7 +250,8 @@
     const listing = STATE.listing || extractListing();
     const classification = listing.openlaneMetadata?.classification || null;
     const outcomeEvidence = listing.outcomeEvidence || classification?.evidence || [];
-    await navigator.clipboard.writeText(JSON.stringify({ listing, valuation: STATE.valuation || null, classification, outcomeEvidence, backendResponse: STATE.backendResponse, captureResponse: STATE.captureResponse }, null, 2));
+    const debug = listing.extractedFields?.debug || null;
+    await navigator.clipboard.writeText(JSON.stringify({ listing, valuation: STATE.valuation || null, classification, outcomeEvidence, debug, backendResponse: STATE.backendResponse, captureResponse: STATE.captureResponse }, null, 2));
     STATE.widget?.render({ status: "ready", listing, valuation: STATE.valuation, message: "Extracted JSON copied." });
   }
 
@@ -288,7 +291,22 @@
   }
 
   function listingSignature(listing) {
-    return STATE.captureRuntime?.captureSignature(listing) || [listing.vin, listing.listingUrl, listing.currentBid, listing.buyNowPrice, listing.mileageKm, listing.imageCount, listing.videoCount].join("|");
+    return STATE.captureRuntime?.captureSignature(listing) || [listing.vin, listing.listingUrl, listing.currentBid, listing.buyNowPrice, listing.bestOffer, listing.mileageKm, listing.imageCount, listing.videoCount].join("|");
+  }
+
+  function logExtractionDebug(listing) {
+    const debug = listing.extractedFields?.debug || {};
+    console.groupCollapsed?.("Market Snap OpenLane extraction");
+    console.info("URL", location.href);
+    console.info("pageType", listing.pageType, "captureKind", listing.captureKind, "outcomeConfidence", listing.outcomeConfidence);
+    console.info("evidence markers", listing.openlaneMetadata?.classification?.evidence || []);
+    console.info("main text sample", debug.mainTextSample || listing.openlaneMetadata?.classification?.mainTextSample);
+    console.info("ignored evidence", debug.ignoredEvidence || listing.openlaneMetadata?.classification?.ignoredEvidence || []);
+    console.info("chosen title evidence", debug.titleCandidates || []);
+    console.info("VIN evidence", debug.vinCandidates || []);
+    console.info("price evidence", debug.priceCandidates || []);
+    console.info("media filtering stats", debug.mediaRejected || []);
+    console.groupEnd?.();
   }
 
   function formatError(error) {

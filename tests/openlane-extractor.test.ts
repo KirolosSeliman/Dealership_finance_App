@@ -153,6 +153,62 @@ test("OpenLane active extractor reads Kia page with lazy media counts and visibl
   assert.equal(metadata.mediaCountEvidence?.videoCount, 0);
 });
 
+test("OpenLane VDP purchase outcome ignores sidebar text and extracts hero vehicle plus selling price", () => {
+  const listing = extractor.extractOpenLaneFixture(
+    fixture("openlane-vdp-purchased-selling-price.html"),
+    "https://app.openlane.ca/vdp/3KPFL4A72HE119966?tab=active",
+  );
+  const metadata = listing.openlaneMetadata as {
+    disclosureCount?: number;
+    classification?: { pageType?: string; decisiveEvidence?: Array<{ marker?: string }>; ignoredEvidence?: Array<{ marker?: string }> };
+    mediaFiltering?: { rejected?: Array<{ reason?: string; url?: string }> };
+  };
+  const fields = listing.extractedFields as {
+    vinEvidence?: { sourceText?: string };
+    debug?: {
+      classifierDecision?: { pageType?: string };
+      ignoredEvidence?: Array<{ marker?: string }>;
+      titleCandidates?: Array<{ text?: string; rejectedReason?: string }>;
+      vinCandidates?: Array<{ vin?: string }>;
+      priceCandidates?: Array<{ label?: string; value?: number }>;
+      mediaRejected?: Array<{ reason?: string; url?: string }>;
+    };
+  };
+  const photos = listing.photos as Array<{ url: string }>;
+
+  assert.notEqual(listing.pageType, "purchase_list");
+  assert.equal(listing.pageType, "purchase_detail");
+  assert.notEqual(listing.captureKind, "observation");
+  assert.match(String(listing.title), /2017 Kia Forte/);
+  assert.equal(listing.year, 2017);
+  assert.equal(listing.make, "Kia");
+  assert.equal(listing.model, "Forte");
+  assert.match(String(listing.trim), /4dr Sdn\./);
+  assert.equal(listing.vin, "3KPFL4A72HE119966");
+  assert.equal(listing.mileageKm, 158569);
+  assert.equal(listing.imageCount, 13);
+  assert.equal(metadata.disclosureCount, 2);
+  assert.equal(listing.videoCount, 1);
+  assert.equal(listing.buyPriceAuction, 4000);
+  assert.equal(listing.currentBid, undefined);
+  assert.equal(listing.totalInvoiceAmount, undefined);
+  assert.equal(listing.finalAcquisitionCost, undefined);
+  assert.ok(["candidate_wholesale_label", "verified_wholesale_label"].includes((listing.priceSemantics as Record<string, string>).buyPriceAuction));
+  assert.equal(listing.carfaxAvailable, true);
+  assert.equal(listing.carfaxUrl, undefined);
+  assert.equal(listing.carfaxUrlStatus, "text_only");
+  assert.ok(photos.some((photo) => photo.url.includes("pub-us.kar-media.com")));
+  assert.ok(photos.every((photo) => !/openlane-logo\.svg|\/vdp\/null|fonts\.gstatic\.com/i.test(photo.url)));
+  assert.ok(metadata.classification?.ignoredEvidence?.some((item) => item.marker === "sidebar_purchase_navigation"));
+  assert.ok(fields.vinEvidence?.sourceText?.includes("3KPFL4A72HE119966"));
+  assert.ok(fields.debug?.classifierDecision?.pageType === "purchase_detail");
+  assert.ok(fields.debug?.ignoredEvidence?.some((item) => item.marker === "sidebar_purchase_navigation"));
+  assert.ok(fields.debug?.titleCandidates?.some((item) => /Sales history/i.test(String(item.text)) && item.rejectedReason));
+  assert.ok(fields.debug?.vinCandidates?.some((item) => item.vin === "3KPFL4A72HE119966"));
+  assert.ok(fields.debug?.priceCandidates?.some((item) => item.label === "Selling price" && item.value === 4000));
+  assert.ok(fields.debug?.mediaRejected?.some((item) => /openlane-logo|fonts\.gstatic|\/vdp\/null/i.test(String(item.url))));
+});
+
 test("OpenLane purchase fee extractor maps verified auction economics without merging fees into buy price", () => {
   const listing = extractor.extractOpenLaneFixture(fixture("openlane-purchase-fee-details-panel.html"), "https://www.openlane.ca/purchases/forte/fees");
   const metadata = listing.openlaneMetadata as { purchaseStatus?: string; purchaseEconomics?: Record<string, unknown> };

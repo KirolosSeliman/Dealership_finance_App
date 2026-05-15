@@ -250,7 +250,9 @@ export interface MarketListingInput {
   tireCondition?: string;
   keysAvailable?: string | boolean;
   carfaxUrl?: string;
+  carfaxMentioned?: boolean;
   carfaxAvailable?: boolean;
+  carfaxUrlStatus?: "url_found" | "text_only" | "missing";
   photos?: MarketListingPhoto[];
   videos?: MarketListingVideo[];
   videoCount?: number;
