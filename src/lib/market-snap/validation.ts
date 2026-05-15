@@ -10,6 +10,45 @@ export const marketTypes = [
 ] as const;
 
 export const marketSourceTypes = ["retail", "wholesale", "auction", "salvage", "import", "extension"] as const;
+export const openLanePageTypes = [
+  "active_listing",
+  "watchlist",
+  "pending",
+  "closing",
+  "post_sale",
+  "purchase_list",
+  "purchase_detail",
+  "fee_details",
+  "purchase_info",
+  "documents",
+  "unknown",
+] as const;
+export const marketCaptureKinds = ["observation", "candidate_outcome", "verified_outcome", "manual_confirmation"] as const;
+export const outcomeConfidenceLevels = ["low", "medium", "high", "verified"] as const;
+export const priceSemanticValues = [
+  "observation",
+  "candidate_wholesale_label",
+  "verified_wholesale_label",
+  "retail_label",
+  "acquisition_cost_component",
+  "final_acquisition_cost",
+] as const;
+export const priceSemanticFields = [
+  "listedPrice",
+  "currentBid",
+  "buyNowPrice",
+  "reservePrice",
+  "soldPriceCandidate",
+  "finalBidAmount",
+  "negotiatedAmount",
+  "buyPriceAuction",
+  "transactionFee",
+  "vehicleHistoryFee",
+  "otherFees",
+  "taxes",
+  "totalInvoiceAmount",
+  "finalAcquisitionCost",
+] as const;
 
 const optionalText = z.string().trim().max(4000).optional().or(z.literal(""));
 const shortText = z.string().trim().max(240).optional().or(z.literal(""));
@@ -36,6 +75,20 @@ const marketListingVideoSchema = z.object({
   title: z.string().trim().max(240).optional(),
   type: z.string().trim().max(80).optional(),
   source: z.enum(["video", "source", "iframe", "link"]).optional(),
+}).strict();
+const captureEvidenceSchema = z.object({
+  evidenceType: z.enum([
+    "visible_page_text",
+    "fee_details_page",
+    "invoice",
+    "purchase_document",
+    "accepted_negotiation",
+    "user_confirmation",
+  ]),
+  sourceText: z.string().trim().max(1000).optional(),
+  sourceUrl: urlText,
+  capturedAt: z.string().datetime().optional(),
+  confidenceScore: score,
 }).strict();
 
 export const conditionFeaturesSchema = z.object({
@@ -122,10 +175,15 @@ export const diagnosticFeaturesSchema = z.object({
   estimatedRepairCostFromCodes: money,
 }).strict().optional();
 
-export const marketListingPayloadSchema = z.object({
+const marketListingPayloadBaseSchema = z.object({
   organizationId: z.string().uuid(),
   sourceName: z.string().trim().min(1).max(120),
   sourceType: z.enum(marketSourceTypes).optional(),
+  pageType: z.enum(openLanePageTypes).optional(),
+  captureKind: z.enum(marketCaptureKinds).optional(),
+  outcomeConfidence: z.enum(outcomeConfidenceLevels).optional(),
+  priceSemantics: z.partialRecord(z.enum(priceSemanticFields), z.enum(priceSemanticValues)).optional(),
+  outcomeEvidence: z.array(captureEvidenceSchema).max(20).optional(),
   listingUrl: urlText,
   title: optionalText,
   description: optionalText,
@@ -148,6 +206,16 @@ export const marketListingPayloadSchema = z.object({
   currentBid: money,
   buyNowPrice: money,
   reservePrice: money,
+  soldPriceCandidate: money,
+  finalBidAmount: money,
+  negotiatedAmount: money,
+  buyPriceAuction: money,
+  transactionFee: money,
+  vehicleHistoryFee: money,
+  otherFees: money,
+  taxes: money,
+  totalInvoiceAmount: money,
+  finalAcquisitionCost: money,
   estimatedAuctionFees: money,
   auctionHammerPrice: money,
   location: optionalText,
@@ -188,15 +256,110 @@ export const marketListingPayloadSchema = z.object({
   marketType: z.enum(marketTypes).optional(),
 });
 
+function enforceCaptureContract(value: Partial<z.infer<typeof marketListingPayloadBaseSchema>>, context: z.RefinementCtx) {
+  const activeObservationPages = new Set(["active_listing", "watchlist"]);
+  const outcomePriceFields = [
+    "soldPriceCandidate",
+    "finalBidAmount",
+    "negotiatedAmount",
+    "buyPriceAuction",
+    "transactionFee",
+    "vehicleHistoryFee",
+    "otherFees",
+    "taxes",
+    "totalInvoiceAmount",
+    "finalAcquisitionCost",
+  ] as const;
+  const verifiedOutcomeFields = [
+    "finalBidAmount",
+    "negotiatedAmount",
+    "buyPriceAuction",
+    "totalInvoiceAmount",
+    "finalAcquisitionCost",
+  ] as const;
+  const hasOutcomePrice = outcomePriceFields.some((field) => value[field] !== undefined);
+  const hasVerifiedOutcomePrice = verifiedOutcomeFields.some((field) => value[field] !== undefined);
+
+  if (activeObservationPages.has(value.pageType ?? "") && value.captureKind && value.captureKind !== "observation") {
+    context.addIssue({
+      code: "custom",
+      path: ["captureKind"],
+      message: "Active OpenLane listing captures must remain observations, not outcome labels.",
+    });
+  }
+
+  if (activeObservationPages.has(value.pageType ?? "") && hasOutcomePrice) {
+    context.addIssue({
+      code: "custom",
+      path: ["pageType"],
+      message: "Active OpenLane listing pages cannot carry final or candidate outcome price fields.",
+    });
+  }
+
+  if (value.captureKind === "observation" && hasOutcomePrice) {
+    context.addIssue({
+      code: "custom",
+      path: ["captureKind"],
+      message: "Observation captures cannot include outcome price fields.",
+    });
+  }
+
+  if (value.captureKind === "verified_outcome" && !hasVerifiedOutcomePrice) {
+    context.addIssue({
+      code: "custom",
+      path: ["captureKind"],
+      message: "Verified outcome captures require a verified outcome price field.",
+    });
+  }
+
+  if ((value.captureKind === "verified_outcome" || value.outcomeConfidence === "verified") && !value.outcomeEvidence?.length) {
+    context.addIssue({
+      code: "custom",
+      path: ["outcomeEvidence"],
+      message: "Verified outcome captures require visible evidence.",
+    });
+  }
+
+  if (value.priceSemantics?.currentBid && value.priceSemantics.currentBid !== "observation") {
+    context.addIssue({
+      code: "custom",
+      path: ["priceSemantics", "currentBid"],
+      message: "currentBid is an observation feature only and cannot be marked as a label.",
+    });
+  }
+
+  for (const field of outcomePriceFields) {
+    const semantic = value.priceSemantics?.[field];
+    if (value[field] !== undefined && semantic === "observation") {
+      context.addIssue({
+        code: "custom",
+        path: ["priceSemantics", field],
+        message: `${field} is an outcome/acquisition field and cannot be marked as an observation.`,
+      });
+    }
+  }
+}
+
+export const marketListingPayloadSchema = marketListingPayloadBaseSchema.superRefine(enforceCaptureContract);
+const listingWithoutOrganizationSchema = marketListingPayloadBaseSchema
+  .omit({ organizationId: true })
+  .superRefine(enforceCaptureContract);
+const importListingRowSchema = marketListingPayloadBaseSchema
+  .omit({ organizationId: true, sourceName: true })
+  .extend({
+    sourceName: z.string().trim().min(1).max(120).optional(),
+  })
+  .superRefine(enforceCaptureContract);
+
 export const valuationRequestSchema = z.object({
   organizationId: z.string().uuid(),
   vehicleId: z.string().uuid().optional(),
-  listing: marketListingPayloadSchema.omit({ organizationId: true }).optional(),
+  listing: listingWithoutOrganizationSchema.optional(),
 });
 
 export const saveListingSchema = z.object({
   organizationId: z.string().uuid(),
-  listing: marketListingPayloadSchema.omit({ organizationId: true }),
+  listing: listingWithoutOrganizationSchema,
   valuation: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -209,9 +372,7 @@ export const dealRadarQuerySchema = z.object({
 export const importPayloadSchema = z.object({
   organizationId: z.string().uuid(),
   sourceName: z.string().trim().min(1).max(120),
-  rows: z.array(marketListingPayloadSchema.omit({ organizationId: true, sourceName: true }).extend({
-    sourceName: z.string().trim().min(1).max(120).optional(),
-  })).min(1).max(1000),
+  rows: z.array(importListingRowSchema).min(1).max(1000),
 });
 
 export const authorizedExtractionRequestSchema = z.object({
@@ -226,7 +387,7 @@ export const authorizedExtractionRequestSchema = z.object({
 
 export const authorizedExtractionResponseSchema = z.object({
   ok: z.boolean(),
-  listing: marketListingPayloadSchema.omit({ organizationId: true }).partial().extend({
+  listing: marketListingPayloadBaseSchema.omit({ organizationId: true }).partial().extend({
     imageUrls: z.array(z.string().url()).max(30).optional(),
   }).optional().nullable(),
   warnings: z.array(z.string()).default([]),

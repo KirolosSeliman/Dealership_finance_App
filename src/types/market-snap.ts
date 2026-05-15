@@ -13,10 +13,45 @@ export type MarketTrend = "rising" | "stable" | "softening" | "unknown";
 export type EstimatorType = "comparable_estimator" | "catboost" | "fallback_estimator";
 
 export type MarketSourceType = "retail" | "wholesale" | "auction" | "salvage" | "import" | "extension";
+export type OpenLanePageType =
+  | "active_listing"
+  | "watchlist"
+  | "pending"
+  | "closing"
+  | "post_sale"
+  | "purchase_list"
+  | "purchase_detail"
+  | "fee_details"
+  | "purchase_info"
+  | "documents"
+  | "unknown";
+export type MarketCaptureKind = "observation" | "candidate_outcome" | "verified_outcome" | "manual_confirmation";
+export type OutcomeConfidence = "low" | "medium" | "high" | "verified";
+export type PriceSemantic =
+  | "observation"
+  | "candidate_wholesale_label"
+  | "verified_wholesale_label"
+  | "retail_label"
+  | "acquisition_cost_component"
+  | "final_acquisition_cost";
 export type ConditionSeverity = "none" | "light" | "moderate" | "severe" | "unknown";
 export type RustSeverity = ConditionSeverity | "structural";
 export type DiagnosticSeverity = "low" | "medium" | "high" | "critical";
 export type PhotoAnalysisStatus = "not_started" | "pending" | "processed" | "failed" | "unknown";
+
+export interface CaptureEvidence {
+  evidenceType:
+    | "visible_page_text"
+    | "fee_details_page"
+    | "invoice"
+    | "purchase_document"
+    | "accepted_negotiation"
+    | "user_confirmation";
+  sourceText?: string;
+  sourceUrl?: string;
+  capturedAt?: string;
+  confidenceScore?: number;
+}
 
 export interface RustFeatures {
   rustDetected?: boolean;
@@ -128,6 +163,27 @@ export interface MarketListingInput {
   organizationId: string;
   sourceName: string;
   sourceType?: MarketSourceType;
+  pageType?: OpenLanePageType;
+  captureKind?: MarketCaptureKind;
+  outcomeConfidence?: OutcomeConfidence;
+  priceSemantics?: Partial<Record<
+    | "listedPrice"
+    | "currentBid"
+    | "buyNowPrice"
+    | "reservePrice"
+    | "soldPriceCandidate"
+    | "finalBidAmount"
+    | "negotiatedAmount"
+    | "buyPriceAuction"
+    | "transactionFee"
+    | "vehicleHistoryFee"
+    | "otherFees"
+    | "taxes"
+    | "totalInvoiceAmount"
+    | "finalAcquisitionCost",
+    PriceSemantic
+  >>;
+  outcomeEvidence?: CaptureEvidence[];
   listingUrl?: string;
   title?: string;
   description?: string;
@@ -147,9 +203,20 @@ export interface MarketListingInput {
   doors?: number;
   cylinders?: number;
   listedPrice?: number;
+  // Current bids are observations/features only. They must never be promoted to final ML labels.
   currentBid?: number;
   buyNowPrice?: number;
   reservePrice?: number;
+  soldPriceCandidate?: number;
+  finalBidAmount?: number;
+  negotiatedAmount?: number;
+  buyPriceAuction?: number;
+  transactionFee?: number;
+  vehicleHistoryFee?: number;
+  otherFees?: number;
+  taxes?: number;
+  totalInvoiceAmount?: number;
+  finalAcquisitionCost?: number;
   estimatedAuctionFees?: number;
   auctionHammerPrice?: number;
   location?: string;

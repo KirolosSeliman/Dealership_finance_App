@@ -86,6 +86,105 @@ test("Market Snap validation rejects unsafe OpenLane media URLs and oversized ra
   }).success, false);
 });
 
+test("Market Snap validation rejects active listing payloads that claim verified outcome prices", () => {
+  const result = marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "active_listing",
+    captureKind: "verified_outcome",
+    title: "2022 Toyota Corolla LE",
+    year: 2022,
+    make: "Toyota",
+    model: "Corolla",
+    currentBid: 16_500,
+    finalBidAmount: 16_500,
+    priceSemantics: {
+      currentBid: "observation",
+      finalBidAmount: "verified_wholesale_label",
+    },
+    outcomeConfidence: "verified",
+    outcomeEvidence: [{
+      evidenceType: "visible_page_text",
+      sourceText: "Current bid $16,500",
+      capturedAt: "2026-05-14T12:00:00.000Z",
+    }],
+  });
+
+  assert.equal(result.success, false);
+});
+
+test("Market Snap validation accepts currentBid as observation without treating it as a final label", () => {
+  const result = marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "active_listing",
+    captureKind: "observation",
+    title: "2022 Toyota Corolla LE",
+    year: 2022,
+    make: "Toyota",
+    model: "Corolla",
+    currentBid: 16_500,
+    priceSemantics: {
+      currentBid: "observation",
+    },
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.data?.pageType, "active_listing");
+  assert.equal(result.data?.captureKind, "observation");
+  assert.equal(result.data?.priceSemantics?.currentBid, "observation");
+  assert.equal(result.data?.finalBidAmount, undefined);
+});
+
+test("Market Snap validation accepts purchase fee payloads with itemized acquisition costs", () => {
+  const result = marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "fee_details",
+    captureKind: "candidate_outcome",
+    title: "2021 Honda CR-V EX-L",
+    year: 2021,
+    make: "Honda",
+    model: "CR-V",
+    buyPriceAuction: 23_400,
+    transactionFee: 450,
+    vehicleHistoryFee: 49.95,
+    otherFees: 125,
+    taxes: 3_612.74,
+    totalInvoiceAmount: 27_637.69,
+    finalAcquisitionCost: 27_637.69,
+    outcomeConfidence: "high",
+    outcomeEvidence: [{
+      evidenceType: "fee_details_page",
+      sourceText: "Buy price $23,400 Transaction fee $450 Total $27,637.69",
+      capturedAt: "2026-05-14T12:00:00.000Z",
+    }],
+    priceSemantics: {
+      buyPriceAuction: "verified_wholesale_label",
+      transactionFee: "acquisition_cost_component",
+      vehicleHistoryFee: "acquisition_cost_component",
+      otherFees: "acquisition_cost_component",
+      taxes: "acquisition_cost_component",
+      totalInvoiceAmount: "final_acquisition_cost",
+      finalAcquisitionCost: "final_acquisition_cost",
+    },
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.data?.pageType, "fee_details");
+  assert.equal(result.data?.captureKind, "candidate_outcome");
+  assert.equal(result.data?.buyPriceAuction, 23_400);
+  assert.equal(result.data?.transactionFee, 450);
+  assert.equal(result.data?.vehicleHistoryFee, 49.95);
+  assert.equal(result.data?.taxes, 3_612.74);
+  assert.equal(result.data?.totalInvoiceAmount, 27_637.69);
+  assert.equal(result.data?.finalAcquisitionCost, 27_637.69);
+  assert.equal(result.data?.priceSemantics?.totalInvoiceAmount, "final_acquisition_cost");
+});
+
 test("Market Snap validation rejects unsafe or malformed listing payloads", () => {
   const parsed = marketListingPayloadSchema.safeParse({
     organizationId: "not-an-org",
