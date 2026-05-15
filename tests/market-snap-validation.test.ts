@@ -188,6 +188,72 @@ test("Market Snap validation accepts purchase fee payloads with itemized acquisi
   assert.equal(result.data?.priceSemantics?.totalInvoiceAmount, "final_acquisition_cost");
 });
 
+test("Market Snap validation keeps post-sale negotiation candidates separate from verified labels", () => {
+  const candidate = marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "post_sale",
+    captureKind: "candidate_outcome",
+    title: "2020 Toyota Camry SE",
+    soldPriceCandidate: 18_250,
+    counterOfferAmount: 17_750,
+    negotiationStatus: "Pending",
+    outcomeConfidence: "medium",
+    priceSemantics: {
+      soldPriceCandidate: "candidate_wholesale_label",
+      counterOfferAmount: "candidate_wholesale_label",
+    },
+  });
+  const unsafeVerified = marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "post_sale",
+    captureKind: "verified_outcome",
+    title: "2020 Toyota Camry SE",
+    soldPriceCandidate: 18_250,
+    negotiationStatus: "Pending",
+    outcomeConfidence: "verified",
+    priceSemantics: {
+      soldPriceCandidate: "candidate_wholesale_label",
+    },
+  });
+  const accepted = marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "post_sale",
+    captureKind: "verified_outcome",
+    title: "2020 Toyota Camry SE",
+    soldPriceCandidate: 18_250,
+    acceptedAmount: 17_900,
+    negotiatedAmount: 17_900,
+    finalBidAmount: 17_900,
+    negotiationStatus: "Accepted",
+    outcomeConfidence: "verified",
+    outcomeEvidence: [{
+      evidenceType: "accepted_negotiation",
+      sourceText: "Seller accepted the negotiated offer.",
+      capturedAt: "2026-05-15T12:00:00.000Z",
+    }],
+    priceSemantics: {
+      soldPriceCandidate: "candidate_wholesale_label",
+      acceptedAmount: "verified_wholesale_label",
+      negotiatedAmount: "verified_wholesale_label",
+      finalBidAmount: "verified_wholesale_label",
+    },
+  });
+
+  assert.equal(candidate.success, true);
+  assert.equal(candidate.data?.soldPriceCandidate, 18_250);
+  assert.equal(candidate.data?.counterOfferAmount, 17_750);
+  assert.equal(unsafeVerified.success, false);
+  assert.equal(accepted.success, true);
+  assert.equal(accepted.data?.acceptedAmount, 17_900);
+  assert.equal(accepted.data?.finalBidAmount, 17_900);
+});
+
 test("Market Snap validation rejects unsafe or malformed listing payloads", () => {
   const parsed = marketListingPayloadSchema.safeParse({
     organizationId: "not-an-org",

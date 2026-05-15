@@ -39,6 +39,7 @@
     const carfaxUrl = extractCarfaxLink(doc, href);
     const conditionReportText = extractConditionText(rawVisibleText, labelValues);
     const purchaseEconomics = extractPurchaseEconomics(rawVisibleText, classification);
+    const postSaleOutcome = extractPostSaleOutcome(rawVisibleText, classification);
     const isPurchaseOutcomePage = ["fee_details", "purchase_detail", "purchase_info", "purchase_list", "post_sale"].includes(classification.pageType);
     const currentBid = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(labelValues, OPENLANE_LABELS.currentBid);
     const buyNowPrice = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(labelValues, OPENLANE_LABELS.buyNowPrice);
@@ -86,7 +87,7 @@
       province,
       sellerName: cleanSellerName(firstLabel(labelValues, OPENLANE_LABELS.sellerName)),
       sellerType: "auction",
-      auctionStatus: purchaseEconomics.purchaseStatus || firstLabel(labelValues, OPENLANE_LABELS.auctionStatus),
+      auctionStatus: purchaseEconomics.purchaseStatus || postSaleOutcome.negotiationStatus || firstLabel(labelValues, OPENLANE_LABELS.auctionStatus),
       saleDate: firstLabel(labelValues, OPENLANE_LABELS.saleDate),
       runNumber: firstLabel(labelValues, OPENLANE_LABELS.runNumber),
       lane: firstLabel(labelValues, OPENLANE_LABELS.lane),
@@ -95,6 +96,14 @@
       listedPrice,
       currentBid,
       buyNowPrice,
+      soldPriceCandidate: postSaleOutcome.soldPriceCandidate,
+      finalBidAmount: postSaleOutcome.finalBidAmount,
+      negotiatedAmount: postSaleOutcome.negotiatedAmount,
+      counterOfferAmount: postSaleOutcome.counterOfferAmount,
+      acceptedAmount: postSaleOutcome.acceptedAmount,
+      negotiationStatus: postSaleOutcome.negotiationStatus,
+      negotiatedAt: postSaleOutcome.negotiatedAt,
+      acceptedAt: postSaleOutcome.acceptedAt,
       buyPriceAuction: purchaseEconomics.buyPriceAuction,
       transactionFee: purchaseEconomics.transactionFee,
       vehicleHistoryFee: purchaseEconomics.vehicleHistoryFee,
@@ -102,7 +111,7 @@
       taxes: purchaseEconomics.taxes,
       totalInvoiceAmount: purchaseEconomics.totalInvoiceAmount,
       finalAcquisitionCost: purchaseEconomics.finalAcquisitionCost,
-      priceSemantics: purchaseEconomics.priceSemantics,
+      priceSemantics: mergeObjects(postSaleOutcome.priceSemantics, purchaseEconomics.priceSemantics),
       reservePrice: moneyFrom(firstLabel(labelValues, OPENLANE_LABELS.reservePrice)),
       estimatedAuctionFees: estimateAuctionFees(listedPrice),
       titleStatus: cleanStatusValue(firstLabel(labelValues, OPENLANE_LABELS.titleStatus)),
@@ -128,6 +137,7 @@
         mediaCountEvidence: mediaCounts,
         purchaseStatus: purchaseEconomics.purchaseStatus,
         purchaseEconomics: purchaseEconomics.metadata,
+        negotiation: postSaleOutcome.metadata,
       },
       extractedFields: {
         ...Object.fromEntries(labelValues.entries()),
@@ -136,7 +146,7 @@
         mileageEvidence: evidenceSnippet(rawVisibleText, /\b(Odometer|Mileage|Kilometers)\b.{0,80}/i, "Odometer"),
       },
       missingData,
-      warnings: [...warnings, ...(classification.warnings || [])],
+      warnings: [...warnings, ...(classification.warnings || []), ...(postSaleOutcome.warnings || [])],
       extractionConfidenceScore: 0,
     };
 
@@ -145,7 +155,7 @@
     if (listing.imageCount === 0) warnings.push("No visible OpenLane photos were found in the page DOM.");
     if (!conditionReportText) warnings.push("Condition report text was not visible or could not be isolated.");
 
-    listing.warnings = [...warnings, ...(classification.warnings || [])];
+    listing.warnings = [...warnings, ...(classification.warnings || []), ...(postSaleOutcome.warnings || [])];
     listing.extractionConfidenceScore = calculateExtractionConfidence(listing);
     return compact(listing);
   }
@@ -485,6 +495,67 @@
     });
   }
 
+  function extractPostSaleOutcome(text, classification) {
+    if (classification.pageType !== "post_sale") return {};
+    const soldPriceCandidate = moneyNearLabel(text, "Sold Price") || moneyNearLabel(text, "Post Sale Amount");
+    const counterOfferAmount = moneyNearLabel(text, "Counter Offer Amount") || moneyNearLabel(text, "Counter Offer") || moneyNearLabel(text, "Counteroffer");
+    const acceptedAmount = moneyNearLabel(text, "Accepted Amount") || moneyNearLabel(text, "Accepted Offer");
+    const negotiationStatus = extractNegotiationStatus(text);
+    const isVerified = classification.captureKind === "verified_outcome" && /accepted|paid|completed|finalized|purchase confirmed/i.test(negotiationStatus || text);
+    const negotiatedAmount = isVerified ? acceptedAmount || moneyNearLabel(text, "Negotiated Amount") : undefined;
+    const finalBidAmount = isVerified ? negotiatedAmount || soldPriceCandidate : undefined;
+    const priceSemantics = soldPriceCandidate || counterOfferAmount || acceptedAmount || negotiatedAmount || finalBidAmount ? compact({
+      soldPriceCandidate: soldPriceCandidate ? "candidate_wholesale_label" : undefined,
+      counterOfferAmount: counterOfferAmount ? "candidate_wholesale_label" : undefined,
+      acceptedAmount: acceptedAmount ? (isVerified ? "verified_wholesale_label" : "candidate_wholesale_label") : undefined,
+      negotiatedAmount: negotiatedAmount ? "verified_wholesale_label" : undefined,
+      finalBidAmount: finalBidAmount ? "verified_wholesale_label" : undefined,
+    }) : undefined;
+    const warnings = [];
+    if (soldPriceCandidate && !isVerified) {
+      warnings.push("Post-sale sold price is not accepted, paid, completed, or user-confirmed; keep it out of training labels.");
+    }
+    return compact({
+      soldPriceCandidate,
+      counterOfferAmount,
+      acceptedAmount,
+      negotiatedAmount,
+      finalBidAmount,
+      negotiationStatus,
+      negotiatedAt: extractDateNearNegotiation(text),
+      acceptedAt: isVerified ? extractDateNearNegotiation(text) : undefined,
+      priceSemantics,
+      warnings,
+      metadata: compact({
+        negotiationStatus,
+        soldPriceCandidate,
+        counterOfferAmount,
+        acceptedAmount,
+        negotiatedAmount,
+        finalBidAmount,
+        negotiatedAt: extractDateNearNegotiation(text),
+        acceptedAt: isVerified ? extractDateNearNegotiation(text) : undefined,
+        trainingStatus: isVerified ? "eligible_verified_outcome" : "candidate_only_do_not_train",
+      }),
+    });
+  }
+
+  function extractNegotiationStatus(text) {
+    const labelStatus = cleanStatusValue(valueNearTextLabel(text, "Status"));
+    if (labelStatus) return labelStatus;
+    if (/\bseller accepted\b|\baccepted\b/i.test(text)) return "Accepted";
+    if (/\brejected\b/i.test(text)) return "Rejected";
+    if (/\bpending\b|\bawaiting\b/i.test(text)) return "Pending";
+    if (/\bcounter offer\b/i.test(text)) return "Counter Offer";
+    if (/\bpaid\b/i.test(text)) return "Paid";
+    if (/\bcompleted\b|\bfinalized\b/i.test(text)) return "Completed";
+    return undefined;
+  }
+
+  function extractDateNearNegotiation(text) {
+    return String(text || "").match(/\b(?:on\s+)?((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s+(?:19|20)\d{2})\b/i)?.[1];
+  }
+
   function splitAnnouncements(value) {
     return normalizeSpace(value || "").split(/\s*[•|;]\s*|\n+/).map((item) => item.trim()).filter(Boolean).slice(0, 30);
   }
@@ -547,6 +618,11 @@
   }
 
   function moneyNearLabel(text, label) {
+    const regex = new RegExp(`(?:^|\\n)\\s*${escapeRegExp(label)}\\s*[:\\n]?\\s*([^\\n]*(?:\\n[^\\n]*){0,3})`, "ig");
+    for (const match of String(text || "").matchAll(regex)) {
+      const money = moneyFrom(match[1]?.match(/(?:CA\$|CAD)?\s*\$\s?[\d,]+(?:\.\d{2})?|\bCAD\s*[\d,]+(?:\.\d{2})?/i)?.[0]);
+      if (money) return money;
+    }
     return moneyFrom(valueNearTextLabel(text, label));
   }
 
@@ -615,6 +691,11 @@
 
   function compact(object) {
     return Object.fromEntries(Object.entries(object).filter(([, value]) => value !== undefined && value !== "" && !(Array.isArray(value) && value.length === 0)));
+  }
+
+  function mergeObjects(...objects) {
+    const merged = compact(Object.assign({}, ...objects.filter(Boolean)));
+    return Object.keys(merged).length ? merged : undefined;
   }
 
   const api = {

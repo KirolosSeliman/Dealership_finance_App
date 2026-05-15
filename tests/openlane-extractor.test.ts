@@ -190,6 +190,67 @@ test("OpenLane purchase list without fee details remains candidate context only"
   assert.equal(listing.finalAcquisitionCost, undefined);
 });
 
+test("OpenLane post-sale pending negotiation keeps sold and counter amounts as candidate labels", () => {
+  const listing = extractor.extractOpenLaneFixture(fixture("openlane-post-sale-pending.html"), "https://www.openlane.ca/post-sale/camry");
+  const metadata = listing.openlaneMetadata as { negotiation?: Record<string, unknown> };
+  const semantics = listing.priceSemantics as Record<string, string>;
+
+  assert.equal(listing.pageType, "post_sale");
+  assert.equal(listing.captureKind, "candidate_outcome");
+  assert.equal(listing.outcomeConfidence, "medium");
+  assert.equal(listing.vin, "4T1G11AK8LU123456");
+  assert.equal(listing.soldPriceCandidate, 18_250);
+  assert.equal(listing.counterOfferAmount, 17_750);
+  assert.equal(listing.acceptedAmount, undefined);
+  assert.equal(listing.negotiatedAmount, undefined);
+  assert.equal(listing.finalBidAmount, undefined);
+  assert.equal(semantics.soldPriceCandidate, "candidate_wholesale_label");
+  assert.equal(semantics.counterOfferAmount, "candidate_wholesale_label");
+  assert.equal(metadata.negotiation?.negotiationStatus, "Pending");
+  assert.ok((listing.outcomeEvidence as Array<{ evidenceType?: string }>).every((item) => item.evidenceType !== "accepted_negotiation"));
+});
+
+test("OpenLane accepted post-sale negotiation promotes accepted amount to verified outcome", () => {
+  const listing = extractor.extractOpenLaneFixture(fixture("openlane-post-sale-accepted.html"), "https://www.openlane.ca/post-sale/camry");
+  const metadata = listing.openlaneMetadata as { negotiation?: Record<string, unknown> };
+  const semantics = listing.priceSemantics as Record<string, string>;
+
+  assert.equal(listing.pageType, "post_sale");
+  assert.equal(listing.captureKind, "verified_outcome");
+  assert.equal(listing.outcomeConfidence, "verified");
+  assert.equal(listing.soldPriceCandidate, 18_250);
+  assert.equal(listing.counterOfferAmount, 17_900);
+  assert.equal(listing.acceptedAmount, 17_900);
+  assert.equal(listing.negotiatedAmount, 17_900);
+  assert.equal(listing.finalBidAmount, 17_900);
+  assert.equal(semantics.soldPriceCandidate, "candidate_wholesale_label");
+  assert.equal(semantics.acceptedAmount, "verified_wholesale_label");
+  assert.equal(semantics.negotiatedAmount, "verified_wholesale_label");
+  assert.equal(semantics.finalBidAmount, "verified_wholesale_label");
+  assert.equal(metadata.negotiation?.negotiationStatus, "Accepted");
+  assert.ok((listing.outcomeEvidence as Array<{ evidenceType?: string }>).some((item) => item.evidenceType === "accepted_negotiation"));
+});
+
+test("OpenLane rejected and ambiguous post-sale prices never become verified labels", () => {
+  const rejected = extractor.extractOpenLaneFixture(fixture("openlane-post-sale-rejected.html"), "https://www.openlane.ca/post-sale/civic");
+  const ambiguous = extractor.extractOpenLaneFixture(fixture("openlane-post-sale-ambiguous-sold.html"), "https://www.openlane.ca/post-sale/escape");
+
+  assert.equal(rejected.pageType, "post_sale");
+  assert.equal(rejected.captureKind, "candidate_outcome");
+  assert.equal(rejected.soldPriceCandidate, 19_400);
+  assert.equal(rejected.counterOfferAmount, 18_750);
+  assert.equal(rejected.acceptedAmount, undefined);
+  assert.equal(rejected.negotiatedAmount, undefined);
+  assert.equal((rejected.openlaneMetadata as { negotiation?: Record<string, unknown> }).negotiation?.negotiationStatus, "Rejected");
+
+  assert.equal(ambiguous.pageType, "post_sale");
+  assert.equal(ambiguous.captureKind, "candidate_outcome");
+  assert.equal(ambiguous.soldPriceCandidate, 14_600);
+  assert.equal(ambiguous.acceptedAmount, undefined);
+  assert.equal(ambiguous.negotiatedAmount, undefined);
+  assert.ok((ambiguous.warnings as string[]).some((warning) => /not accepted/i.test(warning)));
+});
+
 function fixture(name: string) {
   return readFileSync(join(repoRoot, "tests/fixtures/openlane", name), "utf8");
 }

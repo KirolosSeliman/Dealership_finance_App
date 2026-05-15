@@ -91,6 +91,14 @@ The user must already be signed in to Dealer Flow in the same browser profile.
 
 The widget should appear automatically. The popup is only a compact status/settings entry point.
 
+## Capture And Training Status
+
+- Active listing bids are observations only.
+- Purchase fee details and invoices can provide verified acquisition economics when the page visibly shows accepted, paid, completed, or purchase-confirmed evidence.
+- Post-sale sold prices, pending counters, rejected counters, and ambiguous sold-price text are stored as candidate outcomes and must not be used as training labels by default.
+- Accepted post-sale negotiations store the visible accepted amount separately from the original sold-price candidate, with evidence and price semantics marking only the accepted/negotiated amount as a verified wholesale label.
+- Manual final-price confirmation fields are supported in the payload contract, but the extension does not invent or auto-confirm values for the user.
+
 ## Troubleshooting
 
 - Widget not appearing: confirm the page is an OpenLane vehicle detail page, auto-analyze is enabled, the extension is loaded without errors, and the page contains vehicle markers such as VIN, mileage, Carfax, lot/run data, or a gallery.

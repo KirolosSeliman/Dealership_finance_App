@@ -174,6 +174,8 @@ export interface MarketListingInput {
     | "soldPriceCandidate"
     | "finalBidAmount"
     | "negotiatedAmount"
+    | "counterOfferAmount"
+    | "acceptedAmount"
     | "buyPriceAuction"
     | "transactionFee"
     | "vehicleHistoryFee"
@@ -211,6 +213,14 @@ export interface MarketListingInput {
   soldPriceCandidate?: number;
   finalBidAmount?: number;
   negotiatedAmount?: number;
+  counterOfferAmount?: number;
+  acceptedAmount?: number;
+  negotiationStatus?: string;
+  negotiatedAt?: string;
+  acceptedAt?: string;
+  userConfirmedFinalPrice?: boolean;
+  confirmedAt?: string;
+  confirmationNote?: string;
   buyPriceAuction?: number;
   transactionFee?: number;
   vehicleHistoryFee?: number;
