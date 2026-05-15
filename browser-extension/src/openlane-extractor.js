@@ -38,9 +38,11 @@
     const mediaCounts = extractMediaCounts(rawVisibleText);
     const carfaxUrl = extractCarfaxLink(doc, href);
     const conditionReportText = extractConditionText(rawVisibleText, labelValues);
-    const currentBid = extractMoneyByLabels(labelValues, OPENLANE_LABELS.currentBid);
-    const buyNowPrice = extractMoneyByLabels(labelValues, OPENLANE_LABELS.buyNowPrice);
-    const listedPrice = buyNowPrice || currentBid || moneyFrom(rawVisibleText.match(/\$\s?[\d,]+(?:\.\d{2})?/)?.[0]);
+    const purchaseEconomics = extractPurchaseEconomics(rawVisibleText, classification);
+    const isPurchaseOutcomePage = ["fee_details", "purchase_detail", "purchase_info", "purchase_list", "post_sale"].includes(classification.pageType);
+    const currentBid = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(labelValues, OPENLANE_LABELS.currentBid);
+    const buyNowPrice = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(labelValues, OPENLANE_LABELS.buyNowPrice);
+    const listedPrice = isPurchaseOutcomePage ? undefined : buyNowPrice || currentBid || moneyFrom(rawVisibleText.match(/\$\s?[\d,]+(?:\.\d{2})?/)?.[0]);
     const mileageKm = extractMileage(firstLabel(labelValues, OPENLANE_LABELS.mileageKm)) || extractMileage(rawVisibleText);
     const vin = extractVin(firstLabel(labelValues, OPENLANE_LABELS.vin)) || extractVinFromDom(doc) || extractVin(rawVisibleText);
     const province = provinceFrom(firstLabel(labelValues, OPENLANE_LABELS.location) || rawVisibleText);
@@ -82,9 +84,9 @@
       cylinders: numberFrom(firstLabel(labelValues, OPENLANE_LABELS.cylinders)),
       location: firstLabel(labelValues, OPENLANE_LABELS.location),
       province,
-      sellerName: firstLabel(labelValues, OPENLANE_LABELS.sellerName),
+      sellerName: cleanSellerName(firstLabel(labelValues, OPENLANE_LABELS.sellerName)),
       sellerType: "auction",
-      auctionStatus: firstLabel(labelValues, OPENLANE_LABELS.auctionStatus),
+      auctionStatus: purchaseEconomics.purchaseStatus || firstLabel(labelValues, OPENLANE_LABELS.auctionStatus),
       saleDate: firstLabel(labelValues, OPENLANE_LABELS.saleDate),
       runNumber: firstLabel(labelValues, OPENLANE_LABELS.runNumber),
       lane: firstLabel(labelValues, OPENLANE_LABELS.lane),
@@ -93,9 +95,17 @@
       listedPrice,
       currentBid,
       buyNowPrice,
+      buyPriceAuction: purchaseEconomics.buyPriceAuction,
+      transactionFee: purchaseEconomics.transactionFee,
+      vehicleHistoryFee: purchaseEconomics.vehicleHistoryFee,
+      subtotal: purchaseEconomics.subtotal,
+      taxes: purchaseEconomics.taxes,
+      totalInvoiceAmount: purchaseEconomics.totalInvoiceAmount,
+      finalAcquisitionCost: purchaseEconomics.finalAcquisitionCost,
+      priceSemantics: purchaseEconomics.priceSemantics,
       reservePrice: moneyFrom(firstLabel(labelValues, OPENLANE_LABELS.reservePrice)),
       estimatedAuctionFees: estimateAuctionFees(listedPrice),
-      titleStatus: firstLabel(labelValues, OPENLANE_LABELS.titleStatus),
+      titleStatus: cleanStatusValue(firstLabel(labelValues, OPENLANE_LABELS.titleStatus)),
       declarations,
       conditionReportText,
       damageAnnouncements,
@@ -112,7 +122,13 @@
       videoCount: Math.max(media.videos.length, mediaCounts.videoCount ?? 0),
       description: conditionReportText || rawVisibleText.slice(0, 3000),
       rawVisibleText: options.includeRawVisibleText === false ? undefined : rawVisibleText.slice(0, RAW_TEXT_LIMIT),
-      openlaneMetadata: { classification, disclosureCount, mediaCountEvidence: mediaCounts },
+      openlaneMetadata: {
+        classification,
+        disclosureCount,
+        mediaCountEvidence: mediaCounts,
+        purchaseStatus: purchaseEconomics.purchaseStatus,
+        purchaseEconomics: purchaseEconomics.metadata,
+      },
       extractedFields: {
         ...Object.fromEntries(labelValues.entries()),
         classification,
@@ -430,6 +446,45 @@
     return price ? Math.min(1800, Math.max(350, Math.round(price * 0.065))) : undefined;
   }
 
+  function extractPurchaseEconomics(text, classification) {
+    if (!["fee_details", "purchase_detail", "purchase_info"].includes(classification.pageType)) return {};
+    const buyPriceAuction = moneyNearLabel(text, "Buy price - auction");
+    const transactionFee = moneyNearLabel(text, "Transaction Fee");
+    const vehicleHistoryFee = moneyNearLabel(text, "Vehicle history - auction") || moneyNearLabel(text, "Vehicle History Fee");
+    const subtotal = moneyNearLabel(text, "Subtotal");
+    const taxes = moneyNearLabel(text, "Taxes");
+    const totalInvoiceAmount = moneyNearLabel(text, "Total");
+    const finalAcquisitionCost = totalInvoiceAmount;
+    const purchaseStatus = cleanStatusValue(valueNearTextLabel(text, "Status"));
+    const priceSemantics = buyPriceAuction || transactionFee || vehicleHistoryFee || subtotal || taxes || totalInvoiceAmount ? compact({
+      buyPriceAuction: buyPriceAuction ? "verified_wholesale_label" : undefined,
+      transactionFee: transactionFee ? "acquisition_cost_component" : undefined,
+      vehicleHistoryFee: vehicleHistoryFee ? "acquisition_cost_component" : undefined,
+      subtotal: subtotal ? "acquisition_cost_component" : undefined,
+      taxes: taxes ? "acquisition_cost_component" : undefined,
+      totalInvoiceAmount: totalInvoiceAmount ? "final_acquisition_cost" : undefined,
+      finalAcquisitionCost: finalAcquisitionCost ? "final_acquisition_cost" : undefined,
+    }) : undefined;
+    return compact({
+      buyPriceAuction,
+      transactionFee,
+      vehicleHistoryFee,
+      subtotal,
+      taxes,
+      totalInvoiceAmount,
+      finalAcquisitionCost,
+      purchaseStatus,
+      priceSemantics,
+      metadata: compact({
+        currency: /\bCA\$|CAD\b/i.test(text) ? "CAD" : undefined,
+        releaseFormStatus: cleanStatusValue(valueNearTextLabel(text, "Release Form")),
+        titleStatus: cleanStatusValue(valueNearTextLabel(text, "Title Status")),
+        inspectionStatus: cleanStatusValue(valueNearTextLabel(text, "Inspection")),
+        transportStatus: cleanStatusValue(valueNearTextLabel(text, "Transport")),
+      }),
+    });
+  }
+
   function splitAnnouncements(value) {
     return normalizeSpace(value || "").split(/\s*[•|;]\s*|\n+/).map((item) => item.trim()).filter(Boolean).slice(0, 30);
   }
@@ -469,8 +524,8 @@
 
   function extractMediaCounts(text) {
     return compact({
-      photoCount: numberFrom(String(text).match(/\b(\d{1,3})\s+(?:total|photos?|images?)\b/i)?.[1]),
-      videoCount: numberFrom(String(text).match(/\b(\d{1,3})\s+videos?\b/i)?.[1]),
+      photoCount: numberFrom(String(text).match(/\b(\d{1,3})[ \t]+(?:total|photos?|images?)\b/i)?.[1]),
+      videoCount: numberFrom(String(text).match(/\b(\d{1,3})[ \t]+videos?\b/i)?.[1]),
     });
   }
 
@@ -489,6 +544,23 @@
     return Array.from(String(html || "").matchAll(/\s(?:aria-label|data-[a-z0-9_-]+|title|alt)=["']([^"']+)["']/gi))
       .map((match) => match[1])
       .join("\n");
+  }
+
+  function moneyNearLabel(text, label) {
+    return moneyFrom(valueNearTextLabel(text, label));
+  }
+
+  function valueNearTextLabel(text, label) {
+    const match = String(text || "").match(new RegExp(`(?:^|\\n)\\s*${escapeRegExp(label)}\\s*[:\\n]?\\s*([^\\n]{1,160})`, "i"));
+    return normalizeSpace(match?.[1] || "");
+  }
+
+  function cleanSellerName(value) {
+    return normalizeSpace(value || "").replace(/^(dealer|seller|consignor)\s*:\s*/i, "") || undefined;
+  }
+
+  function cleanStatusValue(value) {
+    return normalizeSpace(value || "").replace(/^(status|title status|release form|inspection|transport)\s*:\s*/i, "") || undefined;
   }
 
   function absoluteUrl(value, href) {

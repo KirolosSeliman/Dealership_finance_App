@@ -178,6 +178,7 @@ export interface MarketListingInput {
     | "transactionFee"
     | "vehicleHistoryFee"
     | "otherFees"
+    | "subtotal"
     | "taxes"
     | "totalInvoiceAmount"
     | "finalAcquisitionCost",
@@ -214,6 +215,7 @@ export interface MarketListingInput {
   transactionFee?: number;
   vehicleHistoryFee?: number;
   otherFees?: number;
+  subtotal?: number;
   taxes?: number;
   totalInvoiceAmount?: number;
   finalAcquisitionCost?: number;

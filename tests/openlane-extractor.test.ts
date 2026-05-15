@@ -153,6 +153,43 @@ test("OpenLane active extractor reads Kia page with lazy media counts and visibl
   assert.equal(metadata.mediaCountEvidence?.videoCount, 0);
 });
 
+test("OpenLane purchase fee extractor maps verified auction economics without merging fees into buy price", () => {
+  const listing = extractor.extractOpenLaneFixture(fixture("openlane-purchase-fee-details-panel.html"), "https://www.openlane.ca/purchases/forte/fees");
+  const metadata = listing.openlaneMetadata as { purchaseStatus?: string; purchaseEconomics?: Record<string, unknown> };
+
+  assert.equal(listing.pageType, "fee_details");
+  assert.equal(listing.captureKind, "verified_outcome");
+  assert.equal(listing.outcomeConfidence, "verified");
+  assert.equal(listing.vin, "3KPF24AD7LE123456");
+  assert.equal(listing.title, "2020 Kia Forte LX");
+  assert.equal(listing.saleDate, "May 14, 2026");
+  assert.equal(listing.sellerName, "Auto Group Montreal");
+  assert.equal(listing.auctionStatus, "Paid");
+  assert.equal(metadata.purchaseStatus, "Paid");
+  assert.equal(listing.buyPriceAuction, 6_900);
+  assert.equal(listing.transactionFee, 280);
+  assert.equal(listing.vehicleHistoryFee, 46.55);
+  assert.equal(listing.subtotal, 7_226.55);
+  assert.equal(listing.taxes, 939.45);
+  assert.equal(listing.totalInvoiceAmount, 8_166);
+  assert.equal(listing.finalAcquisitionCost, 8_166);
+  assert.notEqual(listing.buyPriceAuction, listing.totalInvoiceAmount);
+  assert.equal((listing.priceSemantics as Record<string, string>).buyPriceAuction, "verified_wholesale_label");
+  assert.equal((listing.priceSemantics as Record<string, string>).totalInvoiceAmount, "final_acquisition_cost");
+  assert.ok((listing.outcomeEvidence as Array<{ evidenceType?: string }>).some((item) => item.evidenceType === "fee_details_page"));
+  assert.equal(metadata.purchaseEconomics?.currency, "CAD");
+});
+
+test("OpenLane purchase list without fee details remains candidate context only", () => {
+  const listing = extractor.extractOpenLaneFixture(fixture("openlane-purchase-list.html"), "https://www.openlane.ca/purchases");
+
+  assert.equal(listing.pageType, "purchase_list");
+  assert.equal(listing.captureKind, "candidate_outcome");
+  assert.equal(listing.buyPriceAuction, undefined);
+  assert.equal(listing.totalInvoiceAmount, undefined);
+  assert.equal(listing.finalAcquisitionCost, undefined);
+});
+
 function fixture(name: string) {
   return readFileSync(join(repoRoot, "tests/fixtures/openlane", name), "utf8");
 }

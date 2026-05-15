@@ -360,6 +360,7 @@ function openLaneMetadata(input: MarketListingInput) {
     transactionFee: input.transactionFee,
     vehicleHistoryFee: input.vehicleHistoryFee,
     otherFees: input.otherFees,
+    subtotal: input.subtotal,
     taxes: input.taxes,
     totalInvoiceAmount: input.totalInvoiceAmount,
     finalAcquisitionCost: input.finalAcquisitionCost,

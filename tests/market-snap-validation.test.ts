@@ -153,6 +153,7 @@ test("Market Snap validation accepts purchase fee payloads with itemized acquisi
     transactionFee: 450,
     vehicleHistoryFee: 49.95,
     otherFees: 125,
+    subtotal: 24_024.95,
     taxes: 3_612.74,
     totalInvoiceAmount: 27_637.69,
     finalAcquisitionCost: 27_637.69,
@@ -167,6 +168,7 @@ test("Market Snap validation accepts purchase fee payloads with itemized acquisi
       transactionFee: "acquisition_cost_component",
       vehicleHistoryFee: "acquisition_cost_component",
       otherFees: "acquisition_cost_component",
+      subtotal: "acquisition_cost_component",
       taxes: "acquisition_cost_component",
       totalInvoiceAmount: "final_acquisition_cost",
       finalAcquisitionCost: "final_acquisition_cost",
@@ -179,6 +181,7 @@ test("Market Snap validation accepts purchase fee payloads with itemized acquisi
   assert.equal(result.data?.buyPriceAuction, 23_400);
   assert.equal(result.data?.transactionFee, 450);
   assert.equal(result.data?.vehicleHistoryFee, 49.95);
+  assert.equal(result.data?.subtotal, 24_024.95);
   assert.equal(result.data?.taxes, 3_612.74);
   assert.equal(result.data?.totalInvoiceAmount, 27_637.69);
   assert.equal(result.data?.finalAcquisitionCost, 27_637.69);
