@@ -58,6 +58,46 @@ test("Market Snap extension uses in-page OpenLane widget instead of popup-only a
   assert.match(contentScript, /openOptionsPage/);
 });
 
+test("Market Snap widget exposes draggable, settings, and data-quality controls", () => {
+  const widget = readFileSync(join(repoRoot, "browser-extension/src/market-snap-widget.js"), "utf8");
+  const contentScript = readFileSync(join(repoRoot, "browser-extension/src/content-script.js"), "utf8");
+
+  for (const marker of [
+    "drag-handle",
+    "pointerdown",
+    "marketSnapWidgetPosition",
+    "settings-drawer",
+    "dealerFlowBaseUrl",
+    "autoCapture",
+    "modelImprovementOptIn",
+    "data-quality",
+    "Price state",
+    "pageType",
+    "captureKind",
+    "Sold candidate",
+    "Buy price auction",
+    "Invoice total",
+    "Evidence",
+    "data-action=\"hide\"",
+  ]) {
+    assert.match(widget, new RegExp(marker));
+  }
+
+  assert.match(contentScript, /hiddenPageUrl/);
+  assert.match(contentScript, /backendResponse/);
+  assert.match(contentScript, /captureResponse/);
+});
+
+test("Market Snap copy JSON includes classification evidence and backend responses", () => {
+  const contentScript = readFileSync(join(repoRoot, "browser-extension/src/content-script.js"), "utf8");
+
+  assert.match(contentScript, /classification/);
+  assert.match(contentScript, /outcomeEvidence/);
+  assert.match(contentScript, /backendResponse/);
+  assert.match(contentScript, /captureResponse/);
+  assert.match(contentScript, /JSON\.stringify\(\{ listing, valuation/);
+});
+
 test("Market Snap analyze and save routes support extension CORS preflight", () => {
   const analyzeRoute = readFileSync(join(repoRoot, "src/app/api/market-snap/analyze-listing/route.ts"), "utf8");
   const captureRoute = readFileSync(join(repoRoot, "src/app/api/market-snap/capture-listing/route.ts"), "utf8");

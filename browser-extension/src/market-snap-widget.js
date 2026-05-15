@@ -14,31 +14,49 @@
     shadow.innerHTML = `
       <style>${widgetCss()}</style>
       <section class="panel" part="panel">
-        <header>
+        <header class="drag-handle" title="Drag Market Snap">
           <div>
             <strong>Market Snap</strong>
             <span class="source">OpenLane</span>
           </div>
-          <button class="icon collapse" type="button" title="Collapse or expand">-</button>
+          <div class="header-actions">
+            <button class="icon" type="button" data-action="settings" title="Settings">S</button>
+            <button class="icon collapse" type="button" title="Collapse or expand">-</button>
+          </div>
         </header>
         <div class="body">
           <p class="status">Detecting OpenLane vehicle...</p>
           <p class="vehicle"></p>
           <div class="metrics"></div>
           <div class="meta"></div>
+          <details class="data-quality">
+            <summary>Data quality</summary>
+            <div class="quality-body"></div>
+          </details>
+          <form class="settings-drawer" hidden>
+            <label>Dealer Flow URL <input name="dealerFlowBaseUrl" id="dealerFlowBaseUrl" type="url" /></label>
+            <label>Organization ID <input name="organizationId" id="organizationId" type="text" /></label>
+            <label><input name="autoAnalyze" type="checkbox" /> Auto-analyze</label>
+            <label><input name="autoCapture" type="checkbox" /> Capture observations/outcomes</label>
+            <label><input name="modelImprovementOptIn" type="checkbox" /> Model improvement opt-in</label>
+            <label><input name="includeMediaUrls" type="checkbox" /> Include media URLs</label>
+            <label><input name="includeRawVisibleText" type="checkbox" /> Include raw text</label>
+            <label><input name="debugMode" type="checkbox" /> Debug mode</label>
+            <button type="submit">Save settings</button>
+          </form>
           <div class="messages"></div>
           <div class="actions">
             <button type="button" data-action="refresh">Refresh</button>
             <button type="button" data-action="save">Save</button>
             <button type="button" data-action="copy">Copy JSON</button>
             <button type="button" data-action="open">Open Dealer Flow</button>
-            <button type="button" data-action="settings" hidden>Settings</button>
+            <button type="button" data-action="hide">Hide page</button>
           </div>
         </div>
       </section>
     `;
 
-    const state = { collapsed: false, listing: null, valuation: null, status: "idle", message: "" };
+    const state = { collapsed: false, settingsOpen: false, listing: null, valuation: null, status: "idle", message: "" };
     const api = {
       host,
       render(next) {
@@ -77,7 +95,15 @@
     shadow.querySelector("[data-action='save']").addEventListener("click", () => callbacks.onSave?.());
     shadow.querySelector("[data-action='copy']").addEventListener("click", () => callbacks.onCopy?.());
     shadow.querySelector("[data-action='open']").addEventListener("click", () => callbacks.onOpenDealerFlow?.());
-    shadow.querySelector("[data-action='settings']").addEventListener("click", () => callbacks.onOpenSettings?.());
+    shadow.querySelector("[data-action='hide']").addEventListener("click", () => callbacks.onHidePage?.());
+    shadow.querySelector("[data-action='settings']").addEventListener("click", () => {
+      state.settingsOpen = !state.settingsOpen;
+      renderState(shadow, state);
+      loadWidgetSettings(shadow);
+    });
+    shadow.querySelector(".settings-drawer").addEventListener("submit", (event) => saveWidgetSettings(event, callbacks));
+    installDrag(shadow);
+    restoreWidgetPosition(shadow);
 
     host.__dealerFlowWidget = api;
     renderState(shadow, state);
@@ -95,8 +121,9 @@
     shadow.querySelector(".vehicle").textContent = vehicleLabel(state.listing);
     shadow.querySelector(".metrics").innerHTML = state.valuation ? `${detectedHtml(state.listing)}${metricsHtml(state.valuation)}` : detectedHtml(state.listing);
     shadow.querySelector(".meta").innerHTML = metaHtml(state.listing, state.valuation);
+    shadow.querySelector(".quality-body").innerHTML = dataQualityHtml(state.listing, state.valuation);
+    shadow.querySelector(".settings-drawer").hidden = !state.settingsOpen;
     shadow.querySelector(".messages").innerHTML = messagesHtml(state.listing, state.valuation, state.message);
-    shadow.querySelector("[data-action='settings']").hidden = state.status !== "disconnected";
   }
 
   function statusText(state) {
@@ -134,6 +161,12 @@
     return [
       metric("Current bid", money(listing.currentBid || listing.listedPrice)),
       metric("Buy now", money(listing.buyNowPrice)),
+      metric("Sold candidate", money(listing.soldPriceCandidate)),
+      metric("Buy price auction", money(listing.buyPriceAuction)),
+      metric("Invoice total", money(listing.totalInvoiceAmount || listing.finalAcquisitionCost)),
+      metric("Price state", priceStateLabel(listing)),
+      metric("pageType", listing.pageType || "-"),
+      metric("captureKind", listing.captureKind || "-"),
       metric("Mileage", listing.mileageKm ? `${number(listing.mileageKm)} km` : "-"),
       metric("VIN", listing.vin || "-"),
     ].join("");
@@ -158,6 +191,92 @@
     ].filter(Boolean);
     if (items.length === 0) return "";
     return `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
+  }
+
+  function dataQualityHtml(listing, valuation) {
+    if (!listing && !valuation) return "<p>No extraction yet.</p>";
+    const warnings = valuation?.warnings || listing?.warnings || [];
+    const missing = valuation?.missingData || listing?.missingData || [];
+    const evidence = listing?.outcomeEvidence || listing?.openlaneMetadata?.classification?.evidence || [];
+    return [
+      `<p>Confidence: ${escapeHtml(valuation?.confidenceScore ?? listing?.extractionConfidenceScore ?? "-")}</p>`,
+      `<p>Warnings: ${escapeHtml(warnings.length)}</p>`,
+      `<p>Missing: ${escapeHtml(missing.length)}</p>`,
+      `<p>Evidence</p>`,
+      `<ul>${evidence.slice(0, 4).map((item) => `<li>${escapeHtml(item.sourceText || item.marker || item.evidenceType || "visible_page_text")}</li>`).join("")}</ul>`,
+    ].join("");
+  }
+
+  function priceStateLabel(listing) {
+    const semantics = listing.priceSemantics || {};
+    if (semantics.finalBidAmount || semantics.acceptedAmount || semantics.buyPriceAuction || semantics.totalInvoiceAmount) return "verified outcome";
+    if (semantics.soldPriceCandidate || listing.captureKind === "candidate_outcome") return "candidate outcome";
+    if (semantics.currentBid || listing.captureKind === "observation") return "observation";
+    return "unknown";
+  }
+
+  async function loadWidgetSettings(shadow) {
+    const form = shadow.querySelector(".settings-drawer");
+    if (!form || !window.DealerFlowMarketSnapStorage) return;
+    const settings = await window.DealerFlowMarketSnapStorage.getSettings();
+    for (const [key, value] of Object.entries(settings)) {
+      const field = form.elements[key];
+      if (!field) continue;
+      if (field.type === "checkbox") field.checked = Boolean(value);
+      else field.value = value || "";
+    }
+  }
+
+  async function saveWidgetSettings(event, callbacks) {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const values = Object.fromEntries(new FormData(form).entries());
+    for (const field of Array.from(form.querySelectorAll("input[type='checkbox']"))) {
+      values[field.name] = field.checked;
+    }
+    const saved = await window.DealerFlowMarketSnapStorage.saveSettings(values);
+    callbacks.onSettingsSaved?.(saved);
+  }
+
+  function installDrag(shadow) {
+    const panel = shadow.querySelector(".panel");
+    const handle = shadow.querySelector(".drag-handle");
+    let start = null;
+    handle.addEventListener("pointerdown", (event) => {
+      if (event.target.closest("button")) return;
+      const rect = panel.getBoundingClientRect();
+      start = { x: event.clientX, y: event.clientY, left: rect.left, top: rect.top };
+      handle.setPointerCapture?.(event.pointerId);
+    });
+    handle.addEventListener("pointermove", (event) => {
+      if (!start) return;
+      const left = Math.max(8, Math.min(window.innerWidth - panel.offsetWidth - 8, start.left + event.clientX - start.x));
+      const top = Math.max(8, Math.min(window.innerHeight - panel.offsetHeight - 8, start.top + event.clientY - start.y));
+      setWidgetPosition(panel, { left, top });
+    });
+    handle.addEventListener("pointerup", () => {
+      if (!start) return;
+      start = null;
+      chrome.storage?.local?.set?.({ marketSnapWidgetPosition: readWidgetPosition(panel) });
+    });
+  }
+
+  async function restoreWidgetPosition(shadow) {
+    const panel = shadow.querySelector(".panel");
+    const stored = await chrome.storage?.local?.get?.("marketSnapWidgetPosition");
+    if (stored?.marketSnapWidgetPosition) setWidgetPosition(panel, stored.marketSnapWidgetPosition);
+  }
+
+  function setWidgetPosition(panel, position) {
+    panel.style.left = `${Math.round(position.left)}px`;
+    panel.style.top = `${Math.round(position.top)}px`;
+    panel.style.right = "auto";
+    panel.style.bottom = "auto";
+  }
+
+  function readWidgetPosition(panel) {
+    const rect = panel.getBoundingClientRect();
+    return { left: Math.round(rect.left), top: Math.round(rect.top) };
   }
 
   function vehicleLabel(listing) {
@@ -192,7 +311,7 @@
   function widgetCss() {
     return `
       :host { all: initial; color-scheme: dark; }
-      .panel { position: fixed; right: 18px; bottom: 18px; z-index: 2147483647; width: min(360px, calc(100vw - 24px)); max-height: min(720px, calc(100vh - 32px)); overflow: hidden; border: 1px solid rgba(148,163,184,.32); border-radius: 10px; background: #08111d; color: #e5eef8; box-shadow: 0 20px 54px rgba(0,0,0,.38); font: 13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      .panel { position: fixed; left: 18px; bottom: 18px; z-index: 2147483647; width: min(360px, calc(100vw - 24px)); max-height: min(720px, calc(100vh - 32px)); overflow: hidden; border: 1px solid rgba(148,163,184,.32); border-radius: 10px; background: #08111d; color: #e5eef8; box-shadow: 0 20px 54px rgba(0,0,0,.38); font: 13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
       header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-bottom: 1px solid rgba(148,163,184,.18); background: #0f172a; }
       strong { font-size: 14px; }
       .source { margin-left: 8px; color: #94a3b8; font-size: 12px; }
@@ -215,6 +334,14 @@
       .actions button { min-height: 31px; border: 1px solid rgba(103,183,199,.32); border-radius: 7px; background: #67b7c7; color: #041018; cursor: pointer; font-weight: 800; }
       .actions button:nth-child(3), .actions button:nth-child(4) { background: #111827; color: #e5eef8; }
       .actions button[hidden] { display: none; }
+      .settings-drawer { display: grid; gap: 7px; border: 1px solid rgba(148,163,184,.18); border-radius: 7px; padding: 8px; background: rgba(15,23,42,.72); }
+      .settings-drawer[hidden] { display: none; }
+      .settings-drawer label { display: grid; gap: 4px; color: #cbd5e1; font-size: 12px; }
+      .settings-drawer input[type='url'], .settings-drawer input[type='text'] { min-height: 28px; border: 1px solid rgba(148,163,184,.28); border-radius: 6px; background: #020617; color: #f8fafc; padding: 0 7px; }
+      .settings-drawer button { min-height: 30px; border: 1px solid rgba(103,183,199,.32); border-radius: 7px; background: #67b7c7; color: #041018; font-weight: 800; }
+      .data-quality { border: 1px solid rgba(148,163,184,.18); border-radius: 7px; padding: 7px; background: rgba(15,23,42,.48); }
+      .data-quality summary { cursor: pointer; color: #dbeafe; font-weight: 800; }
+      .data-quality p { margin: 6px 0; color: #cbd5e1; }
       .error header { border-bottom-color: rgba(251,113,133,.32); }
       .warning header { border-bottom-color: rgba(251,191,36,.32); }
       .saved header { border-bottom-color: rgba(52,211,153,.32); }

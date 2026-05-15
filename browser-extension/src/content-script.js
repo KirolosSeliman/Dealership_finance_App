@@ -14,6 +14,9 @@
     captureRuntime: null,
     listing: null,
     valuation: null,
+    backendResponse: null,
+    captureResponse: null,
+    hiddenPageUrl: "",
     lastSignature: "",
     currentUrl: location.href,
     running: false,
@@ -37,6 +40,7 @@
 
   async function runRuntime({ force, reason }) {
     if (STATE.running) return;
+    if (!force && STATE.hiddenPageUrl === location.href) return;
     const supported = await waitForVehiclePage(force ? 1 : MAX_READY_RETRIES);
     if (!supported) {
       if (reason === "route-change") removeWidget();
@@ -82,6 +86,11 @@
       onCopy: () => copyExtractedJson(),
       onOpenDealerFlow: () => openDealerFlow(),
       onOpenSettings: () => openSettings(),
+      onSettingsSaved: (settings) => {
+        STATE.settings = settings;
+        STATE.widget?.render({ status: "idle", listing: STATE.listing, valuation: STATE.valuation, message: "Settings saved." });
+      },
+      onHidePage: () => hideCurrentPage(),
     });
     return STATE.widget;
   }
@@ -91,6 +100,8 @@
     STATE.widget = null;
     STATE.listing = null;
     STATE.valuation = null;
+    STATE.backendResponse = null;
+    STATE.captureResponse = null;
     STATE.lastSignature = "";
   }
 
@@ -120,6 +131,8 @@
     STATE.currentUrl = location.href;
     STATE.lastSignature = "";
     STATE.valuation = null;
+    STATE.backendResponse = null;
+    STATE.captureResponse = null;
     scheduleRuntime(ROUTE_CHANGE_DEBOUNCE_MS, "route-change");
   }
 
@@ -160,6 +173,7 @@
 
     try {
       const payload = await window.DealerFlowMarketSnapApi.analyzeListing(STATE.settings, listing);
+      STATE.backendResponse = payload;
       STATE.valuation = payload.valuation;
       STATE.phase = "success";
       STATE.widget?.render({ status: "ready", listing, valuation: STATE.valuation, message: "" });
@@ -173,7 +187,9 @@
   }
 
   function queueCapture(listing, { force = false } = {}) {
-    STATE.captureRuntime?.enqueueCapture(listing, STATE.settings, { force }).catch((error) => {
+    STATE.captureRuntime?.enqueueCapture(listing, STATE.settings, { force }).then((payload) => {
+      STATE.captureResponse = payload;
+    }).catch((error) => {
       if (STATE.settings?.debugMode) console.warn("Market Snap capture queue failed", error);
       STATE.widget?.render({ status: "warning", listing, valuation: STATE.valuation, message: formatError(error) });
     });
@@ -220,6 +236,7 @@
       }
       STATE.widget?.render({ status: "analyzing", listing: STATE.listing, valuation: STATE.valuation, message: "Saving to Deal Radar..." });
       const payload = await window.DealerFlowMarketSnapApi.saveListing(STATE.settings, STATE.listing, STATE.valuation);
+      STATE.backendResponse = payload;
       STATE.valuation = payload.valuation || STATE.valuation;
       STATE.widget?.render({ status: "saved", listing: STATE.listing, valuation: STATE.valuation, message: "Saved to Deal Radar." });
     } catch (error) {
@@ -229,8 +246,15 @@
 
   async function copyExtractedJson() {
     const listing = STATE.listing || extractListing();
-    await navigator.clipboard.writeText(JSON.stringify({ listing, valuation: STATE.valuation || null }, null, 2));
+    const classification = listing.openlaneMetadata?.classification || null;
+    const outcomeEvidence = listing.outcomeEvidence || classification?.evidence || [];
+    await navigator.clipboard.writeText(JSON.stringify({ listing, valuation: STATE.valuation || null, classification, outcomeEvidence, backendResponse: STATE.backendResponse, captureResponse: STATE.captureResponse }, null, 2));
     STATE.widget?.render({ status: "ready", listing, valuation: STATE.valuation, message: "Extracted JSON copied." });
+  }
+
+  function hideCurrentPage() {
+    STATE.hiddenPageUrl = location.href;
+    removeWidget();
   }
 
   function openDealerFlow() {
