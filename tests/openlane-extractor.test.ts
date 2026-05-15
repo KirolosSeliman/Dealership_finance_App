@@ -180,6 +180,42 @@ test("OpenLane purchase fee extractor maps verified auction economics without me
   assert.equal(metadata.purchaseEconomics?.currency, "CAD");
 });
 
+test("OpenLane realistic Hyundai fee details fixture maps invoice economics exactly", () => {
+  const listing = extractor.extractOpenLaneFixture(fixture("openlane-fee-details-hyundai-realistic.html"), "https://www.openlane.ca/purchases/hyundai/fees");
+  const metadata = listing.openlaneMetadata as { purchaseStatus?: string; purchaseEconomics?: Record<string, unknown> };
+
+  assert.equal(listing.pageType, "fee_details");
+  assert.equal(listing.captureKind, "verified_outcome");
+  assert.equal(listing.vin, "KMHD84LF8LU123456");
+  assert.equal(listing.year, 2020);
+  assert.equal(listing.make, "Hyundai");
+  assert.equal(listing.model, "Elantra");
+  assert.equal(listing.buyPriceAuction, 6_900);
+  assert.equal(listing.transactionFee, 280);
+  assert.equal(listing.vehicleHistoryFee, 46.55);
+  assert.equal(listing.taxes, 939.45);
+  assert.equal(listing.totalInvoiceAmount, 8_166);
+  assert.equal(listing.finalAcquisitionCost, 8_166);
+  assert.equal(metadata.purchaseStatus, "Paid");
+  assert.equal(metadata.purchaseEconomics?.currency, "CAD");
+});
+
+test("OpenLane realistic Kia purchase detail fixture preserves media/disclosures and candidate post-sale price", () => {
+  const listing = extractor.extractOpenLaneFixture(fixture("openlane-purchase-detail-kia-realistic.html"), "https://www.openlane.ca/purchases/kia-forte");
+  const metadata = listing.openlaneMetadata as { disclosureCount?: number; mediaCountEvidence?: Record<string, unknown> };
+
+  assert.equal(listing.pageType, "post_sale");
+  assert.equal(listing.captureKind, "candidate_outcome");
+  assert.equal(listing.vin, "3KPFL4A78JE224744");
+  assert.equal(listing.mileageKm, 163042);
+  assert.equal(listing.imageCount, 56);
+  assert.equal(metadata.disclosureCount, 22);
+  assert.equal(listing.soldPriceCandidate, 6_400);
+  assert.equal(listing.finalBidAmount, undefined);
+  assert.equal((listing.priceSemantics as Record<string, string>).soldPriceCandidate, "candidate_wholesale_label");
+  assert.equal(metadata.mediaCountEvidence?.photoCount, 56);
+});
+
 test("OpenLane purchase list without fee details remains candidate context only", () => {
   const listing = extractor.extractOpenLaneFixture(fixture("openlane-purchase-list.html"), "https://www.openlane.ca/purchases");
 

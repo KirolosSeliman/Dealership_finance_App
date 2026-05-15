@@ -24,7 +24,7 @@
     addEvidence(evidence, "purchase_context", /\b(purchases?|open order|order history|purchase info|documents)\b/i.test(`${path} ${normalized}`), snippet(normalized, /\b(purchases?|open order|order history|purchase info|documents)\b/i));
     addEvidence(evidence, "fee_details", /\b(fee details|buy price\s*-\s*auction|transaction fee|vehicle history fee|tax(?:es)?)\b/i.test(normalized), snippet(normalized, /\b(fee details|buy price\s*-\s*auction|transaction fee|vehicle history fee|tax(?:es)?)\b/i));
     addEvidence(evidence, "post_sale", /\b(post sale|sold price|negotiat|counter offer|accepted|rejected)\b/i.test(`${path} ${normalized}`), snippet(normalized, /\b(post sale|sold price|negotiat|counter offer|accepted|rejected)\b/i));
-    addEvidence(evidence, "accepted_outcome", /\b(accepted|seller accepted|paid|invoice|finalized)\b/i.test(normalized), snippet(normalized, /\b(accepted|seller accepted|paid|invoice|finalized)\b/i));
+    addEvidence(evidence, "accepted_outcome", hasAcceptedOutcomeEvidence(normalized), snippet(normalized, /\b(status\s+accepted|accepted amount|seller accepted|paid|invoice|finalized|completed|purchase confirmed)\b/i));
     addEvidence(evidence, "pending_outcome", /\b(pending|awaiting|counter offer|submitted|rejected)\b/i.test(normalized), snippet(normalized, /\b(pending|awaiting|counter offer|submitted|rejected)\b/i));
 
     let pageType = "unknown";
@@ -62,6 +62,11 @@
     if (pageType === "unknown") return Math.min(35, evidence.length * 8);
     const base = pageType === "fee_details" ? 62 : pageType === "post_sale" ? 55 : pageType === "purchase_list" || pageType === "purchase_detail" ? 48 : 45;
     return Math.max(10, Math.min(98, base + evidence.length * 5));
+  }
+
+  function hasAcceptedOutcomeEvidence(text) {
+    if (/\b(no|not|without)\s+accepted\b/i.test(text)) return false;
+    return /\b(status\s+accepted|accepted amount|seller accepted|paid|invoice|finalized|completed|purchase confirmed)\b/i.test(text);
   }
 
   function has(evidence, marker) {
