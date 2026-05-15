@@ -22,7 +22,7 @@
     addEvidence(evidence, "vehicle_header", /\b(19|20)\d{2}\b.+\b[A-Z][a-z]+/i.test(normalized), snippet(normalized, /\b(19|20)\d{2}\b[^\n]{0,120}/i));
     addEvidence(evidence, "vehicle_media", Number(doc.images?.length ?? 0) >= 2 || /\b(gallery|photos?|images?)\b/i.test(normalized), "visible gallery/media marker");
     addEvidence(evidence, "purchase_context", /\b(purchases?|open order|order history|purchase info|documents)\b/i.test(`${path} ${normalized}`), snippet(normalized, /\b(purchases?|open order|order history|purchase info|documents)\b/i));
-    addEvidence(evidence, "fee_details", /\b(fee details|buy price\s*-\s*auction|transaction fee|vehicle history fee|taxes|total)\b/i.test(normalized), snippet(normalized, /\b(fee details|buy price\s*-\s*auction|transaction fee|vehicle history fee|taxes|total)\b/i));
+    addEvidence(evidence, "fee_details", /\b(fee details|buy price\s*-\s*auction|transaction fee|vehicle history fee|tax(?:es)?)\b/i.test(normalized), snippet(normalized, /\b(fee details|buy price\s*-\s*auction|transaction fee|vehicle history fee|tax(?:es)?)\b/i));
     addEvidence(evidence, "post_sale", /\b(post sale|sold price|negotiat|counter offer|accepted|rejected)\b/i.test(`${path} ${normalized}`), snippet(normalized, /\b(post sale|sold price|negotiat|counter offer|accepted|rejected)\b/i));
     addEvidence(evidence, "accepted_outcome", /\b(accepted|seller accepted|paid|invoice|finalized)\b/i.test(normalized), snippet(normalized, /\b(accepted|seller accepted|paid|invoice|finalized)\b/i));
     addEvidence(evidence, "pending_outcome", /\b(pending|awaiting|counter offer|submitted|rejected)\b/i.test(normalized), snippet(normalized, /\b(pending|awaiting|counter offer|submitted|rejected)\b/i));

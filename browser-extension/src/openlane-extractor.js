@@ -2,7 +2,7 @@
   const RAW_TEXT_LIMIT = 12000;
   const OPENLANE_LABELS = {
     vin: ["VIN", "Vehicle Identification Number"],
-    mileageKm: ["Mileage", "Odometer", "Kilometers", "KM"],
+    mileageKm: ["Mileage", "Odometer", "Kilometers"],
     exteriorColor: ["Exterior Color", "Exterior Colour", "Color", "Colour"],
     interiorColor: ["Interior Color", "Interior Colour"],
     drivetrain: ["Drivetrain", "Drive Train"],
@@ -35,19 +35,22 @@
     const title = bestTitle(doc, rawVisibleText);
     const decodedTitle = extractYearMakeModelTrim(title || rawVisibleText);
     const media = options.includeMediaUrls === false ? { photos: [], videos: [] } : extractMedia(doc, href);
+    const mediaCounts = extractMediaCounts(rawVisibleText);
     const carfaxUrl = extractCarfaxLink(doc, href);
     const conditionReportText = extractConditionText(rawVisibleText, labelValues);
     const currentBid = extractMoneyByLabels(labelValues, OPENLANE_LABELS.currentBid);
     const buyNowPrice = extractMoneyByLabels(labelValues, OPENLANE_LABELS.buyNowPrice);
     const listedPrice = buyNowPrice || currentBid || moneyFrom(rawVisibleText.match(/\$\s?[\d,]+(?:\.\d{2})?/)?.[0]);
     const mileageKm = extractMileage(firstLabel(labelValues, OPENLANE_LABELS.mileageKm)) || extractMileage(rawVisibleText);
-    const vin = extractVin(firstLabel(labelValues, OPENLANE_LABELS.vin) || rawVisibleText);
+    const vin = extractVin(firstLabel(labelValues, OPENLANE_LABELS.vin)) || extractVinFromDom(doc) || extractVin(rawVisibleText);
     const province = provinceFrom(firstLabel(labelValues, OPENLANE_LABELS.location) || rawVisibleText);
-    const declarations = splitAnnouncements(labelValues.get("declarations") || findSectionText(rawVisibleText, "Declarations"));
+    const disclosureText = findDisclosureText(rawVisibleText);
+    const declarations = splitAnnouncements(labelValues.get("declarations") || findSectionText(rawVisibleText, "Declarations") || disclosureText);
     const damageAnnouncements = splitAnnouncements(findSectionText(rawVisibleText, "Damage"));
     const mechanicalAnnouncements = splitAnnouncements(findSectionText(rawVisibleText, "Mechanical"));
     const structuralAnnouncements = splitAnnouncements(findSectionText(rawVisibleText, "Structural"));
     const odometerAnnouncements = splitAnnouncements(findSectionText(rawVisibleText, "Odometer"));
+    const disclosureCount = countNearLabel(rawVisibleText, "disclosures?");
     const warnings = [];
     const missingData = [];
 
@@ -105,12 +108,17 @@
       carfaxAvailable: Boolean(carfaxUrl || /carfax/i.test(rawVisibleText)),
       photos: media.photos,
       videos: media.videos,
-      imageCount: media.photos.length,
-      videoCount: media.videos.length,
+      imageCount: Math.max(media.photos.length, mediaCounts.photoCount ?? 0),
+      videoCount: Math.max(media.videos.length, mediaCounts.videoCount ?? 0),
       description: conditionReportText || rawVisibleText.slice(0, 3000),
       rawVisibleText: options.includeRawVisibleText === false ? undefined : rawVisibleText.slice(0, RAW_TEXT_LIMIT),
-      openlaneMetadata: { classification },
-      extractedFields: { ...Object.fromEntries(labelValues.entries()), classification },
+      openlaneMetadata: { classification, disclosureCount, mediaCountEvidence: mediaCounts },
+      extractedFields: {
+        ...Object.fromEntries(labelValues.entries()),
+        classification,
+        vinEvidence: evidenceSnippet(rawVisibleText, /\bVIN\b.{0,80}|[A-HJ-NPR-Z0-9]{17}/i, "VIN"),
+        mileageEvidence: evidenceSnippet(rawVisibleText, /\b(Odometer|Mileage|Kilometers)\b.{0,80}/i, "Odometer"),
+      },
       missingData,
       warnings: [...warnings, ...(classification.warnings || [])],
       extractionConfidenceScore: 0,
@@ -174,7 +182,7 @@
   }
 
   function extractOpenLaneFixture(html, href = "https://www.openlane.ca/vehicle/fixture") {
-    const text = stripTags(html);
+    const text = `${stripTags(html)}\n${extractAttributeText(html)}`;
     const media = extractMediaFromHtml(html, href);
     const fakeDoc = {
       title: text.match(/\b(19|20)\d{2}[^\n<]{3,120}/)?.[0] || "OpenLane vehicle",
@@ -188,8 +196,8 @@
       ...listing,
       photos: media.photos,
       videos: media.videos,
-      imageCount: media.photos.length,
-      videoCount: media.videos.length,
+      imageCount: Math.max(Number(listing.imageCount || 0), media.photos.length),
+      videoCount: Math.max(Number(listing.videoCount || 0), media.videos.length),
       carfaxUrl: listing.carfaxUrl || (html.match(/href=["']([^"']*carfax[^"']*)["']/i)?.[1] ? absoluteUrl(html.match(/href=["']([^"']*carfax[^"']*)["']/i)?.[1], href) : undefined),
       carfaxAvailable: listing.carfaxAvailable || /carfax/i.test(html),
     };
@@ -246,11 +254,29 @@
 
   function extractMileage(value) {
     const text = String(value || "");
-    return numberFrom(text.match(/([\d,.\s]+)\s?(km|kilometres|kilometers)\b/i)?.[1] || text);
+    const match = text.match(/(?:odometer|mileage|kilometers|kilometres)?\D*([\d,.\s]+)\s?(km|kilometres|kilometers)\b/i);
+    return match ? numberFrom(match[1]) : undefined;
   }
 
   function extractVin(value) {
     return vinFrom(value);
+  }
+
+  function extractVinFromDom(doc = document) {
+    const nodes = Array.from(doc.querySelectorAll?.("[data-vin], [aria-label], [data-testid], [title], button, [role='button']") || []);
+    for (const node of nodes) {
+      const text = [
+        node.getAttribute?.("data-vin"),
+        node.getAttribute?.("aria-label"),
+        node.getAttribute?.("data-testid"),
+        node.getAttribute?.("title"),
+        node.innerText,
+        node.textContent,
+      ].filter(Boolean).join(" ");
+      const vin = vinFrom(text);
+      if (vin) return vin;
+    }
+    return undefined;
   }
 
   function extractMoneyByLabels(labels, labelNames = []) {
@@ -305,8 +331,9 @@
     const photos = [];
     const videos = [];
     for (const img of Array.from(doc.images || [])) {
-      addPhoto(photos, { url: img.currentSrc || img.src, thumbnailUrl: img.src, alt: img.alt, width: img.naturalWidth || img.width, height: img.naturalHeight || img.height, source: "img" }, href);
-      for (const candidate of parseSrcset(img.srcset)) addPhoto(photos, { url: candidate, thumbnailUrl: img.src, alt: img.alt, source: "srcset" }, href);
+      const src = img.currentSrc || img.src || img.getAttribute?.("data-src") || img.getAttribute?.("data-original");
+      addPhoto(photos, { url: src, thumbnailUrl: img.src || src, alt: img.alt, width: img.naturalWidth || img.width, height: img.naturalHeight || img.height, source: "img" }, href);
+      for (const candidate of parseSrcset(img.srcset || img.getAttribute?.("srcset"))) addPhoto(photos, { url: candidate, thumbnailUrl: img.src || src, alt: img.alt, source: "srcset" }, href);
     }
     for (const source of Array.from(doc.querySelectorAll?.("picture source[srcset]") || [])) {
       for (const candidate of parseSrcset(source.getAttribute("srcset"))) addPhoto(photos, { url: candidate, source: "picture" }, href);
@@ -335,7 +362,8 @@
     const photos = [];
     const videos = [];
     for (const match of html.matchAll(/<img\b[^>]*>/gi)) {
-      addPhoto(photos, { url: attr(match[0], "src"), thumbnailUrl: attr(match[0], "src"), alt: attr(match[0], "alt"), width: numberFrom(attr(match[0], "width")), height: numberFrom(attr(match[0], "height")), source: "img" }, href);
+      const src = attr(match[0], "src") || attr(match[0], "currentSrc") || attr(match[0], "data-src") || attr(match[0], "data-original");
+      addPhoto(photos, { url: src, thumbnailUrl: src, alt: attr(match[0], "alt"), width: numberFrom(attr(match[0], "width")), height: numberFrom(attr(match[0], "height")), source: "img" }, href);
       for (const candidate of parseSrcset(attr(match[0], "srcset"))) addPhoto(photos, { url: candidate, alt: attr(match[0], "alt"), source: "srcset" }, href);
     }
     for (const match of html.matchAll(/<source\b[^>]*srcset=["']([^"']+)["'][^>]*>/gi)) {
@@ -378,6 +406,11 @@
     return normalizeSpace(match?.[1] || "");
   }
 
+  function findDisclosureText(text) {
+    const match = text.match(/\bDisclosures?\b\s*[:\n]?\s*([\s\S]{0,1200}?)(?=\n\s*(Condition Report|Announcements|Damage|Mechanical|Structural|Odometer)\b|$)/i);
+    return normalizeSpace(match?.[1] || "");
+  }
+
   function firstLabel(values, labels) {
     for (const label of labels) {
       const camel = Object.entries(OPENLANE_LABELS).find(([, names]) => names.includes(label))?.[0];
@@ -403,7 +436,7 @@
 
   function addPhoto(photos, photo, href) {
     const url = absoluteUrl(photo.url, href);
-    if (!url || !looksLikeImage(url)) return;
+    if (!url || (photo.source === "link" && !looksLikeImage(url))) return;
     photos.push(compact({ ...photo, url, thumbnailUrl: absoluteUrl(photo.thumbnailUrl, href) || url }));
   }
 
@@ -432,6 +465,30 @@
 
   function looksLikeVideo(url) {
     return /\.(mp4|webm|mov|m3u8)(\?|#|$)/i.test(url) || /youtube|vimeo|video|walkaround/i.test(url);
+  }
+
+  function extractMediaCounts(text) {
+    return compact({
+      photoCount: numberFrom(String(text).match(/\b(\d{1,3})\s+(?:total|photos?|images?)\b/i)?.[1]),
+      videoCount: numberFrom(String(text).match(/\b(\d{1,3})\s+videos?\b/i)?.[1]),
+    });
+  }
+
+  function countNearLabel(text, labelPattern) {
+    return numberFrom(String(text).match(new RegExp(`\\b(\\d{1,3})\\s+${labelPattern}\\b`, "i"))?.[1]);
+  }
+
+  function evidenceSnippet(text, regex, matchedLabel) {
+    const match = String(text || "").match(regex);
+    if (!match) return undefined;
+    const index = Math.max(0, match.index ?? 0);
+    return compact({ matchedLabel, sourceText: String(text).slice(index, index + 180).trim() });
+  }
+
+  function extractAttributeText(html) {
+    return Array.from(String(html || "").matchAll(/\s(?:aria-label|data-[a-z0-9_-]+|title|alt)=["']([^"']+)["']/gi))
+      .map((match) => match[1])
+      .join("\n");
   }
 
   function absoluteUrl(value, href) {

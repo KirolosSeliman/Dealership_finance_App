@@ -106,6 +106,53 @@ test("OpenLane extractor includes classifier result in listing payload", () => {
   assert.equal((listing.openlaneMetadata as { classification?: { pageType?: string } }).classification?.pageType, "fee_details");
 });
 
+test("OpenLane active extractor reads Silverado page without confusing trim digits for mileage", () => {
+  const listing = extractor.extractOpenLaneFixture(fixture("openlane-active-silverado.html"), "https://www.openlane.ca/vehicle/silverado");
+  const metadata = listing.openlaneMetadata as { disclosureCount?: number; mediaCountEvidence?: Record<string, unknown> };
+  const fields = listing.extractedFields as { vinEvidence?: { sourceText?: string }; mileageEvidence?: { sourceText?: string } };
+
+  assert.equal(listing.pageType, "active_listing");
+  assert.equal(listing.captureKind, "observation");
+  assert.equal(listing.vin, "1GCUDEE88RZ142915");
+  assert.equal(listing.mileageKm, 40100);
+  assert.notEqual(listing.mileageKm, 4157);
+  assert.equal(listing.year, 2024);
+  assert.equal(listing.make, "Chevrolet");
+  assert.equal(listing.model, "Silverado");
+  assert.match(String(listing.trim), /1500 Crew Cab/);
+  assert.equal(listing.currentBid, 50_700);
+  assert.equal(listing.buyNowPrice, 58_900);
+  assert.equal(listing.imageCount, 21);
+  assert.equal(listing.videoCount, 0);
+  assert.equal(metadata.disclosureCount, 12);
+  assert.ok((listing.declarations as string[]).some((item) => /daily rental/i.test(item)));
+  assert.equal(listing.carfaxUrl, "https://www.carfax.ca/report/SILVERADO123");
+  assert.match(String(fields.vinEvidence?.sourceText), /1GCUDEE88RZ142915/);
+  assert.match(String(fields.mileageEvidence?.sourceText), /40,100 KM/i);
+  assert.equal(metadata.mediaCountEvidence?.photoCount, 21);
+});
+
+test("OpenLane active extractor reads Kia page with lazy media counts and visible Carfax text", () => {
+  const listing = extractor.extractOpenLaneFixture(fixture("openlane-active-kia-forte.html"), "https://www.openlane.ca/vehicle/kia-forte");
+  const metadata = listing.openlaneMetadata as { disclosureCount?: number; mediaCountEvidence?: Record<string, unknown> };
+  const photos = listing.photos as Array<{ url: string }>;
+
+  assert.equal(listing.vin, "3KPFL4A78JE224744");
+  assert.equal(listing.mileageKm, 163042);
+  assert.equal(listing.year, 2018);
+  assert.equal(listing.make, "Kia");
+  assert.equal(listing.model, "Forte");
+  assert.equal(listing.currentBid, 6_200);
+  assert.equal(listing.imageCount, 56);
+  assert.equal(listing.videoCount, 0);
+  assert.equal(metadata.disclosureCount, 22);
+  assert.ok((listing.declarations as string[]).some((item) => /Accident repair/i.test(item)));
+  assert.equal(listing.carfaxAvailable, true);
+  assert.equal(listing.carfaxUrl, undefined);
+  assert.ok(photos.some((photo) => photo.url.includes("kia-forte-front")));
+  assert.equal(metadata.mediaCountEvidence?.videoCount, 0);
+});
+
 function fixture(name: string) {
   return readFileSync(join(repoRoot, "tests/fixtures/openlane", name), "utf8");
 }
