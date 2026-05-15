@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { createHash } from "node:crypto";
 import { normalizeListing, runComparableEstimator } from "@/lib/market-snap/engine";
 import type { MarketListingInput, VehicleValuation } from "@/types/market-snap";
 import type { Vehicle } from "@/types/domain";
@@ -153,6 +154,52 @@ export async function saveListingToDealRadar(client: Client, input: MarketListin
 }
 
 export const saveMarketListing = saveListingToDealRadar;
+
+export async function persistOpenLaneCapture(client: Client, input: MarketListingInput, capturedBy?: string) {
+  if (!isOpenLaneCapture(input)) {
+    return { vehicleIdentityId: null, observationStored: false, outcomeStored: false };
+  }
+
+  const identityPayload = openLaneIdentityPayload(input, capturedBy);
+  const { data: identity, error: identityError } = await client
+    .from("openlane_vehicle_identities")
+    .upsert(identityPayload, { onConflict: "organization_id,fallback_key" })
+    .select("id")
+    .single();
+  if (identityError) throw identityError;
+
+  const vehicleIdentityId = String(identity.id);
+  let observationId: string | null = null;
+  let outcomeId: string | null = null;
+
+  if (isOpenLaneObservation(input)) {
+    const { data, error } = await client
+      .from("openlane_observations")
+      .upsert(openLaneObservationPayload(input, vehicleIdentityId, capturedBy), { onConflict: "organization_id,observation_fingerprint", ignoreDuplicates: true })
+      .select("id")
+      .single();
+    if (error) throw error;
+    observationId = data?.id ? String(data.id) : null;
+  }
+
+  if (isOpenLaneOutcome(input)) {
+    const { data, error } = await client
+      .from("openlane_outcomes")
+      .upsert(openLaneOutcomePayload(input, vehicleIdentityId, capturedBy), { onConflict: "organization_id,outcome_fingerprint", ignoreDuplicates: true })
+      .select("id")
+      .single();
+    if (error) throw error;
+    outcomeId = data?.id ? String(data.id) : null;
+  }
+
+  return {
+    vehicleIdentityId,
+    observationId,
+    outcomeId,
+    observationStored: Boolean(observationId),
+    outcomeStored: Boolean(outcomeId),
+  };
+}
 
 export async function getDealRadarListings(client: Client, organizationId: string, page = 1, pageSize = 25) {
   const from = (page - 1) * pageSize;
@@ -400,6 +447,189 @@ function openLaneMetadata(input: MarketListingInput) {
     missingData: input.missingData ?? [],
     videoCount: input.videoCount ?? input.videos?.length ?? 0,
   };
+}
+
+function isOpenLaneCapture(input: MarketListingInput) {
+  return input.sourceName.toLowerCase().includes("openlane") || Boolean(input.pageType);
+}
+
+function isOpenLaneObservation(input: MarketListingInput) {
+  return input.captureKind === "observation" || input.pageType === "active_listing" || input.pageType === "watchlist";
+}
+
+function isOpenLaneOutcome(input: MarketListingInput) {
+  return input.captureKind === "candidate_outcome"
+    || input.captureKind === "verified_outcome"
+    || input.captureKind === "manual_confirmation"
+    || [
+      input.soldPriceCandidate,
+      input.finalBidAmount,
+      input.negotiatedAmount,
+      input.counterOfferAmount,
+      input.acceptedAmount,
+      input.buyPriceAuction,
+      input.totalInvoiceAmount,
+      input.finalAcquisitionCost,
+    ].some((value) => value !== undefined);
+}
+
+function openLaneIdentityPayload(input: MarketListingInput, capturedBy?: string) {
+  return compactDbRow({
+    organization_id: input.organizationId,
+    vin: input.vin ?? null,
+    fallback_key: openLaneFallbackKey(input),
+    listing_url: input.listingUrl || null,
+    title: input.title || null,
+    year: input.year ?? null,
+    make: input.make || null,
+    model: input.model || null,
+    trim: input.trim || null,
+    mileage_km: input.mileageKm ?? null,
+    identity_confidence: input.vin ? "high" : input.listingUrl ? "medium" : "low",
+    last_seen_at: input.capturedAt ?? new Date().toISOString(),
+    created_by: capturedBy ?? null,
+  });
+}
+
+function openLaneObservationPayload(input: MarketListingInput, vehicleIdentityId: string, capturedBy?: string) {
+  const metadata = input.openlaneMetadata ?? {};
+  const disclosureCount = numberOrUndefined((metadata as { disclosureCount?: unknown }).disclosureCount);
+  return compactDbRow({
+    organization_id: input.organizationId,
+    vehicle_identity_id: vehicleIdentityId,
+    source_name: input.sourceName,
+    listing_url: input.listingUrl || null,
+    page_type: input.pageType ?? null,
+    capture_kind: input.captureKind ?? "observation",
+    current_bid: input.currentBid ?? null,
+    buy_now_price: input.buyNowPrice ?? null,
+    time_remaining: stringOrUndefined((metadata as { timeRemaining?: unknown }).timeRemaining) ?? null,
+    status_text: input.auctionStatus ?? input.negotiationStatus ?? null,
+    disclosure_count: disclosureCount ?? null,
+    photo_count: input.imageCount ?? input.photos?.length ?? null,
+    captured_at: input.capturedAt ?? new Date().toISOString(),
+    captured_by: capturedBy ?? null,
+    confidence_level: input.outcomeConfidence ?? "low",
+    evidence: input.outcomeEvidence ?? [],
+    capped_payload: cappedOpenLanePayload(input),
+    observation_fingerprint: captureFingerprint("observation", input, [
+      input.currentBid,
+      input.buyNowPrice,
+      input.auctionStatus,
+      disclosureCount,
+      input.imageCount,
+    ]),
+  });
+}
+
+function openLaneOutcomePayload(input: MarketListingInput, vehicleIdentityId: string, capturedBy?: string) {
+  const outcomeType = openLaneOutcomeType(input);
+  return compactDbRow({
+    organization_id: input.organizationId,
+    vehicle_identity_id: vehicleIdentityId,
+    source_name: input.sourceName,
+    listing_url: input.listingUrl || null,
+    outcome_type: outcomeType,
+    source_page_type: input.pageType ?? null,
+    capture_kind: input.captureKind ?? "candidate_outcome",
+    confidence_level: input.outcomeConfidence ?? (input.captureKind === "verified_outcome" ? "verified" : "medium"),
+    sold_price_candidate: input.soldPriceCandidate ?? null,
+    final_bid_amount: input.finalBidAmount ?? null,
+    negotiated_amount: input.negotiatedAmount ?? null,
+    counter_offer_amount: input.counterOfferAmount ?? null,
+    accepted_amount: input.acceptedAmount ?? null,
+    buy_price_auction: input.buyPriceAuction ?? null,
+    transaction_fee: input.transactionFee ?? null,
+    vehicle_history_fee: input.vehicleHistoryFee ?? null,
+    other_fees: input.otherFees ?? null,
+    subtotal: input.subtotal ?? null,
+    taxes: input.taxes ?? null,
+    total_invoice_amount: input.totalInvoiceAmount ?? null,
+    final_acquisition_cost: input.finalAcquisitionCost ?? null,
+    negotiation_status: input.negotiationStatus ?? null,
+    evidence: input.outcomeEvidence ?? [],
+    price_semantics: input.priceSemantics ?? {},
+    capped_payload: cappedOpenLanePayload(input),
+    captured_at: input.capturedAt ?? new Date().toISOString(),
+    captured_by: capturedBy ?? null,
+    is_training_eligible: input.captureKind === "verified_outcome" || input.captureKind === "manual_confirmation",
+    outcome_fingerprint: captureFingerprint(outcomeType, input, [
+      input.soldPriceCandidate,
+      input.finalBidAmount,
+      input.negotiatedAmount,
+      input.acceptedAmount,
+      input.buyPriceAuction,
+      input.totalInvoiceAmount,
+      input.finalAcquisitionCost,
+      input.negotiationStatus,
+    ]),
+  });
+}
+
+function openLaneOutcomeType(input: MarketListingInput) {
+  if (input.captureKind === "manual_confirmation" || input.userConfirmedFinalPrice) return "manual_confirmation";
+  if (input.pageType === "fee_details" || input.totalInvoiceAmount || input.finalAcquisitionCost || input.buyPriceAuction) return "purchase_fee_details";
+  if (input.captureKind === "verified_outcome" && (input.acceptedAmount || input.negotiatedAmount || input.finalBidAmount)) return "accepted_negotiation";
+  if (input.pageType === "post_sale") return "post_sale_candidate";
+  return input.captureKind === "verified_outcome" ? "verified_outcome" : "candidate_outcome";
+}
+
+function openLaneFallbackKey(input: MarketListingInput) {
+  if (input.vin) return `vin:${input.vin}`;
+  if (input.listingUrl) return `url:${hashText(input.listingUrl)}`;
+  return `fallback:${hashText([input.title, input.year, input.make, input.model, input.saleDate].filter(Boolean).join("|"))}`;
+}
+
+function captureFingerprint(kind: string, input: MarketListingInput, parts: unknown[]) {
+  return hashText([
+    kind,
+    input.organizationId,
+    openLaneFallbackKey(input),
+    input.listingUrl ?? "",
+    input.pageType ?? "",
+    input.captureKind ?? "",
+    ...parts.map((part) => part ?? ""),
+  ].join("|"));
+}
+
+function cappedOpenLanePayload(input: MarketListingInput) {
+  return {
+    sourceName: input.sourceName,
+    listingUrl: input.listingUrl,
+    pageType: input.pageType,
+    captureKind: input.captureKind,
+    outcomeConfidence: input.outcomeConfidence,
+    title: input.title,
+    year: input.year,
+    make: input.make,
+    model: input.model,
+    trim: input.trim,
+    vin: input.vin,
+    mileageKm: input.mileageKm,
+    currentBid: input.currentBid,
+    buyNowPrice: input.buyNowPrice,
+    soldPriceCandidate: input.soldPriceCandidate,
+    finalBidAmount: input.finalBidAmount,
+    negotiatedAmount: input.negotiatedAmount,
+    counterOfferAmount: input.counterOfferAmount,
+    acceptedAmount: input.acceptedAmount,
+    buyPriceAuction: input.buyPriceAuction,
+    totalInvoiceAmount: input.totalInvoiceAmount,
+    finalAcquisitionCost: input.finalAcquisitionCost,
+    priceSemantics: input.priceSemantics,
+    outcomeEvidence: input.outcomeEvidence,
+    openlaneMetadata: input.openlaneMetadata,
+    warnings: input.warnings?.slice(0, 20),
+    missingData: input.missingData?.slice(0, 20),
+  };
+}
+
+function compactDbRow(row: Record<string, unknown>) {
+  return Object.fromEntries(Object.entries(row).filter(([, value]) => value !== undefined));
+}
+
+function hashText(value: string) {
+  return createHash("sha256").update(value).digest("hex");
 }
 
 function sourceToPurchaseSource(sourceName: string) {
