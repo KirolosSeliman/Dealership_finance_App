@@ -79,8 +79,11 @@ test("OpenLane training dataset SQL export only uses verified outcomes and sales
   assert.match(migration, /dealer_flow_retail_training/i);
   assert.match(migration, /is_training_eligible\s*=\s*true/i);
   assert.match(migration, /capture_kind\s+in\s+\('verified_outcome','manual_confirmation'\)/i);
+  assert.match(migration, /left join vehicle_valuations vv on vv\.id = s\.market_snap_valuation_id/i);
+  assert.match(migration, /vv\.confidence_score as market_snap_confidence_score/i);
   assert.doesNotMatch(migration, /current_bid\s+as\s+label/i);
   assert.doesNotMatch(migration, /sold_price_candidate\s+as\s+label/i);
+  assert.doesNotMatch(migration, /s\.market_snap_confidence_score/i);
 });
 
 function activeObservation(overrides: Record<string, unknown> = {}) {

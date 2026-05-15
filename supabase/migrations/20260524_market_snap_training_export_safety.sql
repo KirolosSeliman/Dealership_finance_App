@@ -96,8 +96,10 @@ select
   s.sale_date as label_date,
   s.vehicle_total_cost,
   s.market_snap_estimated_retail_value,
-  s.market_snap_confidence_score
+  vv.confidence_score as market_snap_confidence_score
 from sales s
+left join vehicle_valuations vv on vv.id = s.market_snap_valuation_id
+  and vv.organization_id = s.organization_id
 where s.status = 'active'
   and s.voided_at is null
   and s.paper_sale_price is not null
