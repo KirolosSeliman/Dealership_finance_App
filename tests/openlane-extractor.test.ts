@@ -6,6 +6,15 @@ import test from "node:test";
 
 const repoRoot = process.cwd();
 const require = createRequire(import.meta.url);
+const classifier = require("../browser-extension/src/openlane-page-classifier.js") as {
+  classifyOpenLanePageFromHtml: (html: string, href?: string) => {
+    pageType: string;
+    captureKind: string;
+    confidenceScore: number;
+    evidence: Array<{ marker: string }>;
+    warnings: string[];
+  };
+};
 const extractor = require("../browser-extension/src/openlane-extractor.js") as {
   extractOpenLaneFixture: (html: string, href?: string) => Record<string, unknown>;
   isOpenLaneVehiclePage: (doc: { body?: { innerText?: string; textContent?: string }; images?: unknown[] }, href?: string) => boolean;
@@ -60,6 +69,41 @@ test("OpenLane extractor captures condition reports and missing data", () => {
   assert.ok((missing.missingData as string[]).includes("vin"));
   assert.ok((missing.missingData as string[]).includes("listedPrice"));
   assert.ok((missing.warnings as string[]).some((warning) => /Carfax/i.test(warning)));
+});
+
+test("OpenLane page classifier separates active observations from outcome pages", () => {
+  const active = classifier.classifyOpenLanePageFromHtml(fixture("openlane-basic.html"), "https://www.openlane.ca/vehicle/123");
+  const purchaseList = classifier.classifyOpenLanePageFromHtml(fixture("openlane-purchase-list.html"), "https://www.openlane.ca/purchases");
+  const feeDetails = classifier.classifyOpenLanePageFromHtml(fixture("openlane-fee-details.html"), "https://www.openlane.ca/purchases/123/fees");
+  const postSalePending = classifier.classifyOpenLanePageFromHtml(fixture("openlane-post-sale-pending.html"), "https://www.openlane.ca/post-sale/123");
+  const postSaleAccepted = classifier.classifyOpenLanePageFromHtml(fixture("openlane-post-sale-accepted.html"), "https://www.openlane.ca/post-sale/456");
+  const unknown = classifier.classifyOpenLanePageFromHtml(fixture("openlane-unknown.html"), "https://www.openlane.ca/search");
+
+  assert.equal(active.pageType, "active_listing");
+  assert.equal(active.captureKind, "observation");
+  assert.ok(active.evidence.some((item) => item.marker === "current_bid"));
+  assert.equal(purchaseList.pageType, "purchase_list");
+  assert.equal(purchaseList.captureKind, "candidate_outcome");
+  assert.equal(feeDetails.pageType, "fee_details");
+  assert.equal(feeDetails.captureKind, "verified_outcome");
+  assert.ok(feeDetails.confidenceScore >= 80);
+  assert.equal(postSalePending.pageType, "post_sale");
+  assert.equal(postSalePending.captureKind, "candidate_outcome");
+  assert.equal(postSaleAccepted.pageType, "post_sale");
+  assert.equal(postSaleAccepted.captureKind, "verified_outcome");
+  assert.equal(unknown.pageType, "unknown");
+  assert.equal(unknown.captureKind, "observation");
+  assert.ok(unknown.warnings.some((warning) => /not enough OpenLane page markers/i.test(warning)));
+});
+
+test("OpenLane extractor includes classifier result in listing payload", () => {
+  const listing = extractor.extractOpenLaneFixture(fixture("openlane-fee-details.html"), "https://www.openlane.ca/purchases/123/fees");
+
+  assert.equal(listing.pageType, "fee_details");
+  assert.equal(listing.captureKind, "verified_outcome");
+  assert.equal(listing.outcomeConfidence, "verified");
+  assert.ok(Array.isArray(listing.outcomeEvidence));
+  assert.equal((listing.openlaneMetadata as { classification?: { pageType?: string } }).classification?.pageType, "fee_details");
 });
 
 function fixture(name: string) {

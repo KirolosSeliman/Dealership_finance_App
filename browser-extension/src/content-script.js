@@ -65,7 +65,8 @@
   }
 
   function isSupportedOpenLaneVehiclePage() {
-    return window.DealerFlowOpenLaneExtractor.isOpenLaneVehiclePage(document, location.href);
+    const classification = classifyOpenLanePage();
+    return classification.pageType !== "unknown" && window.DealerFlowOpenLaneExtractor.isOpenLaneVehiclePage(document, location.href);
   }
 
   function ensureWidget() {
@@ -174,10 +175,22 @@
   }
 
   function extractListing() {
-    return window.DealerFlowOpenLaneExtractor.extractOpenLaneListing(document, location.href, {
+    const classification = classifyOpenLanePage();
+    const listing = window.DealerFlowOpenLaneExtractor.extractOpenLaneListing(document, location.href, {
       includeMediaUrls: STATE.settings?.includeMediaUrls !== false,
       includeRawVisibleText: STATE.settings?.includeRawVisibleText !== false,
     });
+    return {
+      ...listing,
+      pageType: classification.pageType,
+      captureKind: classification.captureKind,
+      outcomeConfidence: classification.outcomeConfidence,
+      openlaneMetadata: { ...(listing.openlaneMetadata || {}), classification },
+    };
+  }
+
+  function classifyOpenLanePage() {
+    return window.DealerFlowOpenLanePageClassifier.classifyOpenLanePage(document, location.href);
   }
 
   function isVehicleListing(listing) {

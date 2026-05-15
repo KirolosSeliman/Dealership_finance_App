@@ -16,6 +16,7 @@
       "js": [
         "src/storage.js",
         "src/api-client.js",
+        "src/openlane-page-classifier.js",
         "src/openlane-extractor.js",
         "src/market-snap-widget.js",
         "src/content-script.js"

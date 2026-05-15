@@ -30,6 +30,7 @@
 
   function extractOpenLaneListing(doc = document, href = location.href, options = {}) {
     const rawVisibleText = extractVisibleText(doc);
+    const classification = classifyOpenLanePage(doc, href);
     const labelValues = extractLabelValueMap(doc, rawVisibleText);
     const title = bestTitle(doc, rawVisibleText);
     const decodedTitle = extractYearMakeModelTrim(title || rawVisibleText);
@@ -54,6 +55,10 @@
       sourceName: "OpenLane",
       sourceType: "auction",
       marketType: "auction_market",
+      pageType: classification.pageType,
+      captureKind: classification.captureKind,
+      outcomeConfidence: classification.outcomeConfidence,
+      outcomeEvidence: classificationEvidence(classification),
       listingUrl: href,
       capturedAt: new Date().toISOString(),
       title,
@@ -104,9 +109,10 @@
       videoCount: media.videos.length,
       description: conditionReportText || rawVisibleText.slice(0, 3000),
       rawVisibleText: options.includeRawVisibleText === false ? undefined : rawVisibleText.slice(0, RAW_TEXT_LIMIT),
-      extractedFields: Object.fromEntries(labelValues.entries()),
+      openlaneMetadata: { classification },
+      extractedFields: { ...Object.fromEntries(labelValues.entries()), classification },
       missingData,
-      warnings,
+      warnings: [...warnings, ...(classification.warnings || [])],
       extractionConfidenceScore: 0,
     };
 
@@ -115,6 +121,7 @@
     if (listing.imageCount === 0) warnings.push("No visible OpenLane photos were found in the page DOM.");
     if (!conditionReportText) warnings.push("Condition report text was not visible or could not be isolated.");
 
+    listing.warnings = [...warnings, ...(classification.warnings || [])];
     listing.extractionConfidenceScore = calculateExtractionConfidence(listing);
     return compact(listing);
   }
@@ -122,6 +129,8 @@
   function isOpenLaneVehiclePage(doc = document, href = location.href) {
     const host = new URL(href).hostname.toLowerCase();
     if (!host.includes("openlane.")) return false;
+    const classification = classifyOpenLanePage(doc, href);
+    if (classification.pageType && classification.pageType !== "unknown") return true;
     const text = extractVisibleText(doc);
     const markers = [
       /\bVIN\b/i.test(text) || /[A-HJ-NPR-Z0-9]{17}/i.test(text),
@@ -132,6 +141,32 @@
       doc.images.length >= 2,
     ];
     return markers.filter(Boolean).length >= 2;
+  }
+
+  function classifyOpenLanePage(doc = document, href = location.href) {
+    return root.DealerFlowOpenLanePageClassifier?.classifyOpenLanePage?.(doc, href) || {
+      pageType: "unknown",
+      captureKind: "observation",
+      outcomeConfidence: "low",
+      confidenceScore: 0,
+      evidence: [],
+      warnings: ["OpenLane page classifier was not available."],
+    };
+  }
+
+  function classificationEvidence(classification) {
+    return (classification.evidence || []).map((item) => ({
+      evidenceType: evidenceTypeForClassification(classification),
+      sourceText: item.sourceText || item.marker,
+      capturedAt: new Date().toISOString(),
+      confidenceScore: classification.confidenceScore,
+    }));
+  }
+
+  function evidenceTypeForClassification(classification) {
+    if (classification.pageType === "fee_details") return "fee_details_page";
+    if (classification.pageType === "post_sale" && classification.captureKind === "verified_outcome") return "accepted_negotiation";
+    return "visible_page_text";
   }
 
   function isLikelyOpenLaneVehiclePage(doc = document, href = location.href) {
@@ -456,6 +491,7 @@
   const api = {
     extractOpenLaneListing,
     extractOpenLaneFixture,
+    classifyOpenLanePage,
     isOpenLaneVehiclePage,
     isLikelyOpenLaneVehiclePage,
     extractVisibleText,
