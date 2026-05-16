@@ -21,7 +21,9 @@
     lotNumber: ["Lot", "Lot Number"],
     stockNumber: ["Stock", "Stock Number"],
     trim: ["Trim"],
-    currentBid: ["Current Bid", "Current Offer", "Best Offer", "Offer", "My Offer", "Top Bid", "Offre actuelle", "Meilleure offre", "Mise actuelle", "Bid"],
+    currentBid: ["Current Bid", "Top Bid", "Mise actuelle", "Bid"],
+    currentOffer: ["Current Offer", "Offer", "My Offer", "Offre actuelle"],
+    bestOffer: ["Best Offer", "Meilleure offre"],
     buyNowPrice: ["Buy Now", "Buy It Now"],
     reservePrice: ["Reserve", "Reserve Price"],
     titleStatus: ["Title", "Title Status"],
@@ -50,8 +52,10 @@
     const postSaleOutcome = extractPostSaleOutcome(mainVisibleText, classification);
     const isPurchaseOutcomePage = ["fee_details", "purchase_detail", "purchase_info", "purchase_list", "post_sale"].includes(classification.pageType);
     const currentBid = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(labelValues, OPENLANE_LABELS.currentBid);
+    const currentOffer = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(labelValues, OPENLANE_LABELS.currentOffer);
+    const bestOffer = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(labelValues, OPENLANE_LABELS.bestOffer);
     const buyNowPrice = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(labelValues, OPENLANE_LABELS.buyNowPrice);
-    const listedPrice = isPurchaseOutcomePage ? undefined : buyNowPrice || currentBid || moneyFrom(mainVisibleText.match(moneyRegex())?.[0]);
+    const listedPrice = isPurchaseOutcomePage ? undefined : buyNowPrice || currentBid || currentOffer || bestOffer || moneyFrom(mainVisibleText.match(moneyRegex())?.[0]);
     const mileageKm = mileageResult.mileageKm;
     const vin = vinResult.vin;
     const province = provinceFrom(firstLabel(labelValues, OPENLANE_LABELS.location) || mainVisibleText);
@@ -103,6 +107,8 @@
       stockNumber: firstLabel(labelValues, OPENLANE_LABELS.stockNumber),
       listedPrice,
       currentBid,
+      currentOffer,
+      bestOffer,
       buyNowPrice,
       soldPriceCandidate: postSaleOutcome.soldPriceCandidate,
       finalBidAmount: postSaleOutcome.finalBidAmount,
@@ -490,6 +496,8 @@
     const searchLabels = labelNames.length ? labelNames : [
       ...OPENLANE_LABELS.buyNowPrice,
       ...OPENLANE_LABELS.currentBid,
+      ...OPENLANE_LABELS.currentOffer,
+      ...OPENLANE_LABELS.bestOffer,
       ...OPENLANE_LABELS.reservePrice,
     ];
     return moneyFrom(firstLabel(values, searchLabels));

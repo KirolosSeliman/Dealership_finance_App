@@ -95,6 +95,33 @@ test("OpenLane identity debug explains missing VIN when no candidate exists", ()
   assert.ok((listing.missingData as string[]).includes("vin"));
 });
 
+test("OpenLane active offer labels remain observation-only and separate from current bid", () => {
+  const listing = extractor.extractOpenLaneFixture(`
+    <main class="vdp-page">
+      <section class="vehicle-hero" data-vin="2T3R1RFV5MW123456">
+        <h1>2021 Toyota RAV4 LE</h1>
+        <p>Odometer 52,300 KM</p>
+      </section>
+      <section class="bid-panel">
+        <dl>
+          <dt>Current offer</dt>
+          <dd>$13,400</dd>
+          <dt>Best Offer</dt>
+          <dd>$13,900</dd>
+        </dl>
+      </section>
+    </main>
+  `, "https://app.openlane.ca/vdp/offer-observation?tab=active");
+
+  assert.equal(listing.pageType, "active_listing");
+  assert.equal(listing.captureKind, "observation");
+  assert.equal(listing.currentBid, undefined);
+  assert.equal(listing.currentOffer, 13400);
+  assert.equal(listing.bestOffer, 13900);
+  assert.equal(listing.buyPriceAuction, undefined);
+  assert.equal(listing.finalAcquisitionCost, undefined);
+});
+
 test("OpenLane extractor reads core auction fields from fixture HTML", () => {
   const listing = extractor.extractOpenLaneFixture(fixture("openlane-basic.html"), "https://www.openlane.ca/vehicle/123");
   const pageContext = listing.pageContext as Record<string, unknown>;

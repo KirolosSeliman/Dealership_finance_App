@@ -169,6 +169,8 @@ export interface MarketListingInput {
   priceSemantics?: Partial<Record<
     | "listedPrice"
     | "currentBid"
+    | "currentOffer"
+    | "bestOffer"
     | "buyNowPrice"
     | "reservePrice"
     | "soldPriceCandidate"
@@ -208,6 +210,8 @@ export interface MarketListingInput {
   listedPrice?: number;
   // Current bids are observations/features only. They must never be promoted to final ML labels.
   currentBid?: number;
+  currentOffer?: number;
+  bestOffer?: number;
   buyNowPrice?: number;
   reservePrice?: number;
   soldPriceCandidate?: number;

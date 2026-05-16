@@ -36,6 +36,8 @@ export const priceSemanticValues = [
 export const priceSemanticFields = [
   "listedPrice",
   "currentBid",
+  "currentOffer",
+  "bestOffer",
   "buyNowPrice",
   "reservePrice",
   "soldPriceCandidate",
@@ -207,6 +209,8 @@ const marketListingPayloadBaseSchema = z.object({
   cylinders: z.coerce.number().int().min(0).max(24).optional(),
   listedPrice: money,
   currentBid: money,
+  currentOffer: money,
+  bestOffer: money,
   buyNowPrice: money,
   reservePrice: money,
   soldPriceCandidate: money,
@@ -346,12 +350,14 @@ function enforceCaptureContract(value: Partial<z.infer<typeof marketListingPaylo
     });
   }
 
-  if (value.priceSemantics?.currentBid && value.priceSemantics.currentBid !== "observation") {
-    context.addIssue({
-      code: "custom",
-      path: ["priceSemantics", "currentBid"],
-      message: "currentBid is an observation feature only and cannot be marked as a label.",
-    });
+  for (const field of ["currentBid", "currentOffer", "bestOffer"] as const) {
+    if (value.priceSemantics?.[field] && value.priceSemantics[field] !== "observation") {
+      context.addIssue({
+        code: "custom",
+        path: ["priceSemantics", field],
+        message: `${field} is an observation feature only and cannot be marked as a label.`,
+      });
+    }
   }
 
   for (const field of outcomePriceFields) {

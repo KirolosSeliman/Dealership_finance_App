@@ -149,6 +149,30 @@ test("Market Snap validation accepts currentBid as observation without treating 
   assert.equal(result.data?.finalBidAmount, undefined);
 });
 
+test("Market Snap validation treats active offers as observation-only price fields", () => {
+  const result = marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "active_listing",
+    captureKind: "observation",
+    title: "2021 Toyota RAV4 LE",
+    year: 2021,
+    make: "Toyota",
+    model: "RAV4",
+    currentOffer: 13_400,
+    bestOffer: 13_900,
+    priceSemantics: {
+      currentOffer: "observation",
+      bestOffer: "observation",
+    },
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.data?.currentOffer, 13_400);
+  assert.equal(result.data?.bestOffer, 13_900);
+});
+
 test("Market Snap validation accepts purchase fee payloads with itemized acquisition costs", () => {
   const result = marketListingPayloadSchema.safeParse({
     organizationId,
