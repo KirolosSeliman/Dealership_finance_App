@@ -1,0 +1,15 @@
+{
+  "vehicle": {
+    "vin": "5NMS3CAD8LH123456",
+    "photos": [
+      "https://pub-us.kar-media.com/vehicle/5NMS3CAD8LH123456/front.jpg",
+      "https://app.openlane.ca/openlane-logo.svg"
+    ],
+    "condition": {
+      "mechanical": "Check engine light on",
+      "disclosure": "Accident repair reported"
+    }
+  },
+  "sessionToken": "eyJaaaaaaaaaaaaaaaaaaaaaaaa.eyJbbbbbbbbbbbbbbbbbbbbbbbb.cccccccccccccccccccccccc",
+  "buyerEmail": "buyer@example.com"
+}

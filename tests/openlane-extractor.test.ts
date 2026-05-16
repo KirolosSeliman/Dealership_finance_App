@@ -27,6 +27,11 @@ const extractor = require("../browser-extension/src/openlane-extractor.js") as {
   extractOpenLaneFixture: (html: string, href?: string) => Record<string, unknown>;
   isOpenLaneVehiclePage: (doc: { body?: { innerText?: string; textContent?: string }; images?: unknown[] }, href?: string) => boolean;
 };
+const networkObserver = require("../browser-extension/src/openlane-network-observer.js") as {
+  extractCandidatesFromNetworkPayload: (payload: unknown, url?: string) => { vinCandidates: Array<{ vin: string }>; mediaCandidates: Array<{ url: string }>; conditionCandidates: Array<{ text: string }>; sanitizedKeys: string[] };
+  sanitizeNetworkPayload: (payload: unknown) => unknown;
+  mergeNetworkEvidenceIntoListing: (listing: Record<string, unknown>, evidence: unknown[]) => Record<string, unknown>;
+};
 
 test("OpenLane extractor identifies supported vehicle pages", () => {
   const html = fixture("openlane-basic.html");
@@ -120,6 +125,83 @@ test("OpenLane active offer labels remain observation-only and separate from cur
   assert.equal(listing.bestOffer, 13900);
   assert.equal(listing.buyPriceAuction, undefined);
   assert.equal(listing.finalAcquisitionCost, undefined);
+});
+
+test("OpenLane realistic fixture suite protects critical live extraction regressions", () => {
+  const activeEn = extractor.extractOpenLaneFixture(fixture("openlane-vdp-active-en.html"), "https://app.openlane.ca/vdp/silverado?tab=active");
+  const activeFr = extractor.extractOpenLaneFixture(fixture("openlane-vdp-active-fr-touareg.html"), "https://app.openlane.ca/vdp/touareg?tab=active");
+  const purchased = extractor.extractOpenLaneFixture(fixture("openlane-vdp-purchased-selling-price.html"), "https://app.openlane.ca/vdp/3KPFL4A72HE119966");
+  const fees = extractor.extractOpenLaneFixture(fixture("openlane-fee-details-realistic.html"), "https://app.openlane.ca/purchases/hyundai/fees");
+  const carfax = extractor.extractOpenLaneFixture(fixture("openlane-carfax-url.html"), "https://app.openlane.ca/vdp/rav4");
+  const media = extractor.extractOpenLaneFixture(fixture("openlane-media-lazy-gallery.html"), "https://app.openlane.ca/vdp/rav4");
+  const hiddenDisclosures = extractor.extractOpenLaneFixture(fixture("openlane-hidden-tabs-disclosures.html"), "https://app.openlane.ca/vdp/santa-fe");
+  const pending = extractor.extractOpenLaneFixture(fixture("openlane-post-sale-pending.html"), "https://app.openlane.ca/post-sale/camry");
+  const accepted = extractor.extractOpenLaneFixture(fixture("openlane-post-sale-accepted.html"), "https://app.openlane.ca/post-sale/camry");
+
+  assert.equal(activeEn.pageType, "active_listing");
+  assert.equal(activeEn.captureKind, "observation");
+  assert.equal(activeEn.vin, "1GCUDEE88RZ142915");
+  assert.match(String(activeEn.title), /2024 Chevrolet Silverado/);
+  assert.doesNotMatch(String(activeEn.title), /2026 at 8:00 pm/);
+  assert.equal(activeEn.currentBid, 50_700);
+  assert.equal(activeEn.buyPriceAuction, undefined);
+  assert.equal(activeEn.carfaxUrl, "https://www.carfax.ca/report/SILVERADO123");
+  assert.ok((activeEn.photos as Array<{ url: string }>).every((photo) => !/openlane-logo/i.test(photo.url)));
+
+  assert.equal(activeFr.pageType, "active_listing");
+  assert.notEqual(activeFr.pageType, "purchase_list");
+  assert.match(String(activeFr.title), /2013 Volkswagen Touareg/);
+  assert.equal(activeFr.vin, "WVGEP9BP4DD012345");
+  assert.equal(activeFr.mileageKm, 176240);
+  assert.equal(activeFr.currentOffer, 6500);
+  assert.equal(activeFr.bestOffer, 6800);
+
+  assert.notEqual(purchased.pageType, "purchase_list");
+  assert.equal(purchased.buyPriceAuction, 4000);
+  assert.equal(purchased.currentBid, undefined);
+
+  assert.equal(fees.buyPriceAuction, 6_900);
+  assert.equal(fees.totalInvoiceAmount, 8_166);
+  assert.notEqual(fees.buyPriceAuction, fees.totalInvoiceAmount);
+
+  assert.equal(carfax.carfaxUrl, "https://www.carfax.ca/report/REALCARFAX123");
+  assert.equal(carfax.carfaxUrlStatus, "url_found");
+
+  assert.equal(media.imageCount, 13);
+  assert.equal(media.videoCount, 1);
+  assert.ok((media.photos as Array<{ url: string }>).some((photo) => /pub-us\.kar-media\.com/.test(photo.url)));
+  assert.ok((media.photos as Array<{ url: string }>).every((photo) => !/openlane-logo|\/vdp\/null|fonts\.gstatic\.com/i.test(photo.url)));
+
+  const condition = hiddenDisclosures.condition as { dealerNotes?: string; mechanicalDisclosures?: string[]; highRiskTerms?: string[] };
+  assert.match(String(condition.dealerNotes), /Mechanical inspection recommended/i);
+  assert.ok(condition.mechanicalDisclosures?.some((item) => /Check engine light/i.test(item)));
+  assert.ok(condition.highRiskTerms?.some((term) => /engine/i.test(term)));
+  assert.equal((hiddenDisclosures.warnings as string[]).some((warning) => /Condition report text was not visible/i.test(warning)), false);
+
+  assert.equal(pending.captureKind, "candidate_outcome");
+  assert.equal(pending.finalBidAmount, undefined);
+  assert.equal(accepted.captureKind, "verified_outcome");
+  assert.equal(accepted.finalBidAmount, 17_900);
+});
+
+test("OpenLane network fixture extracts sanitized vehicle evidence without private fields", () => {
+  const payload = JSON.parse(fixture("openlane-network-vdp-response.json"));
+  const candidates = networkObserver.extractCandidatesFromNetworkPayload(payload, "https://app.openlane.ca/api/vdp/5NMS3CAD8LH123456");
+  const sanitized = JSON.stringify(networkObserver.sanitizeNetworkPayload(payload));
+  const merged = networkObserver.mergeNetworkEvidenceIntoListing({ sourceName: "OpenLane", listingUrl: "https://app.openlane.ca/vdp/santa-fe" }, [{
+    capturedAt: "2026-05-15T12:00:00.000Z",
+    endpointPattern: "app.openlane.ca/api/vdp/:id",
+    sanitizedKeys: candidates.sanitizedKeys,
+    candidates,
+  }]);
+
+  assert.equal(candidates.vinCandidates[0]?.vin, "5NMS3CAD8LH123456");
+  assert.ok(candidates.mediaCandidates.some((item) => /pub-us\.kar-media\.com/.test(item.url)));
+  assert.equal(candidates.mediaCandidates.some((item) => /openlane-logo/i.test(item.url)), false);
+  assert.ok(candidates.conditionCandidates.some((item) => /Check engine light/i.test(item.text)));
+  assert.doesNotMatch(sanitized, /buyer@example\.com|eyJaaaaaaaa/i);
+  assert.equal(merged.vin, "5NMS3CAD8LH123456");
+  assert.match(String(merged.conditionReportText), /Check engine light/);
 });
 
 test("OpenLane extractor reads core auction fields from fixture HTML", () => {
