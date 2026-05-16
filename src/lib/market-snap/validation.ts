@@ -57,8 +57,8 @@ export const priceSemanticFields = [
 
 const optionalText = z.string().trim().max(4000).optional().or(z.literal(""));
 const shortText = z.string().trim().max(240).optional().or(z.literal(""));
-const urlText = z.string().trim().url().optional().or(z.literal(""));
 const httpUrl = z.string().trim().url().refine((value) => ["http:", "https:"].includes(new URL(value).protocol), "URL must use http or https");
+const optionalHttpUrl = httpUrl.optional().or(z.literal(""));
 const money = z.coerce.number().finite().min(0).max(99_999_999).optional();
 const score = z.coerce.number().finite().min(0).max(100).optional();
 const conditionSeverity = z.enum(["none", "light", "moderate", "severe", "unknown"]);
@@ -66,6 +66,21 @@ const rustSeverity = z.enum(["none", "light", "moderate", "severe", "structural"
 const diagnosticSeverity = z.enum(["low", "medium", "high", "critical"]);
 const textList = z.array(z.string().trim().min(1).max(80)).max(30).optional();
 const longerTextList = z.array(z.string().trim().min(1).max(240)).max(50).optional();
+const unsafeJsonKey = /(auth|authorization|cookie|token|secret|credential|session|password|csrf|jwt|bearer)/i;
+const unsafeUrlProtocol = /^\s*(javascript|data|vbscript):/i;
+const urlLikeKey = /\b(url|href|src|thumbnail|poster)\b/i;
+
+const safeDeepRecord = (maxBytes: number, maxArrayLength = 120) => z.record(z.string(), z.unknown()).superRefine((value, context) => {
+  const size = jsonByteLength(value);
+  if (size > maxBytes) {
+    context.addIssue({
+      code: "custom",
+      message: `Structured extraction payload is too large (${size} bytes, max ${maxBytes}).`,
+    });
+  }
+  validateSafeJsonValue(value, context, { maxArrayLength });
+});
+
 const marketListingPhotoSchema = z.object({
   url: httpUrl,
   thumbnailUrl: httpUrl.optional(),
@@ -91,7 +106,7 @@ const captureEvidenceSchema = z.object({
     "user_confirmation",
   ]),
   sourceText: z.string().trim().max(1000).optional(),
-  sourceUrl: urlText,
+  sourceUrl: optionalHttpUrl,
   capturedAt: z.string().datetime().optional(),
   confidenceScore: score,
 }).strict();
@@ -180,6 +195,70 @@ export const diagnosticFeaturesSchema = z.object({
   estimatedRepairCostFromCodes: money,
 }).strict().optional();
 
+function jsonByteLength(value: unknown) {
+  try {
+    return Buffer.byteLength(JSON.stringify(value) ?? "", "utf8");
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+function validateSafeJsonValue(value: unknown, context: z.RefinementCtx, options: { maxArrayLength: number }, path: string[] = [], depth = 0) {
+  if (depth > 8) {
+    context.addIssue({ code: "custom", path, message: "Structured extraction payload is nested too deeply." });
+    return;
+  }
+
+  if (typeof value === "string") {
+    if (value.length > 4000) {
+      context.addIssue({ code: "custom", path, message: "Structured extraction strings must be capped at 4,000 characters." });
+    }
+    if (unsafeUrlProtocol.test(value)) {
+      context.addIssue({ code: "custom", path, message: "Structured extraction payload cannot contain script, data, or vbscript URLs." });
+    }
+    if (urlLikeKey.test(path.at(-1) ?? "") && looksLikeUrl(value)) {
+      const protocol = safeProtocol(value);
+      if (protocol && protocol !== "http:" && protocol !== "https:") {
+        context.addIssue({ code: "custom", path, message: "Structured extraction URL fields must use http or https." });
+      }
+    }
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length > options.maxArrayLength) {
+      context.addIssue({ code: "custom", path, message: `Structured extraction arrays are capped at ${options.maxArrayLength} items.` });
+    }
+    value.slice(0, options.maxArrayLength + 1).forEach((item, index) => validateSafeJsonValue(item, context, options, path.concat(String(index)), depth + 1));
+    return;
+  }
+
+  if (!value || typeof value !== "object") return;
+
+  const entries = Object.entries(value);
+  if (entries.length > 120) {
+    context.addIssue({ code: "custom", path, message: "Structured extraction objects are capped at 120 keys." });
+  }
+  for (const [key, item] of entries.slice(0, 121)) {
+    if (unsafeJsonKey.test(key)) {
+      context.addIssue({ code: "custom", path: path.concat(key), message: "Structured extraction payload cannot contain credential or session fields." });
+    }
+    validateSafeJsonValue(item, context, options, path.concat(key), depth + 1);
+  }
+}
+
+function looksLikeUrl(value: string) {
+  return /^[a-z][a-z0-9+.-]*:/i.test(value) || /^https?:\/\//i.test(value);
+}
+
+function safeProtocol(value: string) {
+  try {
+    return new URL(value).protocol;
+  } catch {
+    return "";
+  }
+}
+
 const marketListingPayloadBaseSchema = z.object({
   organizationId: z.string().uuid(),
   sourceName: z.string().trim().min(1).max(120),
@@ -189,7 +268,7 @@ const marketListingPayloadBaseSchema = z.object({
   outcomeConfidence: z.enum(outcomeConfidenceLevels).optional(),
   priceSemantics: z.partialRecord(z.enum(priceSemanticFields), z.enum(priceSemanticValues)).optional(),
   outcomeEvidence: z.array(captureEvidenceSchema).max(20).optional(),
-  listingUrl: urlText,
+  listingUrl: optionalHttpUrl,
   title: optionalText,
   description: optionalText,
   year: z.coerce.number().int().min(1900).max(2100).optional(),
@@ -252,7 +331,7 @@ const marketListingPayloadBaseSchema = z.object({
   odometerAnnouncements: longerTextList,
   tireCondition: shortText,
   keysAvailable: z.union([z.boolean(), z.string().trim().max(240)]).optional().or(z.literal("")),
-  carfaxUrl: urlText,
+  carfaxUrl: optionalHttpUrl,
   carfaxMentioned: z.boolean().optional(),
   carfaxAvailable: z.boolean().optional(),
   carfaxUrlStatus: z.enum(["url_found", "text_only", "missing"]).optional(),
@@ -260,16 +339,16 @@ const marketListingPayloadBaseSchema = z.object({
   videos: z.array(marketListingVideoSchema).max(50).optional(),
   videoCount: z.coerce.number().int().min(0).max(100).optional(),
   rawVisibleText: z.string().trim().max(12_000).optional().or(z.literal("")),
-  pageContext: z.record(z.string(), z.unknown()).optional(),
-  identity: z.record(z.string(), z.unknown()).optional(),
-  auctionObservation: z.record(z.string(), z.unknown()).optional(),
-  purchaseOutcome: z.record(z.string(), z.unknown()).optional(),
-  condition: z.record(z.string(), z.unknown()).optional(),
-  media: z.record(z.string(), z.unknown()).optional(),
-  carfax: z.record(z.string(), z.unknown()).optional(),
-  debug: z.record(z.string(), z.unknown()).optional(),
-  openlaneMetadata: z.record(z.string(), z.unknown()).optional(),
-  extractedFields: z.record(z.string(), z.unknown()).optional(),
+  pageContext: safeDeepRecord(12_000).optional(),
+  identity: safeDeepRecord(12_000).optional(),
+  auctionObservation: safeDeepRecord(12_000).optional(),
+  purchaseOutcome: safeDeepRecord(12_000).optional(),
+  condition: safeDeepRecord(20_000).optional(),
+  media: safeDeepRecord(40_000, 240).optional(),
+  carfax: safeDeepRecord(12_000).optional(),
+  debug: safeDeepRecord(30_000, 160).optional(),
+  openlaneMetadata: safeDeepRecord(40_000, 200).optional(),
+  extractedFields: safeDeepRecord(30_000, 160).optional(),
   missingData: z.array(z.string().trim().min(1).max(80)).max(50).optional(),
   warnings: z.array(z.string().trim().min(1).max(240)).max(50).optional(),
   extractionConfidenceScore: score,
@@ -411,7 +490,7 @@ export const authorizedExtractionRequestSchema = z.object({
   organizationId: z.string().uuid(),
   html: z.string().min(1).max(1_000_000),
   sourceName: z.string().trim().min(1).max(120),
-  sourceUrl: urlText,
+  sourceUrl: optionalHttpUrl,
   sourceType: z.enum(marketSourceTypes).optional(),
   permissionBasis: z.string().trim().min(3).max(500),
   robotsAllowed: z.boolean().optional(),

@@ -390,8 +390,9 @@ function capRawVisibleText(value?: string) {
 }
 
 function openLaneMetadata(input: MarketListingInput) {
+  const baseMetadata = capOpenLaneStorageValue(input.openlaneMetadata ?? {});
   return {
-    ...(input.openlaneMetadata ?? {}),
+    ...(typeof baseMetadata === "object" && !Array.isArray(baseMetadata) ? baseMetadata : {}),
     pageType: input.pageType,
     captureKind: input.captureKind,
     outcomeConfidence: input.outcomeConfidence,
@@ -447,10 +448,10 @@ function openLaneMetadata(input: MarketListingInput) {
     keysAvailable: input.keysAvailable,
     carfaxMentioned: input.carfaxMentioned,
     carfaxUrlStatus: input.carfaxUrlStatus,
-    extractedFields: input.extractedFields ?? {},
+    extractedFields: capOpenLaneStorageValue(input.extractedFields ?? {}),
     missingData: input.missingData ?? [],
     videoCount: input.videoCount ?? input.videos?.length ?? 0,
-    extractionContract: {
+    extractionContract: capOpenLaneStorageValue({
       pageContext: input.pageContext,
       identity: input.identity,
       auctionObservation: input.auctionObservation,
@@ -459,7 +460,7 @@ function openLaneMetadata(input: MarketListingInput) {
       media: input.media,
       carfax: input.carfax,
       debug: input.debug,
-    },
+    }),
   };
 }
 
@@ -635,11 +636,31 @@ function cappedOpenLanePayload(input: MarketListingInput) {
     totalInvoiceAmount: input.totalInvoiceAmount,
     finalAcquisitionCost: input.finalAcquisitionCost,
     priceSemantics: input.priceSemantics,
-    outcomeEvidence: input.outcomeEvidence,
-    openlaneMetadata: input.openlaneMetadata,
+    outcomeEvidence: input.outcomeEvidence?.slice(0, 20),
+    openlaneMetadata: openLaneMetadata(input),
     warnings: input.warnings?.slice(0, 20),
     missingData: input.missingData?.slice(0, 20),
   };
+}
+
+function capOpenLaneStorageValue(value: unknown, depth = 0): unknown {
+  if (depth > 6) return "[depth_capped]";
+  if (typeof value === "string") return sanitizeStorageString(value);
+  if (typeof value === "number" || typeof value === "boolean" || value === null || value === undefined) return value;
+  if (Array.isArray(value)) return value.slice(0, 120).map((item) => capOpenLaneStorageValue(item, depth + 1));
+  if (typeof value !== "object") return undefined;
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).slice(0, 120).map(([key, item]) => [
+    key,
+    /token|secret|password|credential|authorization|cookie|session/i.test(key) ? "[redacted]" : capOpenLaneStorageValue(item, depth + 1),
+  ]));
+}
+
+function sanitizeStorageString(value: string) {
+  const text = value
+    .replace(/\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b/g, "[redacted]")
+    .replace(/\bsk_(?:live|test|proj)_[A-Za-z0-9_-]{16,}\b/g, "[redacted]")
+    .slice(0, 4000);
+  return /^\s*(javascript|data|vbscript):/i.test(text) ? "[unsafe_url_removed]" : text;
 }
 
 function compactDbRow(row: Record<string, unknown>) {

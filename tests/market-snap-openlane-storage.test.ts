@@ -26,6 +26,10 @@ test("OpenLane capture storage writes active listing observations separately fro
   assert.equal(observation.capture_kind, "observation");
   assert.equal(observation.captured_by, capturedBy);
   assert.equal((observation.capped_payload as { rawVisibleText?: string }).rawVisibleText, undefined);
+  const cappedMetadata = (observation.capped_payload as { openlaneMetadata: { networkEvidence: unknown[]; extractedFields: { sessionToken?: string; unsafeUrl?: string } } }).openlaneMetadata;
+  assert.equal(cappedMetadata.networkEvidence.length, 120);
+  assert.equal(cappedMetadata.extractedFields.sessionToken, "[redacted]");
+  assert.equal(cappedMetadata.extractedFields.unsafeUrl, "[unsafe_url_removed]");
 });
 
 test("OpenLane capture storage writes candidate and verified outcomes without overwriting observations", async () => {
@@ -85,7 +89,15 @@ function activeObservation(): MarketListingInput {
     buyNowPrice: 22_900,
     imageCount: 12,
     capturedAt: "2026-05-14T12:00:00.000Z",
-    openlaneMetadata: { disclosureCount: 3 },
+    openlaneMetadata: {
+      disclosureCount: 3,
+      networkEvidence: Array.from({ length: 140 }, (_, index) => ({ endpointPattern: `app.openlane.ca/api/vdp/${index}`, candidateCounts: { vin: 1 } })),
+      sectionMapSummary: { summary: { vehicleHero: { textLength: 120, ignored: false } } },
+    },
+    extractedFields: {
+      sessionToken: "eyJaaaaaaaaaaaaaaaaaaaaaaaa.eyJbbbbbbbbbbbbbbbbbbbbbbbb.cccccccccccccccccccccccc",
+      unsafeUrl: "data:image/png;base64,AAAA",
+    },
     rawVisibleText: "visible text must not be stored in the capture payload",
     priceSemantics: { currentBid: "observation", buyNowPrice: "observation" },
   };

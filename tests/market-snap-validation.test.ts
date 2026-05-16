@@ -65,14 +65,27 @@ test("Market Snap validation accepts rich OpenLane extension payloads", () => {
     condition: { conditionReportText: "Minor scratches on rear bumper.", evidence: [] },
     media: { photoCountVisible: 1, videoCountVisible: 1, evidence: [] },
     carfax: { mentioned: true, available: true, url: "https://www.carfax.ca/report/ABC123", urlStatus: "url_found", evidence: [] },
-    debug: { warnings: [], rejectedCandidates: [] },
-    openlaneMetadata: { runNumber: "42", lane: "A" },
+    debug: {
+      sectionMapSummary: { summary: { vehicleHero: { textLength: 120, ignored: false } } },
+      candidateScores: [{ text: "2021 Toyota RAV4", source: "section-map:vehicleHero", score: 95 }],
+      rejectedCandidates: [{ text: "Sales history of similar vehicles", rejectedReason: "market_guide_heading" }],
+      warnings: [],
+    },
+    openlaneMetadata: {
+      runNumber: "42",
+      lane: "A",
+      sectionMapSummary: { summary: { vehicleHero: { textLength: 120, ignored: false }, sidebar: { textLength: 240, ignored: true } } },
+      networkEvidence: [{ endpointPattern: "app.openlane.ca/api/vdp/:id", candidateCounts: { vin: 1, media: 2, condition: 1 } }],
+      mediaFiltering: { rejected: [{ url: "https://www.openlane.ca/openlane-logo.svg", reason: "logo_or_icon" }] },
+    },
     extractedFields: { lane: "A", runNumber: "42" },
     extractionConfidenceScore: 88,
   });
 
   assert.equal(result.success, true);
   assert.equal(result.data?.carfaxUrlStatus, "url_found");
+  assert.equal(Array.isArray(result.data?.debug?.candidateScores), true);
+  assert.equal(Array.isArray(result.data?.openlaneMetadata?.networkEvidence), true);
 });
 
 test("Market Snap validation rejects unsafe OpenLane media URLs and oversized raw text", () => {
@@ -94,6 +107,44 @@ test("Market Snap validation rejects unsafe OpenLane media URLs and oversized ra
     make: "Toyota",
     model: "RAV4",
     rawVisibleText: "x".repeat(12_001),
+  }).success, false);
+});
+
+test("Market Snap validation rejects unsafe deep extraction URLs and oversized debug payloads", () => {
+  assert.equal(marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    year: 2021,
+    make: "Toyota",
+    model: "RAV4",
+    debug: {
+      candidateScores: Array.from({ length: 161 }, (_, index) => ({ text: `candidate ${index}`, score: 1 })),
+    },
+  }).success, false);
+
+  assert.equal(marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    year: 2021,
+    make: "Toyota",
+    model: "RAV4",
+    openlaneMetadata: {
+      networkEvidence: [{ endpointPattern: "app.openlane.ca/api/vdp/:id", sessionToken: "must-not-arrive" }],
+    },
+  }).success, false);
+
+  assert.equal(marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    year: 2021,
+    make: "Toyota",
+    model: "RAV4",
+    media: {
+      rejectedMedia: [{ url: "data:image/png;base64,AAAA", reason: "inline_blob" }],
+    },
   }).success, false);
 });
 
