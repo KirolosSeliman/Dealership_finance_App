@@ -32,6 +32,7 @@
     const classification = listing.openlaneMetadata?.classification || listing.extractedFields?.classification || {};
     const debug = listing.extractedFields?.debug || {};
     const mediaFiltering = listing.openlaneMetadata?.mediaFiltering || {};
+    const conditionDetails = listing.openlaneMetadata?.conditionDetails || {};
     return {
       pageContext: compact({
         pageType: listing.pageType,
@@ -80,16 +81,19 @@
         evidence: listing.outcomeEvidence || [],
       }),
       condition: compact({
-        knownHistoryItems: listing.declarations,
-        safetyDisclosures: listing.structuralAnnouncements,
-        mechanicalDisclosures: listing.mechanicalAnnouncements,
-        exteriorDisclosures: listing.damageAnnouncements,
-        interiorDisclosures: listing.interiorAnnouncements,
-        tireWheelDisclosures: listing.tireCondition ? [listing.tireCondition] : undefined,
-        obd2Status: listing.diagnosticFeatures?.diagnosticCodesAvailable === true ? "available" : listing.diagnosticFeatures?.diagnosticCodesAvailable === false ? "not_visible" : undefined,
-        dealerNotes: listing.openlaneMetadata?.dealerNotes,
-        conditionReportText: listing.conditionReportText,
-        evidence: [
+        knownHistoryItems: conditionDetails.knownHistoryItems || listing.declarations,
+        safetyDisclosures: conditionDetails.safetyDisclosures || listing.safetyDisclosures || listing.structuralAnnouncements,
+        mechanicalDisclosures: conditionDetails.mechanicalDisclosures || listing.mechanicalAnnouncements,
+        exteriorDisclosures: conditionDetails.exteriorDisclosures || listing.damageAnnouncements,
+        interiorDisclosures: conditionDetails.interiorDisclosures || listing.interiorAnnouncements,
+        tireWheelDisclosures: conditionDetails.tireWheelDisclosures || (listing.tireCondition ? [listing.tireCondition] : undefined),
+        obd2Status: conditionDetails.obd2Status || (listing.diagnosticFeatures?.diagnosticCodesAvailable === true ? "available" : listing.diagnosticFeatures?.diagnosticCodesAvailable === false ? "not_visible" : undefined),
+        dealerNotes: conditionDetails.dealerNotes || listing.openlaneMetadata?.dealerNotes,
+        sellerBroadcasts: conditionDetails.sellerBroadcasts,
+        qaSummary: conditionDetails.qaSummary,
+        highRiskTerms: conditionDetails.highRiskTerms,
+        conditionReportText: conditionDetails.conditionReportText || listing.conditionReportText,
+        evidence: conditionDetails.evidence || [
           listing.conditionReportText ? { source: "condition_report_text", sourceText: listing.conditionReportText.slice(0, 1000) } : undefined,
           ...(listing.declarations || []).slice(0, 10).map((item) => ({ source: "declarations", sourceText: item })),
         ].filter(Boolean),

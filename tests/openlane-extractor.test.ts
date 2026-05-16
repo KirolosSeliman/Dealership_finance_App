@@ -205,6 +205,40 @@ test("OpenLane extractor captures condition reports and missing data", () => {
   assert.ok((missing.warnings as string[]).some((warning) => /Carfax/i.test(warning)));
 });
 
+test("OpenLane extractor structures bilingual condition disclosures and dealer notes", () => {
+  const listing = extractor.extractOpenLaneFixture(fixture("openlane-condition-disclosures-french.html"), "https://app.openlane.ca/vdp/french-condition");
+  const condition = listing.condition as {
+    knownHistoryItems?: string[];
+    safetyDisclosures?: string[];
+    mechanicalDisclosures?: string[];
+    exteriorDisclosures?: string[];
+    interiorDisclosures?: string[];
+    tireWheelDisclosures?: string[];
+    obd2Status?: string;
+    dealerNotes?: string;
+    qaSummary?: string;
+    conditionReportText?: string;
+    highRiskTerms?: string[];
+    evidence?: unknown[];
+  };
+
+  assert.ok(condition.knownHistoryItems?.some((item) => /Historique D.accidents Antécédents - Oui/i.test(item)));
+  assert.ok(condition.knownHistoryItems?.some((item) => /Rien n.a été signalé/i.test(item)));
+  assert.ok(condition.safetyDisclosures?.some((item) => /Pare-Brise - Fissuré/i.test(item)));
+  assert.ok(condition.mechanicalDisclosures?.some((item) => /Moteur Requiert Réparations/i.test(item)));
+  assert.ok(condition.mechanicalDisclosures?.some((item) => /check engine light on/i.test(item)));
+  assert.ok(condition.exteriorDisclosures?.some((item) => /Travaux De Peinture Antérieurs/i.test(item)));
+  assert.ok(condition.interiorDisclosures?.some((item) => /Rien n.a été signalé/i.test(item)));
+  assert.ok(condition.tireWheelDisclosures?.some((item) => /Deux pneus usés/i.test(item)));
+  assert.equal(condition.obd2Status, "not_visible");
+  assert.match(String(condition.dealerNotes), /inspection mécanique est recommandée/);
+  assert.match(String(condition.qaSummary), /voyant check engine/i);
+  assert.match(String(condition.conditionReportText), /Pare-Brise - Fissuré/);
+  assert.ok(condition.highRiskTerms?.some((term) => /engine|moteur/i.test(term)));
+  assert.ok((condition.evidence || []).length > 0);
+  assert.equal((listing.warnings as string[]).some((warning) => /Condition report text was not visible/i.test(warning)), false);
+});
+
 test("OpenLane page classifier separates active observations from outcome pages", () => {
   const active = classifier.classifyOpenLanePageFromHtml(fixture("openlane-basic.html"), "https://www.openlane.ca/vehicle/123");
   const purchaseList = classifier.classifyOpenLanePageFromHtml(fixture("openlane-purchase-list.html"), "https://www.openlane.ca/purchases");

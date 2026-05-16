@@ -44,7 +44,8 @@
     const mediaRejected = [...(media.rejected || []), ...(doc.__openlaneMediaRejected || [])];
     const mediaCounts = extractMediaCounts(mainVisibleText);
     const carfax = extractCarfaxInfo(doc, href, rawVisibleText);
-    const conditionReportText = extractConditionText(mainVisibleText, labelValues);
+    const conditionDetails = extractConditionDetails(textRegions.sectionMap, mainVisibleText, labelValues);
+    const conditionReportText = [conditionDetails.conditionReportText, extractConditionText(mainVisibleText, labelValues)].filter(Boolean).join(" | ") || undefined;
     const purchaseEconomics = extractPurchaseEconomics(mainVisibleText, classification);
     const postSaleOutcome = extractPostSaleOutcome(mainVisibleText, classification);
     const isPurchaseOutcomePage = ["fee_details", "purchase_detail", "purchase_info", "purchase_list", "post_sale"].includes(classification.pageType);
@@ -55,10 +56,10 @@
     const vin = vinResult.vin;
     const province = provinceFrom(firstLabel(labelValues, OPENLANE_LABELS.location) || mainVisibleText);
     const disclosureText = findDisclosureText(mainVisibleText);
-    const declarations = splitAnnouncements(labelValues.get("declarations") || findSectionText(mainVisibleText, "Declarations") || disclosureText);
-    const damageAnnouncements = splitAnnouncements(findSectionText(mainVisibleText, "Damage"));
-    const mechanicalAnnouncements = splitAnnouncements(findSectionText(mainVisibleText, "Mechanical"));
-    const structuralAnnouncements = splitAnnouncements(findSectionText(mainVisibleText, "Structural"));
+    const declarations = conditionDetails.knownHistoryItems || splitAnnouncements(labelValues.get("declarations") || findSectionText(mainVisibleText, "Declarations") || disclosureText);
+    const damageAnnouncements = conditionDetails.exteriorDisclosures || splitAnnouncements(findSectionText(mainVisibleText, "Damage"));
+    const mechanicalAnnouncements = conditionDetails.mechanicalDisclosures || splitAnnouncements(findSectionText(mainVisibleText, "Mechanical"));
+    const structuralAnnouncements = conditionDetails.safetyDisclosures || splitAnnouncements(findSectionText(mainVisibleText, "Structural"));
     const odometerAnnouncements = splitAnnouncements(findSectionText(mainVisibleText, "Odometer"));
     const disclosureCount = countNearLabel(mainVisibleText, "disclosures?");
     const warnings = [];
@@ -127,8 +128,10 @@
       damageAnnouncements,
       mechanicalAnnouncements,
       structuralAnnouncements,
+      safetyDisclosures: conditionDetails.safetyDisclosures,
+      interiorAnnouncements: conditionDetails.interiorDisclosures,
       odometerAnnouncements,
-      tireCondition: firstLabel(labelValues, OPENLANE_LABELS.tireCondition),
+      tireCondition: conditionDetails.tireWheelDisclosures?.join(" | ") || firstLabel(labelValues, OPENLANE_LABELS.tireCondition),
       keysAvailable: firstLabel(labelValues, OPENLANE_LABELS.keysAvailable),
       carfaxMentioned: carfax.carfaxMentioned,
       carfaxUrl: carfax.carfaxUrl,
@@ -152,6 +155,8 @@
         },
         mediaFiltering: { rejected: mediaRejected },
         carfaxEvidence: carfax.carfaxEvidence,
+        conditionDetails,
+        dealerNotes: conditionDetails.dealerNotes,
         purchaseStatus: purchaseEconomics.purchaseStatus,
         purchaseEconomics: purchaseEconomics.metadata,
         negotiation: postSaleOutcome.metadata,
@@ -631,6 +636,99 @@
       if (/carfax/i.test(source)) evidence.push(`${source.match(/<[^>]+>/)?.[0] || ""} ${stripTags(source)}`.slice(0, 500));
     }
     return evidence;
+  }
+
+  function extractConditionDetails(sectionMap, text, labels) {
+    const zones = sectionMap?.zones || {};
+    const knownHistoryText = zones.knownHistory?.text || findSectionByHeadings(text, ["Known history", "Antécédents connus", "Antecedents connus"]);
+    const disclosureText = zones.disclosuresCondition?.text || findSectionByHeadings(text, ["Disclosures and conditions", "Disclosures", "Divulgations et condition"]);
+    const dealerNotes = cleanConditionSection(zones.dealerNotes?.text || findSectionByHeadings(text, ["Note from selling dealer", "Note du concessionnaire vendeur", "Dealer notes"]));
+    const qaSummary = cleanConditionSection(zones.qaSection?.text || findSectionByHeadings(text, ["Q and A", "Q&A", "Q et R"]));
+    const sellerBroadcasts = cleanConditionSection(findSectionByHeadings(text, ["Seller broadcasts", "Broadcasts", "Messages du vendeur"]));
+    const knownHistoryItems = conditionItems(knownHistoryText, ["Known history", "Antécédents connus", "Antecedents connus"]);
+    const safetyDisclosures = conditionItems(subsectionText(disclosureText, ["In relation to safety", "En relation avec la sécurité", "En relation avec la securite"]));
+    const mechanicalDisclosures = conditionItems(subsectionText(disclosureText, ["Mechanical", "Mécanique", "Mecanique"]));
+    const exteriorDisclosures = conditionItems(subsectionText(disclosureText, ["Exterior", "Extérieur", "Exterieur"]));
+    const interiorDisclosures = conditionItems(subsectionText(disclosureText, ["Interior", "Intérieur", "Interieur"]));
+    const tireWheelDisclosures = conditionItems(subsectionText(disclosureText, ["Tires and wheels", "Pneus et roues"]));
+    const obd2Text = subsectionText(disclosureText, ["OBD2 Reader", "Lecteur OBD2"]);
+    const obd2Status = obd2Text ? (/nothing reported|rien n.a été signalé|rien n.a ete signale/i.test(obd2Text) ? "nothing_reported" : /non disponible|not available|not visible|unavailable/i.test(obd2Text) ? "not_visible" : "visible_text") : undefined;
+    const fallbackDeclarations = conditionItems(labels.get("declarations"));
+    const allConditionText = [
+      knownHistoryItems.length ? `Known history: ${knownHistoryItems.join(" | ")}` : "",
+      safetyDisclosures.length ? `Safety: ${safetyDisclosures.join(" | ")}` : "",
+      mechanicalDisclosures.length ? `Mechanical: ${mechanicalDisclosures.join(" | ")}` : "",
+      exteriorDisclosures.length ? `Exterior: ${exteriorDisclosures.join(" | ")}` : "",
+      interiorDisclosures.length ? `Interior: ${interiorDisclosures.join(" | ")}` : "",
+      tireWheelDisclosures.length ? `Tires and wheels: ${tireWheelDisclosures.join(" | ")}` : "",
+      obd2Text ? `OBD2 Reader: ${cleanConditionSection(obd2Text)}` : "",
+      dealerNotes ? `Dealer notes: ${dealerNotes}` : "",
+      sellerBroadcasts ? `Seller broadcasts: ${sellerBroadcasts}` : "",
+      qaSummary ? `Q and A: ${qaSummary}` : "",
+      fallbackDeclarations.length ? `Declarations: ${fallbackDeclarations.join(" | ")}` : "",
+    ].filter(Boolean).join(" | ").slice(0, 4000);
+    const highRiskTerms = highRiskConditionTerms(allConditionText);
+    const evidence = [
+      knownHistoryText ? { source: "known_history_zone", sourceText: cleanConditionSection(knownHistoryText).slice(0, 500) } : undefined,
+      disclosureText ? { source: "disclosures_condition_zone", sourceText: cleanConditionSection(disclosureText).slice(0, 800) } : undefined,
+      dealerNotes ? { source: "dealer_notes_zone", sourceText: dealerNotes.slice(0, 500) } : undefined,
+      qaSummary ? { source: "qa_zone", sourceText: qaSummary.slice(0, 500) } : undefined,
+    ].filter(Boolean);
+
+    return compact({
+      knownHistoryItems: knownHistoryItems.length ? knownHistoryItems : fallbackDeclarations.length ? fallbackDeclarations : undefined,
+      safetyDisclosures,
+      mechanicalDisclosures,
+      exteriorDisclosures,
+      interiorDisclosures,
+      tireWheelDisclosures,
+      obd2Status,
+      dealerNotes,
+      sellerBroadcasts,
+      qaSummary,
+      conditionReportText: allConditionText || undefined,
+      highRiskTerms,
+      evidence,
+    });
+  }
+
+  function findSectionByHeadings(text, headings) {
+    for (const heading of headings) {
+      const found = findSectionText(text, heading);
+      if (found) return `${heading}\n${found}`;
+    }
+    return "";
+  }
+
+  function subsectionText(text, headings) {
+    const source = String(text || "");
+    const headingPattern = headings.map(escapeRegExp).join("|");
+    const nextHeading = [
+      "Known history", "Antécédents connus", "Disclosures and conditions", "Divulgations et condition",
+      "In relation to safety", "En relation avec la sécurité", "Mechanical", "Mécanique", "Exterior", "Extérieur",
+      "Interior", "Intérieur", "Tires and wheels", "Pneus et roues", "OBD2 Reader", "Lecteur OBD2",
+      "Note from selling dealer", "Note du concessionnaire vendeur", "Q and A", "Q et R",
+    ].map(escapeRegExp).join("|");
+    const match = source.match(new RegExp(`(?:^|\\n)\\s*(?:${headingPattern})\\s*[:\\n]?\\s*([\\s\\S]{0,1200}?)(?=\\n\\s*(?:${nextHeading})\\b|$)`, "i"));
+    return cleanConditionSection(match?.[1] || "");
+  }
+
+  function conditionItems(text, headingsToRemove = []) {
+    const headingSet = new Set(headingsToRemove.map((heading) => normalizeSpace(heading).toLowerCase()));
+    return cleanConditionSection(text)
+      .split(/\n|\s+\|\s+/)
+      .map((line) => normalizeSpace(line.replace(/^[-•]\s*/, "")))
+      .filter((line) => line && !headingSet.has(line.toLowerCase()))
+      .slice(0, 30);
+  }
+
+  function cleanConditionSection(text) {
+    return normalizeSpace(String(text || "").replace(/\r/g, "\n"));
+  }
+
+  function highRiskConditionTerms(text) {
+    const riskTerms = ["engine", "moteur", "transmission", "accident", "cracked windshield", "pare-brise", "rust", "rouille", "structural", "structurel", "check engine", "salvage", "rebuilt"];
+    return riskTerms.filter((term) => new RegExp(escapeRegExp(term), "i").test(text));
   }
 
   function extractConditionText(text, labels) {
