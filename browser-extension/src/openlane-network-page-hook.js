@@ -3,10 +3,12 @@
   window.__dealerFlowOpenLaneNetworkHook = true;
 
   const MAX_TEXT_LENGTH = 120000;
-  const RELEVANT_URL = /openlane|kar|vehicle|vdp|listing|inventory|purchase|condition|disclosure|media|photo|image/i;
+  const ALLOWED_HOST = /(^|\.)openlane\.(ca|com)$|kar-media\.com$/i;
+  const ALLOW_ENDPOINT = /\b(vdp|vehicle|vehicles|listing|inventory|purchase|purchases|condition|disclosure|media|photo|image|bid|offer|fee|fees|invoice|post-sale|sale)\b/i;
+  const DENY_ENDPOINT = /\b(auth|oauth|login|logout|session|profile|account|payment|billing|user|users|me|token|cookie|password)\b/i;
 
   function emit(url, contentType, body) {
-    if (!RELEVANT_URL.test(String(url || ""))) return;
+    if (!isAllowedEndpoint(url)) return;
     window.postMessage({ source: "dealer-flow-openlane-network", url: String(url || ""), contentType: String(contentType || ""), body }, window.location.origin);
   }
 
@@ -50,5 +52,18 @@
     } catch {
       // Passive observation only; never break page fetch.
     }
+  }
+
+  function isAllowedEndpoint(url) {
+    let parsed;
+    try {
+      parsed = new URL(String(url || ""), window.location.href);
+    } catch {
+      return false;
+    }
+    const target = `${parsed.hostname}${parsed.pathname}`.toLowerCase();
+    if (!ALLOWED_HOST.test(parsed.hostname)) return false;
+    if (DENY_ENDPOINT.test(target)) return false;
+    return ALLOW_ENDPOINT.test(target);
   }
 })();
