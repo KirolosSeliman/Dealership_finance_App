@@ -159,6 +159,7 @@
           ignoredFooterSample: textRegions.footerText?.slice(0, 300),
           ignoredMarketGuideSample: textRegions.marketGuideText?.slice(0, 300),
         },
+        sectionMapSummary: summarizeSectionMapForDebug(textRegions.sectionMap),
         mediaFiltering: { rejected: mediaRejected },
         carfaxEvidence: carfax.carfaxEvidence,
         conditionDetails,
@@ -216,6 +217,20 @@
       doc.images.length >= 2,
     ];
     return markers.filter(Boolean).length >= 2;
+  }
+
+  function summarizeSectionMapForDebug(sectionMap) {
+    if (!sectionMap) return undefined;
+    return {
+      isVdpUrl: Boolean(sectionMap.isVdpUrl),
+      summary: sectionMap.summary || {},
+      ignoredEvidence: (sectionMap.ignoredEvidence || []).slice(0, 8),
+      zoneEvidence: Object.fromEntries(Object.entries(sectionMap.zones || {}).map(([name, zone]) => [name, {
+        ignored: Boolean(zone?.ignored),
+        textLength: zone?.text?.length || 0,
+        evidence: (zone?.evidence || []).slice(0, 3),
+      }])),
+    };
   }
 
   function classifyOpenLanePage(doc = document, href = location.href) {

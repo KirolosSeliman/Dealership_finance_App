@@ -260,11 +260,43 @@
 
   async function copyExtractedJson() {
     const listing = STATE.listing || extractListing();
+    await navigator.clipboard.writeText(JSON.stringify(buildCopyPayload(listing), null, 2));
+    STATE.widget?.render({ status: "ready", listing, valuation: STATE.valuation, message: "Extracted JSON copied." });
+  }
+
+  function buildCopyPayload(listing) {
     const classification = listing.openlaneMetadata?.classification || null;
     const outcomeEvidence = listing.outcomeEvidence || classification?.evidence || [];
-    const debug = listing.extractedFields?.debug || null;
-    await navigator.clipboard.writeText(JSON.stringify({ listing, valuation: STATE.valuation || null, classification, outcomeEvidence, debug, backendResponse: STATE.backendResponse, captureResponse: STATE.captureResponse }, null, 2));
-    STATE.widget?.render({ status: "ready", listing, valuation: STATE.valuation, message: "Extracted JSON copied." });
+    const debug = listing.extractedFields?.debug || {};
+    const normalizedExtraction = {
+      pageContext: listing.pageContext || null,
+      identity: listing.identity || null,
+      auctionObservation: listing.auctionObservation || null,
+      purchaseOutcome: listing.purchaseOutcome || null,
+      condition: listing.condition || null,
+      media: listing.media || null,
+      carfax: listing.carfax || null,
+      debug: listing.debug || null,
+    };
+    const sectionMap = {
+      summary: listing.openlaneMetadata?.sectionMapSummary || listing.debug?.sectionMapSummary || null,
+      textRegions: listing.openlaneMetadata?.textRegions || null,
+      ignoredEvidence: classification?.ignoredEvidence || debug.ignoredEvidence || [],
+    };
+    return sanitizeDebugValue({
+      normalizedExtraction,
+      legacyPayload: listing,
+      valuation: STATE.valuation || null,
+      classification,
+      sectionMap,
+      candidateScores: debug.candidateScores || debug.titleCandidates || [],
+      safeExpansion: listing.openlaneMetadata?.safeExpansion || STATE.safeExpansion || null,
+      networkEvidence: listing.openlaneMetadata?.networkEvidence || [],
+      outcomeEvidence,
+      debug,
+      backendResponse: STATE.backendResponse,
+      captureResponse: STATE.captureResponse,
+    });
   }
 
   function hideCurrentPage() {
@@ -312,13 +344,24 @@
     console.info("URL", location.href);
     console.info("pageType", listing.pageType, "captureKind", listing.captureKind, "outcomeConfidence", listing.outcomeConfidence);
     console.info("evidence markers", listing.openlaneMetadata?.classification?.evidence || []);
+    console.info("section map", sanitizeDebugValue(listing.openlaneMetadata?.sectionMapSummary || listing.debug?.sectionMapSummary || listing.openlaneMetadata?.textRegions || {}));
     console.info("main text sample", debug.mainTextSample || listing.openlaneMetadata?.classification?.mainTextSample);
     console.info("ignored evidence", debug.ignoredEvidence || listing.openlaneMetadata?.classification?.ignoredEvidence || []);
     console.info("chosen title evidence", debug.titleCandidates || []);
     console.info("VIN evidence", debug.vinCandidates || []);
     console.info("price evidence", debug.priceCandidates || []);
+    console.info("condition evidence", sanitizeDebugValue(listing.condition?.evidence || listing.openlaneMetadata?.conditionDetails?.evidence || []));
+    console.info("safe expansion", sanitizeDebugValue(listing.openlaneMetadata?.safeExpansion || STATE.safeExpansion || null));
+    console.info("network candidates", sanitizeDebugValue(debug.networkCandidates || listing.openlaneMetadata?.networkEvidence || []));
     console.info("media filtering stats", debug.mediaRejected || []);
     console.groupEnd?.();
+  }
+
+  function sanitizeDebugValue(value) {
+    if (typeof value === "string") return value.replace(/\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b/g, "[redacted]").replace(/\bsk_(?:live|test|proj)_[A-Za-z0-9_-]{16,}\b/g, "[redacted]");
+    if (Array.isArray(value)) return value.map(sanitizeDebugValue);
+    if (!value || typeof value !== "object") return value;
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, /token|secret|password|credential|authorization|cookie/i.test(key) ? "[redacted]" : sanitizeDebugValue(item)]));
   }
 
   function formatError(error) {

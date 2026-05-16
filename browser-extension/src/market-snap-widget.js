@@ -38,7 +38,9 @@
             <label>Organization ID <input name="organizationId" id="organizationId" type="text" /></label>
             <label><input name="autoAnalyze" type="checkbox" /> Auto-analyze</label>
             <label><input name="autoCapture" type="checkbox" /> Capture observations/outcomes</label>
+            <label><input name="autoSave" type="checkbox" /> Auto-save to Deal Radar</label>
             <label><input name="modelImprovementOptIn" type="checkbox" /> Model improvement opt-in</label>
+            <label><input name="observePageNetworkData" type="checkbox" /> Observe page network data</label>
             <label><input name="includeMediaUrls" type="checkbox" /> Include media URLs</label>
             <label><input name="includeRawVisibleText" type="checkbox" /> Include raw text</label>
             <label><input name="debugMode" type="checkbox" /> Debug mode</label>
@@ -160,6 +162,8 @@
     if (!listing) return "";
     return [
       metric("Current bid", money(listing.currentBid || listing.listedPrice)),
+      metric("Current offer", money(listing.currentOffer)),
+      metric("Best offer", money(listing.bestOffer)),
       metric("Buy now", money(listing.buyNowPrice)),
       metric("Sold candidate", money(listing.soldPriceCandidate)),
       metric("Buy price auction", money(listing.buyPriceAuction)),
@@ -186,6 +190,7 @@
   function messagesHtml(listing, valuation, message) {
     const items = [
       message,
+      ...conditionWarningItems(listing).slice(0, 3),
       ...(valuation?.warnings || listing?.warnings || []).slice(0, 4),
       ...(valuation?.missingData || listing?.missingData || []).slice(0, 4).map((field) => `Missing: ${field}`),
     ].filter(Boolean);
@@ -199,16 +204,46 @@
     const missing = valuation?.missingData || listing?.missingData || [];
     const evidence = listing?.outcomeEvidence || listing?.openlaneMetadata?.classification?.evidence || [];
     const debug = listing?.extractedFields?.debug || {};
+    const condition = listing?.condition || listing?.openlaneMetadata?.conditionDetails || {};
+    const rejectedCandidates = (listing?.debug?.rejectedCandidates || []).length || (debug.titleCandidates || []).filter((candidate) => candidate.rejectedReason).length + (debug.mediaRejected || []).length;
+    const networkCandidates = debug.networkCandidates || {};
+    const safeExpansion = listing?.openlaneMetadata?.safeExpansion;
     return [
       `<p>Confidence: ${escapeHtml(valuation?.confidenceScore ?? listing?.extractionConfidenceScore ?? "-")}</p>`,
       `<p>Warnings: ${escapeHtml(warnings.length)}</p>`,
       `<p>Missing: ${escapeHtml(missing.length)}</p>`,
       `<p>Classifier: ${escapeHtml(listing?.pageType || "-")} / ${escapeHtml(listing?.captureKind || "-")}</p>`,
+      `<p>Top evidence: ${escapeHtml(topEvidenceLabel(evidence, debug))}</p>`,
       `<p>VIN evidence: ${escapeHtml(debug.vinCandidates?.[0]?.source || listing?.extractedFields?.vinEvidence?.matchedLabel || "-")}</p>`,
       `<p>Price evidence: ${escapeHtml(debug.priceCandidates?.[0]?.label || "-")}</p>`,
+      `<p>Condition warnings: ${escapeHtml(conditionWarningItems(listing).length)}</p>`,
+      `<p>Dealer notes: ${escapeHtml(condition.dealerNotes ? "visible" : "-")}</p>`,
+      `<p>Rejected candidates: ${escapeHtml(rejectedCandidates)}</p>`,
+      `<p>Network candidates: ${escapeHtml(networkCandidateCount(networkCandidates))}</p>`,
+      `<p>Safe expansion: ${escapeHtml(safeExpansion ? `${safeExpansion.clicked?.length || 0} opened / ${safeExpansion.skipped?.length || 0} skipped` : "-")}</p>`,
       `<p>Evidence</p>`,
       `<ul>${evidence.slice(0, 4).map((item) => `<li>${escapeHtml(item.sourceText || item.marker || item.evidenceType || "visible_page_text")}</li>`).join("")}</ul>`,
     ].join("");
+  }
+
+  function conditionWarningItems(listing) {
+    const condition = listing?.condition || listing?.openlaneMetadata?.conditionDetails || {};
+    return [
+      ...(condition.highRiskTerms || []).map((term) => `Condition risk: ${term}`),
+      condition.dealerNotes ? `Dealer notes: ${condition.dealerNotes}` : "",
+      ...(condition.mechanicalDisclosures || listing?.mechanicalAnnouncements || []).slice(0, 2).map((item) => `Mechanical: ${item}`),
+    ].filter(Boolean);
+  }
+
+  function topEvidenceLabel(evidence, debug) {
+    const title = debug.titleCandidates?.[0];
+    if (title?.text) return `${title.source || "title"} (${title.score || 0})`;
+    const first = evidence?.[0];
+    return first?.sourceText || first?.marker || first?.evidenceType || "-";
+  }
+
+  function networkCandidateCount(candidates) {
+    return Number(candidates.vinCandidates?.length || 0) + Number(candidates.mediaCandidates?.length || 0) + Number(candidates.conditionCandidates?.length || 0);
   }
 
   function priceStateLabel(listing) {
@@ -322,8 +357,8 @@
 
   function widgetCss() {
     return `
-      :host { all: initial; color-scheme: dark; }
-      .panel { position: fixed; left: 18px; bottom: 18px; z-index: 2147483647; width: min(360px, calc(100vw - 24px)); max-height: min(720px, calc(100vh - 32px)); overflow: hidden; border: 1px solid rgba(148,163,184,.32); border-radius: 10px; background: #08111d; color: #e5eef8; box-shadow: 0 20px 54px rgba(0,0,0,.38); font: 13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      :host { all: initial; color-scheme: dark; pointer-events: none; }
+      .panel { pointer-events: auto; position: fixed; left: 18px; bottom: 18px; z-index: 2147483647; width: min(360px, calc(100vw - 24px)); max-height: min(720px, calc(100vh - 32px)); overflow: hidden; border: 1px solid rgba(148,163,184,.32); border-radius: 10px; background: #08111d; color: #e5eef8; box-shadow: 0 20px 54px rgba(0,0,0,.38); font: 13px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
       header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-bottom: 1px solid rgba(148,163,184,.18); background: #0f172a; }
       strong { font-size: 14px; }
       .source { margin-left: 8px; color: #94a3b8; font-size: 12px; }

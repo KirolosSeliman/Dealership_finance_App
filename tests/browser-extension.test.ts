@@ -89,15 +89,23 @@ test("Market Snap widget exposes draggable, settings, and data-quality controls"
     "modelImprovementOptIn",
     "data-quality",
     "Price state",
+    "Current offer",
+    "Best offer",
     "pageType",
     "captureKind",
     "carfaxUrlStatus",
     "VIN evidence",
     "Price evidence",
+    "Condition warnings",
+    "Dealer notes",
+    "Rejected candidates",
+    "Network candidates",
+    "Safe expansion",
     "Sold candidate",
     "Buy price auction",
     "Invoice total",
     "Evidence",
+    "observePageNetworkData",
     "data-action=\"hide\"",
   ]) {
     assert.match(widget, new RegExp(marker));
@@ -106,20 +114,33 @@ test("Market Snap widget exposes draggable, settings, and data-quality controls"
   assert.match(contentScript, /hiddenPageUrl/);
   assert.match(contentScript, /backendResponse/);
   assert.match(contentScript, /captureResponse/);
+  assert.match(widget, /pointer-events:\s*none/);
+  assert.match(widget, /pointer-events:\s*auto/);
 });
 
-test("Market Snap copy JSON includes classification evidence and backend responses", () => {
+test("Market Snap copy JSON includes normalized extraction, runtime evidence, and backend responses", () => {
   const contentScript = readFileSync(join(repoRoot, "browser-extension/src/content-script.js"), "utf8");
 
+  assert.match(contentScript, /normalizedExtraction/);
+  assert.match(contentScript, /legacyPayload/);
   assert.match(contentScript, /classification/);
+  assert.match(contentScript, /sectionMap/);
+  assert.match(contentScript, /candidateScores/);
+  assert.match(contentScript, /safeExpansion/);
+  assert.match(contentScript, /networkEvidence/);
   assert.match(contentScript, /outcomeEvidence/);
   assert.match(contentScript, /debug/);
   assert.match(contentScript, /logExtractionDebug/);
   assert.match(contentScript, /ignored evidence/);
+  assert.match(contentScript, /section map/);
+  assert.match(contentScript, /safe expansion/);
+  assert.match(contentScript, /network candidates/);
+  assert.match(contentScript, /condition evidence/);
   assert.match(contentScript, /media filtering stats/);
   assert.match(contentScript, /backendResponse/);
   assert.match(contentScript, /captureResponse/);
-  assert.match(contentScript, /JSON\.stringify\(\{ listing, valuation/);
+  assert.match(contentScript, /buildCopyPayload/);
+  assert.match(contentScript, /sanitizeDebugValue/);
 });
 
 test("Market Snap analyze and save routes support extension CORS preflight", () => {

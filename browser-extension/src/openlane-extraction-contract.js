@@ -114,7 +114,8 @@
         evidence: carfaxEvidence(listing),
       }),
       debug: compact({
-        sectionMapSummary: listing.openlaneMetadata?.textRegions || classification.mainTextSample ? {
+        sectionMapSummary: listing.openlaneMetadata?.sectionMapSummary || listing.openlaneMetadata?.textRegions || classification.mainTextSample ? {
+          ...(listing.openlaneMetadata?.sectionMapSummary || {}),
           mainTextSample: listing.openlaneMetadata?.textRegions?.mainTextSample || classification.mainTextSample,
           ignoredSidebarSample: listing.openlaneMetadata?.textRegions?.ignoredSidebarSample,
           ignoredFooterSample: listing.openlaneMetadata?.textRegions?.ignoredFooterSample,
