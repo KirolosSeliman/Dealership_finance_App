@@ -25,7 +25,18 @@
       <label class="checkbox"><input id="debugMode" type="checkbox" /> Debug mode</label>
       <label class="checkbox"><input id="includeMediaUrls" type="checkbox" /> Include visible media URLs</label>
       <label class="checkbox"><input id="includeRawVisibleText" type="checkbox" /> Include capped visible page text</label>
-      <label class="checkbox"><input id="observePageNetworkData" type="checkbox" /> Observe page-generated OpenLane JSON responses</label>
+      <section class="notice">
+        <h2>Deep Capture Mode</h2>
+        <p>Deep Capture requires affirmative consent from an authorized Dealer Flow organization user before it is enabled. The client is authorized only to capture visible vehicle/listing/business data from pages they are allowed to access.</p>
+        <ul>
+          <li>Normal capture reads visible listing fields for Market Snap analysis.</li>
+          <li>Deep Capture may include safe read-only section expansion, visible page-loaded JSON response summaries, media URL metadata, condition/disclosure evidence, bid/offer observations, and visible post-sale or fee/invoice details.</li>
+          <li>Model improvement is a separate opt-in. Active current bids are not training labels.</li>
+          <li>No CAPTCHA bypass. No anti-bot bypass. No login-wall bypass. No hidden request manipulation.</li>
+          <li>No credential, cookie, token, or session capture. Consent can be withdrawn.</li>
+        </ul>
+      </section>
+      <label class="checkbox"><input id="observePageNetworkData" type="checkbox" /> Deep Capture: observe page-generated OpenLane JSON responses after consent</label>
       <p class="muted">Use only authorized/user-assisted listing capture. This extension does not bypass login walls, CAPTCHAs, rate limits, access controls, or platform restrictions.</p>
       <button id="saveSettings">Save settings</button>
       <p id="status" class="muted"></p>

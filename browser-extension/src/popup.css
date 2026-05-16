@@ -84,6 +84,33 @@ button {
   padding: 12px;
 }
 
+.notice {
+  display: grid;
+  gap: 8px;
+  border: 1px solid rgba(251, 191, 36, 0.32);
+  border-radius: 8px;
+  background: rgba(113, 63, 18, 0.22);
+  padding: 10px;
+}
+
+.notice h2 {
+  margin: 0;
+  color: #fde68a;
+  font-size: 13px;
+}
+
+.notice p,
+.notice ul {
+  margin: 0;
+  color: #e2e8f0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.notice ul {
+  padding-left: 18px;
+}
+
 .empty,
 #status,
 .muted {
