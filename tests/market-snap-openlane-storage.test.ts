@@ -25,11 +25,20 @@ test("OpenLane capture storage writes active listing observations separately fro
   assert.equal(observation.buy_now_price, 22_900);
   assert.equal(observation.capture_kind, "observation");
   assert.equal(observation.captured_by, capturedBy);
+  assert.equal(observation.retention_policy, "temporary_deep_capture");
+  assert.equal(observation.capture_level, "deep_capture");
+  assert.equal(observation.consent_id, "33333333-3333-4333-8333-333333333333");
+  assert.equal(observation.source_type, "auction");
+  assert.ok(typeof observation.expires_at === "string");
+  assert.ok(Number(observation.data_quality_score) >= 90);
+  assert.equal(observation.evidence_confidence_score, 92);
+  assert.equal((observation.field_evidence as { vin?: unknown[] }).vin?.length, 1);
   assert.equal((observation.capped_payload as { rawVisibleText?: string }).rawVisibleText, undefined);
   const cappedMetadata = (observation.capped_payload as { openlaneMetadata: { networkEvidence: unknown[]; extractedFields: { sessionToken?: string; unsafeUrl?: string } } }).openlaneMetadata;
   assert.equal(cappedMetadata.networkEvidence.length, 120);
-  assert.equal(cappedMetadata.extractedFields.sessionToken, "[redacted]");
+  assert.equal(cappedMetadata.extractedFields.sessionToken, undefined);
   assert.equal(cappedMetadata.extractedFields.unsafeUrl, "[unsafe_url_removed]");
+  assert.doesNotMatch(JSON.stringify(observation.capped_payload), /buyer@example\.com|514-555-1212|authorization/i);
 });
 
 test("OpenLane capture storage writes candidate and verified outcomes without overwriting observations", async () => {
@@ -47,11 +56,28 @@ test("OpenLane capture storage writes candidate and verified outcomes without ov
   const verified = client.tables.openlane_outcomes.rows.find((row) => row.outcome_type === "accepted_negotiation");
   const candidate = client.tables.openlane_outcomes.rows.find((row) => row.outcome_type === "post_sale_candidate");
   assert.equal(verified?.is_training_eligible, true);
+  assert.equal(verified?.model_improvement_opted_in, true);
+  assert.equal(verified?.retention_policy, "verified_outcome_business_record");
+  assert.equal(verified?.capture_level, "deep_capture");
+  assert.equal(verified?.consent_id, "33333333-3333-4333-8333-333333333333");
+  assert.ok(Number(verified?.evidence_confidence_score) >= 90);
   assert.equal(verified?.accepted_amount, 17_900);
   assert.equal(verified?.final_bid_amount, 17_900);
   assert.equal(candidate?.is_training_eligible, false);
+  assert.equal(candidate?.model_improvement_opted_in, true);
+  assert.equal(candidate?.retention_policy, "temporary_deep_capture");
   assert.equal(candidate?.sold_price_candidate, 18_250);
   assert.equal(candidate?.final_bid_amount, null);
+});
+
+test("OpenLane verified outcomes require model-improvement opt-in before training eligibility", async () => {
+  const client = new FakeCaptureClient();
+  await persistOpenLaneCapture(client as never, { ...acceptedOutcome(), captureScopes: ["post_sale_outcome_capture"] }, capturedBy);
+
+  const outcome = client.tables.openlane_outcomes.rows[0];
+  assert.equal(outcome.capture_kind, "verified_outcome");
+  assert.equal(outcome.model_improvement_opted_in, false);
+  assert.equal(outcome.is_training_eligible, false);
 });
 
 test("OpenLane capture storage migration is append-only, RLS-protected, and organization isolated", () => {
@@ -70,6 +96,25 @@ test("OpenLane capture storage migration is append-only, RLS-protected, and orga
   assert.match(migration, /unique \(organization_id, outcome_fingerprint\)/i);
 });
 
+test("Deep Capture retention migration links consent, caps evidence, and protects training labels", () => {
+  const migration = readFileSync(join(repoRoot, "supabase/migrations/20260526_deep_capture_retention_training_guards.sql"), "utf8");
+
+  for (const table of ["openlane_vehicle_identities", "openlane_observations", "openlane_outcomes"]) {
+    assert.match(migration, new RegExp(`alter table ${table}`, "i"));
+    assert.match(migration, /consent_id uuid references market_snap_capture_consents\(id\) on delete set null/i);
+    assert.match(migration, /capture_level text/i);
+    assert.match(migration, /source_type text/i);
+  }
+
+  assert.match(migration, /field_evidence jsonb not null default '\{\}'::jsonb/i);
+  assert.match(migration, /retention_policy text not null default 'temporary_deep_capture'/i);
+  assert.match(migration, /model_improvement_opted_in boolean not null default false/i);
+  assert.match(migration, /is_training_eligible = false or/i);
+  assert.match(migration, /model_improvement_opted_in = true/i);
+  assert.match(migration, /cleanup_market_snap_deep_capture_retention/i);
+  assert.doesNotMatch(migration, /\bdelete\s+from\s+(vehicles|sales|vehicle_expenses|cash_transactions|deal_radar_saved_listings)/i);
+});
+
 function activeObservation(): MarketListingInput {
   return {
     organizationId,
@@ -77,6 +122,9 @@ function activeObservation(): MarketListingInput {
     sourceType: "auction",
     pageType: "active_listing",
     captureKind: "observation",
+    captureLevel: "deep_capture",
+    captureScopes: ["dom_visible", "network_response_observation", "model_improvement"],
+    deepCaptureConsentId: "33333333-3333-4333-8333-333333333333",
     outcomeConfidence: "low",
     listingUrl: "https://www.openlane.ca/vehicle/123",
     title: "2021 Toyota RAV4 XLE",
@@ -91,8 +139,26 @@ function activeObservation(): MarketListingInput {
     capturedAt: "2026-05-14T12:00:00.000Z",
     openlaneMetadata: {
       disclosureCount: 3,
-      networkEvidence: Array.from({ length: 140 }, (_, index) => ({ endpointPattern: `app.openlane.ca/api/vdp/${index}`, candidateCounts: { vin: 1 } })),
+      networkEvidence: Array.from({ length: 140 }, (_, index) => ({
+        endpointPattern: `app.openlane.ca/api/vdp/${index}`,
+        authorization: "Bearer secret-token",
+        candidateCounts: { vin: 1 },
+        buyerEmail: "buyer@example.com",
+        buyerPhone: "514-555-1212",
+      })),
       sectionMapSummary: { summary: { vehicleHero: { textLength: 120, ignored: false } } },
+    },
+    fieldEvidence: {
+      vin: [{
+        field: "vin",
+        value: "2T3R1RFV5MW123456",
+        normalizedValue: "2T3R1RFV5MW123456",
+        sourceType: "dom_label",
+        sourceText: "VIN 2T3R1RFV5MW123456 buyer@example.com",
+        confidenceScore: 92,
+        capturedAt: "2026-05-14T12:00:00.000Z",
+        consentId: "33333333-3333-4333-8333-333333333333",
+      }],
     },
     extractedFields: {
       sessionToken: "eyJaaaaaaaaaaaaaaaaaaaaaaaa.eyJbbbbbbbbbbbbbbbbbbbbbbbb.cccccccccccccccccccccccc",

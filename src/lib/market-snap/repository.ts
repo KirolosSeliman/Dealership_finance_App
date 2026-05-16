@@ -74,15 +74,7 @@ export async function upsertMarketListingFromAnalysis(client: Client, input: Mar
       source_reliability_score: normalized.sourceReliabilityScore,
       time_decay_weight: normalized.timeDecayWeight,
       sample_weight: normalized.sampleWeight,
-      normalized_payload: {
-        ...normalized,
-        valuation: valuation ? {
-          estimatedRetailMarketValue: valuation.estimatedRetailMarketValue,
-          confidenceScore: valuation.confidenceScore,
-          estimatorType: valuation.estimatorType,
-          modelVersion: valuation.modelVersion,
-        } : undefined,
-      },
+      normalized_payload: marketListingStoragePayload(normalized, valuation),
       sanitized_raw_payload: {
         title: normalized.title,
         description: normalized.description,
@@ -127,7 +119,7 @@ export async function saveListingToDealRadar(client: Client, input: MarketListin
       mileage_km: input.mileageKm ?? null,
       listed_price: input.listedPrice ?? input.buyNowPrice ?? input.currentBid ?? input.auctionHammerPrice ?? null,
       market_type: valuation?.marketType ?? input.marketType ?? "clean_retail_market",
-      normalized_payload: input,
+      normalized_payload: marketListingStoragePayload(input, valuation),
       condition_features: input.conditionFeatures ?? {},
       image_features: input.imageFeatures ?? { imageCount: input.imageCount, photoAnalysisStatus: input.imageCount ? "not_started" : "unknown" },
       diagnostic_features: input.diagnosticFeatures ?? {},
@@ -317,7 +309,7 @@ export async function insertMarketListings(client: Client, rows: MarketListingIn
       source_reliability_score: normalized.sourceReliabilityScore,
       time_decay_weight: normalized.timeDecayWeight,
       sample_weight: normalized.sampleWeight,
-      normalized_payload: normalized,
+      normalized_payload: marketListingStoragePayload(normalized),
       sanitized_raw_payload: {
         title: normalized.title,
         description: normalized.description,
@@ -452,6 +444,7 @@ function openLaneMetadata(input: MarketListingInput) {
     keysAvailable: input.keysAvailable,
     carfaxMentioned: input.carfaxMentioned,
     carfaxUrlStatus: input.carfaxUrlStatus,
+    fieldEvidence: capOpenLaneStorageValue(input.fieldEvidence ?? {}),
     extractedFields: capOpenLaneStorageValue(input.extractedFields ?? {}),
     missingData: input.missingData ?? [],
     videoCount: input.videoCount ?? input.videos?.length ?? 0,
@@ -493,6 +486,7 @@ function isOpenLaneOutcome(input: MarketListingInput) {
 }
 
 function openLaneIdentityPayload(input: MarketListingInput, capturedBy?: string) {
+  const retention = openLaneRetentionMetadata(input);
   return compactDbRow({
     organization_id: input.organizationId,
     vin: input.vin ?? null,
@@ -507,12 +501,18 @@ function openLaneIdentityPayload(input: MarketListingInput, capturedBy?: string)
     identity_confidence: input.vin ? "high" : input.listingUrl ? "medium" : "low",
     last_seen_at: input.capturedAt ?? new Date().toISOString(),
     created_by: capturedBy ?? null,
+    retention_policy: retention.retention_policy,
+    expires_at: retention.expires_at,
+    capture_level: retention.capture_level,
+    consent_id: retention.consent_id,
+    source_type: retention.source_type,
   });
 }
 
 function openLaneObservationPayload(input: MarketListingInput, vehicleIdentityId: string, capturedBy?: string) {
   const metadata = input.openlaneMetadata ?? {};
   const disclosureCount = numberOrUndefined((metadata as { disclosureCount?: unknown }).disclosureCount);
+  const retention = openLaneRetentionMetadata(input);
   return compactDbRow({
     organization_id: input.organizationId,
     vehicle_identity_id: vehicleIdentityId,
@@ -529,8 +529,16 @@ function openLaneObservationPayload(input: MarketListingInput, vehicleIdentityId
     captured_at: input.capturedAt ?? new Date().toISOString(),
     captured_by: capturedBy ?? null,
     confidence_level: input.outcomeConfidence ?? "low",
-    evidence: input.outcomeEvidence ?? [],
+    evidence: capOpenLaneStorageValue(input.sourceEvidence ?? input.outcomeEvidence ?? []),
+    field_evidence: capOpenLaneStorageValue(input.fieldEvidence ?? {}),
     capped_payload: cappedOpenLanePayload(input),
+    retention_policy: retention.retention_policy,
+    expires_at: retention.expires_at,
+    capture_level: retention.capture_level,
+    consent_id: retention.consent_id,
+    source_type: retention.source_type,
+    data_quality_score: deepCaptureDataQualityScore(input),
+    evidence_confidence_score: deepCaptureEvidenceConfidenceScore(input),
     observation_fingerprint: captureFingerprint("observation", input, [
       input.currentBid,
       input.currentOffer,
@@ -545,6 +553,8 @@ function openLaneObservationPayload(input: MarketListingInput, vehicleIdentityId
 
 function openLaneOutcomePayload(input: MarketListingInput, vehicleIdentityId: string, capturedBy?: string) {
   const outcomeType = openLaneOutcomeType(input);
+  const retention = openLaneRetentionMetadata(input);
+  const trainingEligible = isTrainingEligibleOpenLaneOutcome(input);
   return compactDbRow({
     organization_id: input.organizationId,
     vehicle_identity_id: vehicleIdentityId,
@@ -568,12 +578,21 @@ function openLaneOutcomePayload(input: MarketListingInput, vehicleIdentityId: st
     total_invoice_amount: input.totalInvoiceAmount ?? null,
     final_acquisition_cost: input.finalAcquisitionCost ?? null,
     negotiation_status: input.negotiationStatus ?? null,
-    evidence: input.outcomeEvidence ?? [],
-    price_semantics: input.priceSemantics ?? {},
+    evidence: capOpenLaneStorageValue(input.outcomeEvidence ?? input.sourceEvidence ?? []),
+    price_semantics: capOpenLaneStorageValue(input.priceSemantics ?? {}),
+    field_evidence: capOpenLaneStorageValue(input.fieldEvidence ?? {}),
     capped_payload: cappedOpenLanePayload(input),
     captured_at: input.capturedAt ?? new Date().toISOString(),
     captured_by: capturedBy ?? null,
-    is_training_eligible: input.captureKind === "verified_outcome" || input.captureKind === "manual_confirmation",
+    is_training_eligible: trainingEligible,
+    model_improvement_opted_in: hasModelImprovementOptIn(input),
+    retention_policy: retention.retention_policy,
+    expires_at: retention.expires_at,
+    capture_level: retention.capture_level,
+    consent_id: retention.consent_id,
+    source_type: retention.source_type,
+    data_quality_score: deepCaptureDataQualityScore(input),
+    evidence_confidence_score: deepCaptureEvidenceConfidenceScore(input),
     outcome_fingerprint: captureFingerprint(outcomeType, input, [
       input.soldPriceCandidate,
       input.finalBidAmount,
@@ -593,6 +612,83 @@ function openLaneOutcomeType(input: MarketListingInput) {
   if (input.captureKind === "verified_outcome" && (input.acceptedAmount || input.negotiatedAmount || input.finalBidAmount)) return "accepted_negotiation";
   if (input.pageType === "post_sale") return "post_sale_candidate";
   return input.captureKind === "verified_outcome" ? "verified_outcome" : "candidate_outcome";
+}
+
+function openLaneRetentionMetadata(input: MarketListingInput) {
+  const captureLevel = input.captureLevel ?? (input.deepCaptureConsentId || input.captureScopes?.some((scope) => scope !== "dom_visible") ? "deep_capture" : "basic_dom");
+  const verifiedBusinessRecord = input.captureKind === "verified_outcome" || input.captureKind === "manual_confirmation";
+  const retentionPolicy = verifiedBusinessRecord ? "verified_outcome_business_record" : captureLevel === "deep_capture" ? "temporary_deep_capture" : "basic_capture";
+  const retentionDays = verifiedBusinessRecord ? 1095 : captureLevel === "deep_capture" ? 90 : 30;
+  return {
+    retention_policy: retentionPolicy,
+    expires_at: new Date(Date.now() + retentionDays * 86_400_000).toISOString(),
+    capture_level: captureLevel,
+    consent_id: input.deepCaptureConsentId ?? null,
+    source_type: input.sourceType ?? (input.sourceName.toLowerCase().includes("openlane") ? "auction" : "extension"),
+  };
+}
+
+function isTrainingEligibleOpenLaneOutcome(input: MarketListingInput) {
+  return hasModelImprovementOptIn(input)
+    && (input.captureKind === "verified_outcome" || input.captureKind === "manual_confirmation")
+    && input.negotiationStatus?.toLowerCase() !== "pending"
+    && hasVerifiedOutcomeLabel(input);
+}
+
+function hasModelImprovementOptIn(input: MarketListingInput) {
+  return input.captureScopes?.includes("model_improvement") === true;
+}
+
+function hasVerifiedOutcomeLabel(input: MarketListingInput) {
+  return [
+    input.acceptedAmount,
+    input.negotiatedAmount,
+    input.finalBidAmount,
+    input.buyPriceAuction,
+    input.totalInvoiceAmount,
+    input.finalAcquisitionCost,
+  ].some((value) => value !== undefined && Number(value) > 0);
+}
+
+function deepCaptureDataQualityScore(input: MarketListingInput) {
+  const typedFields = [
+    input.title,
+    input.year,
+    input.make,
+    input.model,
+    input.trim,
+    input.vin,
+    input.mileageKm,
+    input.listingUrl,
+  ].filter((value) => value !== undefined && value !== "").length;
+  const typedScore = Math.min(24, typedFields * 3);
+  const sourceScore = input.sourceType === "auction" || input.sourceName.toLowerCase().includes("openlane") ? 14 : 8;
+  const pageScore = input.pageType && input.pageType !== "unknown" ? 12 : 4;
+  const evidenceScore = Math.round(deepCaptureEvidenceConfidenceScore(input) * 0.25);
+  const missingPenalty = Math.min(30, (input.missingData?.length ?? 0) * 5);
+  const rawOnlyPenalty = typedFields < 4 && input.rawVisibleText ? 12 : 0;
+  return Math.max(20, Math.min(100, 50 + typedScore + sourceScore + pageScore + evidenceScore - missingPenalty - rawOnlyPenalty));
+}
+
+function deepCaptureEvidenceConfidenceScore(input: MarketListingInput) {
+  const scores: number[] = [];
+  for (const items of Object.values(input.fieldEvidence ?? {})) {
+    for (const item of items) {
+      const score = numberOrUndefined(item.confidenceScore);
+      if (score !== undefined) scores.push(score);
+    }
+  }
+  for (const evidence of input.sourceEvidence ?? []) {
+    const score = numberOrUndefined(evidence.confidenceScore);
+    if (score !== undefined) scores.push(score);
+  }
+  for (const evidence of input.outcomeEvidence ?? []) {
+    const score = numberOrUndefined(evidence.confidenceScore);
+    if (score !== undefined) scores.push(score);
+  }
+  if (input.extractionConfidenceScore !== undefined) scores.push(input.extractionConfidenceScore);
+  if (scores.length === 0) return 50;
+  return Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length);
 }
 
 function openLaneFallbackKey(input: MarketListingInput) {
@@ -622,7 +718,7 @@ function cappedOpenLanePayload(input: MarketListingInput) {
     captureLevel: input.captureLevel,
     captureScopes: input.captureScopes,
     deepCaptureConsentId: input.deepCaptureConsentId,
-    sourceEvidence: input.sourceEvidence?.slice(0, 20),
+    sourceEvidence: capOpenLaneStorageValue(input.sourceEvidence?.slice(0, 20) ?? []),
     outcomeConfidence: input.outcomeConfidence,
     title: input.title,
     year: input.year,
@@ -644,11 +740,70 @@ function cappedOpenLanePayload(input: MarketListingInput) {
     totalInvoiceAmount: input.totalInvoiceAmount,
     finalAcquisitionCost: input.finalAcquisitionCost,
     priceSemantics: input.priceSemantics,
-    outcomeEvidence: input.outcomeEvidence?.slice(0, 20),
+    outcomeEvidence: capOpenLaneStorageValue(input.outcomeEvidence?.slice(0, 20) ?? []),
+    fieldEvidence: capOpenLaneStorageValue(input.fieldEvidence ?? {}),
     openlaneMetadata: openLaneMetadata(input),
     warnings: input.warnings?.slice(0, 20),
     missingData: input.missingData?.slice(0, 20),
   };
+}
+
+function marketListingStoragePayload(input: MarketListingInput, valuation?: VehicleValuation) {
+  return capOpenLaneStorageValue({
+    organizationId: input.organizationId,
+    sourceName: input.sourceName,
+    sourceType: input.sourceType,
+    marketType: input.marketType,
+    listingUrl: input.listingUrl,
+    title: input.title,
+    description: input.description,
+    conditionReportText: input.conditionReportText,
+    year: input.year,
+    make: input.make,
+    model: input.model,
+    trim: input.trim,
+    vin: input.vin,
+    mileageKm: input.mileageKm,
+    listedPrice: input.listedPrice,
+    currentBid: input.currentBid,
+    currentOffer: input.currentOffer,
+    bestOffer: input.bestOffer,
+    buyNowPrice: input.buyNowPrice,
+    soldPriceCandidate: input.soldPriceCandidate,
+    finalBidAmount: input.finalBidAmount,
+    negotiatedAmount: input.negotiatedAmount,
+    acceptedAmount: input.acceptedAmount,
+    buyPriceAuction: input.buyPriceAuction,
+    totalInvoiceAmount: input.totalInvoiceAmount,
+    finalAcquisitionCost: input.finalAcquisitionCost,
+    pageType: input.pageType,
+    captureKind: input.captureKind,
+    captureLevel: input.captureLevel,
+    captureScopes: input.captureScopes,
+    deepCaptureConsentId: input.deepCaptureConsentId,
+    sourceEvidence: input.sourceEvidence?.slice(0, 20),
+    outcomeEvidence: input.outcomeEvidence?.slice(0, 20),
+    fieldEvidence: input.fieldEvidence ?? {},
+    priceSemantics: input.priceSemantics ?? {},
+    conditionFeatures: input.conditionFeatures ?? {},
+    imageFeatures: input.imageFeatures ?? {},
+    diagnosticFeatures: input.diagnosticFeatures ?? {},
+    openlaneMetadata: isOpenLaneCapture(input) ? openLaneMetadata(input) : input.openlaneMetadata ?? {},
+    extractedFields: input.extractedFields ?? {},
+    missingData: input.missingData?.slice(0, 20),
+    warnings: input.warnings?.slice(0, 20),
+    extractionConfidenceScore: input.extractionConfidenceScore,
+    capturedAt: input.capturedAt,
+    valuation: valuation ? {
+      estimatedRetailMarketValue: valuation.estimatedRetailMarketValue,
+      estimatedWholesaleBuyValue: valuation.estimatedWholesaleBuyValue,
+      estimatedWholesaleSellValue: valuation.estimatedWholesaleSellValue,
+      maxRecommendedBid: valuation.maxRecommendedBid,
+      confidenceScore: valuation.confidenceScore,
+      estimatorType: valuation.estimatorType,
+      modelVersion: valuation.modelVersion,
+    } : undefined,
+  });
 }
 
 function capOpenLaneStorageValue(value: unknown, depth = 0): unknown {
@@ -657,16 +812,19 @@ function capOpenLaneStorageValue(value: unknown, depth = 0): unknown {
   if (typeof value === "number" || typeof value === "boolean" || value === null || value === undefined) return value;
   if (Array.isArray(value)) return value.slice(0, 120).map((item) => capOpenLaneStorageValue(item, depth + 1));
   if (typeof value !== "object") return undefined;
-  return Object.fromEntries(Object.entries(value as Record<string, unknown>).slice(0, 120).map(([key, item]) => [
-    key,
-    /token|secret|password|credential|authorization|cookie|session/i.test(key) ? "[redacted]" : capOpenLaneStorageValue(item, depth + 1),
-  ]));
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+    .slice(0, 120)
+    .filter(([key]) => !/token|secret|password|credential|authorization|cookie|session|csrf|jwt|bearer/i.test(key))
+    .map(([key, item]) => [key, capOpenLaneStorageValue(item, depth + 1)]));
 }
 
 function sanitizeStorageString(value: string) {
   const text = value
     .replace(/\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b/g, "[redacted]")
     .replace(/\bsk_(?:live|test|proj)_[A-Za-z0-9_-]{16,}\b/g, "[redacted]")
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]")
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[redacted_email]")
+    .replace(/\b(?:\+?1[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)\d{3}[-.\s]?\d{4}\b/g, "[redacted_phone]")
     .slice(0, 4000);
   return /^\s*(javascript|data|vbscript):/i.test(text) ? "[unsafe_url_removed]" : text;
 }

@@ -23,6 +23,7 @@ export type OpenLaneOutcomeExportRow = {
   capture_kind?: CaptureKind | string | null;
   confidence_level?: string | null;
   is_training_eligible?: boolean | null;
+  model_improvement_opted_in?: boolean | null;
   sold_price_candidate?: number | null;
   final_bid_amount?: number | null;
   negotiated_amount?: number | null;
@@ -197,6 +198,7 @@ function latestObservationByIdentity(observations: OpenLaneObservationExportRow[
 
 function isVerifiedTrainingOutcome(outcome: OpenLaneOutcomeExportRow) {
   return outcome.is_training_eligible === true
+    && outcome.model_improvement_opted_in === true
     && (outcome.capture_kind === "verified_outcome" || outcome.capture_kind === "manual_confirmation")
     && outcome.negotiation_status?.toLowerCase() !== "pending";
 }
