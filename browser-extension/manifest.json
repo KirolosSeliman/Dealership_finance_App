@@ -19,6 +19,7 @@
         "src/openlane-extraction-contract.js",
         "src/openlane-section-map.js",
         "src/openlane-page-classifier.js",
+        "src/openlane-safe-expander.js",
         "src/openlane-extractor.js",
         "src/market-snap-widget.js",
         "src/capture-runtime.js",

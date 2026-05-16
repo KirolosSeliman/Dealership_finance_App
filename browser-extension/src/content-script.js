@@ -16,6 +16,7 @@
     valuation: null,
     backendResponse: null,
     captureResponse: null,
+    safeExpansion: null,
     hiddenPageUrl: "",
     lastSignature: "",
     currentUrl: location.href,
@@ -150,6 +151,7 @@
       return;
     }
 
+    await expandReadOnlySections();
     const listing = extractListing();
     if (!isVehicleListing(listing)) {
       STATE.widget?.render({ status: "warning", listing, message: "OpenLane vehicle data is still loading or incomplete." });
@@ -216,8 +218,14 @@
       outcomeConfidence: classification.outcomeConfidence,
       openlaneMetadata: { ...(listing.openlaneMetadata || {}), classification },
     };
+    if (STATE.safeExpansion) merged.openlaneMetadata.safeExpansion = STATE.safeExpansion;
     if (STATE.settings?.debugMode) logExtractionDebug(merged);
     return merged;
+  }
+
+  async function expandReadOnlySections() {
+    STATE.safeExpansion = await window.DealerFlowOpenLaneSafeExpander?.expandOpenLaneReadOnlySections?.(document, { maxSteps: 8, waitMs: 120 });
+    return STATE.safeExpansion;
   }
 
   function classifyOpenLanePage() {
@@ -325,10 +333,12 @@
       return;
     }
     if (message?.type === "MARKET_SNAP_EXTRACT") {
-      const listing = extractListing();
-      STATE.listing = listing;
-      sendResponse({ ok: true, listing });
-      return;
+      expandReadOnlySections().then(() => {
+        const listing = extractListing();
+        STATE.listing = listing;
+        sendResponse({ ok: true, listing });
+      }).catch((error) => sendResponse({ ok: false, message: formatError(error) }));
+      return true;
     }
     if (message?.type === "MARKET_SNAP_ANALYZE") {
       runRuntime({ force: true, reason: "popup-analyze" }).then(() => sendResponse({ ok: true, listing: STATE.listing, valuation: STATE.valuation })).catch((error) => sendResponse({ ok: false, message: formatError(error) }));

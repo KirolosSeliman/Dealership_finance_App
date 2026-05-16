@@ -7,6 +7,10 @@ import test from "node:test";
 const repoRoot = process.cwd();
 const require = createRequire(import.meta.url);
 require("../browser-extension/src/openlane-section-map.js");
+const safeExpander = require("../browser-extension/src/openlane-safe-expander.js") as {
+  expandOpenLaneReadOnlySections: (doc: { querySelectorAll: (selector: string) => unknown[] }, options?: { maxSteps?: number; waitMs?: number }) => Promise<{ clicked: Array<{ label: string }>; skipped: Array<{ reason: string; label: string }>; snapshots: Array<{ text: string }> }>;
+  classifyExpansionControl: (control: unknown) => { safe: boolean; reason: string; label: string };
+};
 const openLaneExtractor = require("../browser-extension/src/openlane-extractor.js") as {
   extractOpenLaneFixture: (html: string, href?: string) => Record<string, unknown>;
   extractVisibleText: (doc: { body?: { innerText?: string; textContent?: string } }) => string;
@@ -26,6 +30,7 @@ test("Market Snap extension injects on OpenLane Canada vehicle pages", () => {
   assert.ok(scripts.includes("src/openlane-extraction-contract.js"));
   assert.ok(scripts.includes("src/openlane-section-map.js"));
   assert.ok(scripts.includes("src/openlane-page-classifier.js"));
+  assert.ok(scripts.includes("src/openlane-safe-expander.js"));
   assert.ok(scripts.includes("src/openlane-extractor.js"));
   assert.ok(scripts.includes("src/market-snap-widget.js"));
   assert.ok(scripts.includes("src/content-script.js"));
@@ -47,6 +52,8 @@ test("Market Snap extension uses in-page OpenLane widget instead of popup-only a
   assert.match(contentScript, /pushState/);
   assert.match(contentScript, /replaceState/);
   assert.match(contentScript, /disconnected/);
+  assert.match(contentScript, /expandReadOnlySections/);
+  assert.match(contentScript, /DealerFlowOpenLaneSafeExpander/);
   assert.match(contentScript, /createMarketSnapWidget/);
   assert.match(contentScript, /MARKET_SNAP_ANALYZE/);
   assert.match(widget, /dealer-flow-market-snap-widget/);
@@ -186,12 +193,16 @@ test("OpenLane extractor captures core vehicle, price, and auction fields", () =
 test("OpenLane extractor exposes the dedicated helper contract", () => {
   const contract = readFileSync(join(repoRoot, "browser-extension/src/openlane-extraction-contract.js"), "utf8");
   const sectionMap = readFileSync(join(repoRoot, "browser-extension/src/openlane-section-map.js"), "utf8");
+  const expander = readFileSync(join(repoRoot, "browser-extension/src/openlane-safe-expander.js"), "utf8");
 
   for (const marker of ["buildOpenLaneExtractionContract", "pageContext", "identity", "auctionObservation", "purchaseOutcome", "condition", "media", "carfax", "debug"]) {
     assert.match(contract, new RegExp(marker));
   }
   for (const marker of ["buildOpenLaneSectionMap", "buildOpenLaneSectionMapFromHtml", "vehicleHero", "disclosuresCondition", "dealerNotes", "marketGuide", "sidebar"]) {
     assert.match(sectionMap, new RegExp(marker));
+  }
+  for (const marker of ["expandOpenLaneReadOnlySections", "SAFE_LABEL_PATTERN", "DANGEROUS_LABEL_PATTERN", "maxSteps", "snapshotOpenLaneReadOnlySections"]) {
+    assert.match(expander, new RegExp(marker));
   }
 
   for (const helper of [
@@ -213,6 +224,35 @@ test("OpenLane extractor exposes the dedicated helper contract", () => {
   ]) {
     assert.equal(typeof openLaneExtractor[helper], "function", `${helper} should be exported`);
   }
+});
+
+test("OpenLane safe expander opens read-only sections and skips dangerous controls", async () => {
+  const hiddenSection = fakeNode("Disclosures and conditions", "");
+  const safe = fakeNode("Disclosures and conditions", "", () => {
+    hiddenSection.innerText = "Hidden disclosure text. Note from selling dealer: check engine light on.";
+    hiddenSection.textContent = "Hidden disclosure text. Note from selling dealer: check engine light on.";
+  });
+  const bid = fakeNode("Place bid", "", () => {
+    throw new Error("dangerous bid clicked");
+  });
+  const markRetrieved = fakeNode("Mark Retrieved", "", () => {
+    throw new Error("dangerous mark retrieved clicked");
+  });
+  const doc = {
+    querySelectorAll(selector: string) {
+      if (selector.includes("button")) return [safe, bid, markRetrieved];
+      return [hiddenSection];
+    },
+  };
+
+  const result = await safeExpander.expandOpenLaneReadOnlySections(doc, { maxSteps: 4, waitMs: 0 });
+
+  assert.equal(safe.clicked, true);
+  assert.equal(bid.clicked, false);
+  assert.equal(markRetrieved.clicked, false);
+  assert.ok(result.clicked.some((item) => /Disclosures/i.test(item.label)));
+  assert.ok(result.skipped.some((item) => item.reason === "dangerous_label" && /Place bid/i.test(item.label)));
+  assert.ok(result.snapshots.some((snapshot) => /Hidden disclosure text/i.test(snapshot.text)));
 });
 
 test("OpenLane extractor caps raw visible text at the prompt limit", () => {
@@ -268,4 +308,25 @@ function readExtensionText(path: string): string {
   }
   if (!/\.(js|json|html|css|md)$/i.test(path)) return "";
   return readFileSync(path, "utf8");
+}
+
+function fakeNode(label: string, text = "", onClick?: () => void) {
+  return {
+    clicked: false,
+    innerText: label,
+    textContent: text || label,
+    dataset: {} as Record<string, string>,
+    getAttribute(name: string) {
+      if (name === "aria-label") return label;
+      if (name === "type") return "button";
+      return "";
+    },
+    closest() {
+      return null;
+    },
+    click() {
+      this.clicked = true;
+      onClick?.();
+    },
+  };
 }
