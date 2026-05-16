@@ -19,8 +19,12 @@ export interface MarketSnapCaptureConsent {
   termsVersion: string;
   privacyVersion: string;
   captureScopes: MarketSnapCaptureScope[];
+  allowedDomains: string[];
   allowedHosts: string[];
+  allowedDataCategories: string[];
+  deniedDataCategories: string[];
   acceptedAt: string;
+  acceptedByUserId?: string;
   withdrawnAt?: string;
 }
 
@@ -146,8 +150,12 @@ function mapConsentRow(row: Record<string, unknown>): MarketSnapCaptureConsent {
     termsVersion: String(row.terms_version),
     privacyVersion: String(row.privacy_version),
     captureScopes: normalizeScopes(row.capture_scopes),
+    allowedDomains: normalizeStringArray(row.allowed_domains),
     allowedHosts: normalizeStringArray(row.allowed_hosts),
+    allowedDataCategories: normalizeStringArray(row.allowed_data_categories),
+    deniedDataCategories: normalizeStringArray(row.denied_data_categories),
     acceptedAt: String(row.accepted_at),
+    acceptedByUserId: stringOrUndefined(row.accepted_by_user_id),
     withdrawnAt: stringOrUndefined(row.withdrawn_at),
   };
 }

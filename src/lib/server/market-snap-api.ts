@@ -69,6 +69,24 @@ export async function deepCaptureConsent(request: Request) {
 
     await requireOrganizationRole(client, userId, payload.organizationId, ["owner", "admin"]);
 
+    if (payload.action === "list_events") {
+      return NextResponse.json({ ok: true, events: await listDeepCaptureConsentEvents(client, payload.organizationId) });
+    }
+
+    if (payload.action === "export_audit") {
+      return NextResponse.json({ ok: true, audit: await exportDeepCaptureAudit(client, payload.organizationId, userId) });
+    }
+
+    if (payload.action === "delete_eligible_captures") {
+      const deletion = await deleteEligibleDeepCaptureData(client, payload.organizationId, userId);
+      return NextResponse.json({ ok: true, deletion });
+    }
+
+    if (payload.action === "disable_model_improvement") {
+      const result = await disableDeepCaptureModelImprovement(client, payload.organizationId, userId);
+      return NextResponse.json({ ok: true, ...result });
+    }
+
     if (payload.action === "withdraw") {
       const active = await getActiveMarketSnapCaptureConsent(client, payload.organizationId, userId);
       if (active) {
@@ -203,9 +221,10 @@ function allowedExtensionOrigins() {
 
 async function buildDeepCaptureConsentStatus(client: Client, organizationId: string, userId: string) {
   const consent = await getActiveMarketSnapCaptureConsent(client, organizationId, userId);
-  if (!consent) return { consentStatus: "off", deepCaptureEnabled: false };
-  if (!isCurrentDeepCaptureConsent(consent)) return consentStatusPayload(consent, "requires_renewal");
-  return consentStatusPayload(consent, "active");
+  const captureSummary = await getDeepCaptureSummary(client, organizationId);
+  if (!consent) return { consentStatus: "off", deepCaptureEnabled: false, captureSummary, retentionSummary: deepCaptureRetentionSummary() };
+  if (!isCurrentDeepCaptureConsent(consent)) return { ...consentStatusPayload(consent, "requires_renewal"), captureSummary, retentionSummary: deepCaptureRetentionSummary() };
+  return { ...consentStatusPayload(consent, "active"), captureSummary, retentionSummary: deepCaptureRetentionSummary() };
 }
 
 function consentStatusPayload(
@@ -215,7 +234,12 @@ function consentStatusPayload(
     termsVersion: string;
     privacyVersion: string;
     captureScopes: MarketSnapCaptureScope[];
+    allowedDomains?: string[];
+    allowedHosts?: string[];
+    allowedDataCategories?: string[];
+    deniedDataCategories?: string[];
     acceptedAt: string;
+    acceptedByUserId?: string;
   },
   consentStatus: "active" | "requires_renewal",
 ) {
@@ -227,7 +251,28 @@ function consentStatusPayload(
     deepCaptureTermsVersion: consent.termsVersion,
     deepCapturePrivacyVersion: consent.privacyVersion,
     deepCaptureConsentAcceptedAt: consent.acceptedAt,
+    deepCaptureConsentAcceptedBy: consent.acceptedByUserId,
     captureScopes: consent.captureScopes,
+    modelImprovementEnabled: consent.captureScopes.includes("model_improvement"),
+    allowedDomains: consent.allowedDomains ?? ["openlane.ca", "openlane.com"],
+    allowedHosts: consent.allowedHosts ?? ["app.openlane.ca", "*.openlane.ca", "*.openlane.com"],
+    allowedDataCategories: consent.allowedDataCategories ?? [
+      "visible_vehicle_data",
+      "visible_listing_economics",
+      "condition_disclosures",
+      "media_url_metadata",
+      "capped_evidence",
+    ],
+    deniedDataCategories: consent.deniedDataCategories ?? [
+      "credentials",
+      "authorization_headers",
+      "cookies",
+      "session_tokens",
+      "passwords",
+      "csrf_tokens",
+      "jwt_tokens",
+      "unrelated_personal_data",
+    ],
   };
 }
 
@@ -251,6 +296,146 @@ function normalizeConsentScopes(scopes: readonly MarketSnapCaptureScope[] | unde
   }
   if (!modelImprovementOptIn) normalized.delete("model_improvement");
   return Array.from(normalized);
+}
+
+async function listDeepCaptureConsentEvents(client: Client, organizationId: string) {
+  const { data, error } = await client
+    .from("market_snap_capture_consent_events")
+    .select("id, consent_id, event_type, actor_user_id, details, created_at")
+    .eq("organization_id", organizationId)
+    .order("created_at", { ascending: false })
+    .limit(100);
+  if (error) throw error;
+  return data ?? [];
+}
+
+async function exportDeepCaptureAudit(client: Client, organizationId: string, userId: string) {
+  return {
+    exportedAt: new Date().toISOString(),
+    exportedByUserId: userId,
+    consentStatus: await buildDeepCaptureConsentStatus(client, organizationId, userId),
+    events: await listDeepCaptureConsentEvents(client, organizationId),
+    captureSummary: await getDeepCaptureSummary(client, organizationId),
+    retentionSummary: deepCaptureRetentionSummary(),
+  };
+}
+
+async function deleteEligibleDeepCaptureData(client: Client, organizationId: string, userId: string) {
+  const active = await getActiveMarketSnapCaptureConsent(client, organizationId, userId);
+  const [marketListings, observations, outcomes] = await Promise.all([
+    client
+      .from("market_listings")
+      .delete({ count: "exact" })
+      .eq("organization_id", organizationId)
+      .eq("is_saved_to_deal_radar", false)
+      .in("retention_policy", ["temporary_capture", "unsaved_market_listing"]),
+    client
+      .from("openlane_observations")
+      .delete({ count: "exact" })
+      .eq("organization_id", organizationId)
+      .in("retention_policy", ["temporary_deep_capture", "basic_capture"]),
+    client
+      .from("openlane_outcomes")
+      .update({
+        evidence: [],
+        field_evidence: {},
+        capped_payload: {},
+        retention_policy: "sanitized_outcome_metadata",
+      }, { count: "exact" })
+      .eq("organization_id", organizationId)
+      .in("retention_policy", ["temporary_deep_capture", "basic_capture"]),
+  ]);
+  for (const result of [marketListings, observations, outcomes]) {
+    if (result.error) throw result.error;
+  }
+  const details = {
+    action: "delete_eligible_captures",
+    marketListingsDeleted: marketListings.count ?? 0,
+    openlaneObservationsDeleted: observations.count ?? 0,
+    openlaneOutcomesSanitized: outcomes.count ?? 0,
+  };
+  await recordMarketSnapConsentEvent(client, {
+    organizationId,
+    consentId: active?.id,
+    eventType: "consent_updated",
+    actorUserId: userId,
+    details,
+  });
+  return details;
+}
+
+async function disableDeepCaptureModelImprovement(client: Client, organizationId: string, userId: string) {
+  const active = await getActiveMarketSnapCaptureConsent(client, organizationId, userId);
+  if (!active) return { consentStatus: "off", deepCaptureEnabled: false, modelImprovementEnabled: false };
+
+  const nextScopes = active.captureScopes.filter((scope) => scope !== "model_improvement");
+  const { error: consentError } = await client
+    .from("market_snap_capture_consents")
+    .update({ capture_scopes: nextScopes })
+    .eq("id", active.id)
+    .eq("organization_id", organizationId);
+  if (consentError) throw consentError;
+
+  const { error: outcomeError } = await client
+    .from("openlane_outcomes")
+    .update({ is_training_eligible: false, model_improvement_opted_in: false })
+    .eq("organization_id", organizationId)
+    .eq("model_improvement_opted_in", true);
+  if (outcomeError) throw outcomeError;
+
+  await recordMarketSnapConsentEvent(client, {
+    organizationId,
+    consentId: active.id,
+    eventType: "model_improvement_disabled",
+    actorUserId: userId,
+    details: { source: "web_app_settings" },
+  });
+
+  return {
+    ...consentStatusPayload({ ...active, captureScopes: nextScopes }, isCurrentDeepCaptureConsent(active) ? "active" : "requires_renewal"),
+    modelImprovementEnabled: false,
+  };
+}
+
+async function getDeepCaptureSummary(client: Client, organizationId: string) {
+  const [observations, outcomes, temporaryListings] = await Promise.all([
+    client
+      .from("openlane_observations")
+      .select("id, page_type, capture_kind, capture_level, source_type, captured_at, retention_policy", { count: "exact" })
+      .eq("organization_id", organizationId)
+      .order("captured_at", { ascending: false })
+      .limit(5),
+    client
+      .from("openlane_outcomes")
+      .select("id, outcome_type, capture_kind, capture_level, source_type, captured_at, retention_policy, is_training_eligible, model_improvement_opted_in", { count: "exact" })
+      .eq("organization_id", organizationId)
+      .order("captured_at", { ascending: false })
+      .limit(5),
+    client
+      .from("market_listings")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", organizationId)
+      .eq("is_saved_to_deal_radar", false)
+      .in("retention_policy", ["temporary_capture", "unsaved_market_listing"]),
+  ]);
+  for (const result of [observations, outcomes, temporaryListings]) {
+    if (result.error) throw result.error;
+  }
+  return {
+    observationCount: observations.count ?? observations.data?.length ?? 0,
+    outcomeCount: outcomes.count ?? outcomes.data?.length ?? 0,
+    eligibleUnsavedMarketListingCount: temporaryListings.count ?? 0,
+    latestObservations: observations.data ?? [],
+    latestOutcomes: outcomes.data ?? [],
+  };
+}
+
+function deepCaptureRetentionSummary() {
+  return {
+    temporaryCaptures: "Unsaved temporary Market Snap and Deep Capture observations can expire or be deleted when eligible.",
+    businessRecords: "Saved Deal Radar listings and verified business outcomes remain according to Dealer Flow business-retention rules.",
+    minimizedEvidence: "Dealer Flow stores normalized vehicle fields, capped evidence snippets, endpoint patterns, provenance, and confidence metadata instead of full raw browser responses.",
+  };
 }
 
 export async function analyzeListing(request: Request) {

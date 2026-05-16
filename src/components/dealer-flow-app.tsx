@@ -2595,9 +2595,200 @@ function SettingsPage({
           ]} />
         </div>
       </Panel>
+      <DeepCaptureSettingsPanel organizationId={activeOrganization.id} permissions={permissions} />
       <Panel title={t.sections.privateStorage}><p className="flex items-center gap-2 text-slate-300"><Lock size={18} />{activeOrganization.name}</p><p className="mt-3 text-sm text-slate-500">{t.backup.r2Inactive}</p></Panel>
     </div>
   );
+}
+
+type DeepCaptureStatusPayload = {
+  consentStatus?: string;
+  deepCaptureEnabled?: boolean;
+  deepCaptureConsentVersion?: string;
+  deepCaptureTermsVersion?: string;
+  deepCapturePrivacyVersion?: string;
+  deepCaptureConsentAcceptedAt?: string;
+  deepCaptureConsentAcceptedBy?: string;
+  captureScopes?: string[];
+  modelImprovementEnabled?: boolean;
+  allowedDomains?: string[];
+  allowedHosts?: string[];
+  allowedDataCategories?: string[];
+  deniedDataCategories?: string[];
+  retentionSummary?: Record<string, string>;
+  captureSummary?: {
+    observationCount?: number;
+    outcomeCount?: number;
+    eligibleUnsavedMarketListingCount?: number;
+    latestObservations?: Array<Record<string, unknown>>;
+    latestOutcomes?: Array<Record<string, unknown>>;
+  };
+  events?: Array<Record<string, unknown>>;
+};
+
+const deepCaptureScopeLabels: Record<string, string> = {
+  dom_visible: "visible DOM extraction",
+  safe_read_only_expansion: "safe read-only section expansion",
+  network_response_observation: "network response observation",
+  fee_outcome_capture: "fee/outcome capture",
+  post_sale_outcome_capture: "post-sale outcome capture",
+  media_url_capture: "media URL capture",
+  model_improvement: "model improvement",
+};
+
+function DeepCaptureSettingsPanel({ organizationId, permissions }: { organizationId: string; permissions: Permissions }) {
+  const [status, setStatus] = useState<DeepCaptureStatusPayload | null>(null);
+  const [message, setMessage] = useState("");
+  const [working, setWorking] = useState("");
+  const canManage = permissions.manageSettings || permissions.manageBackups;
+
+  const requestDeepCapture = useCallback(async (action: string, extra: Record<string, unknown> = {}) => {
+    const response = await fetch("/api/market-snap/deep-capture-consent", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ organizationId, action, source: "web_app_settings", ...extra }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload.ok) throw new Error(String(payload.message ?? "Deep Capture request failed."));
+    return payload;
+  }, [organizationId]);
+
+  const refreshStatus = useCallback(async () => {
+    try {
+      const payload = await requestDeepCapture("status");
+      setStatus(payload);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not load Deep Capture status.");
+    }
+  }, [requestDeepCapture]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const timeout = window.setTimeout(() => {
+      requestDeepCapture("status")
+        .then((payload) => {
+          if (!cancelled) setStatus(payload);
+        })
+        .catch((error) => {
+          if (!cancelled) setMessage(error instanceof Error ? error.message : "Could not load Deep Capture status.");
+        });
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [requestDeepCapture]);
+
+  async function runAction(action: string, successMessage: string, extra: Record<string, unknown> = {}) {
+    setMessage("");
+    setWorking(action);
+    try {
+      const payload = await requestDeepCapture(action, extra);
+      if (action === "export_audit") downloadJson("dealer-flow-deep-capture-audit.json", payload.audit ?? payload);
+      setMessage(successMessage);
+      await refreshStatus();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Deep Capture request failed.");
+    } finally {
+      setWorking("");
+    }
+  }
+
+  const scopes = status?.captureScopes ?? [];
+  const scopeRows: Array<[string, string]> = Object.entries(deepCaptureScopeLabels).map(([scope, label]) => [label, scopes.includes(scope) ? "Enabled" : "Off"]);
+  const captureSummary = status?.captureSummary ?? {};
+  const retentionSummary = status?.retentionSummary ?? {};
+
+  return (
+    <Panel title="Market Snap / Deep Capture">
+      <div className="space-y-4 text-sm text-slate-400">
+        <div className="space-y-2">
+          <p>Deep Capture improves accuracy by reading structured vehicle/listing data already loaded in your browser session.</p>
+          <p>It does not collect passwords, cookies, authorization headers, or unrelated browsing data.</p>
+          <p>You can turn it off anytime.</p>
+          <p>Model improvement is separate.</p>
+        </div>
+        {message && <div className="message-banner border border-amber-300/20 bg-amber-300/10 text-amber-100">{message}</div>}
+        <InfoGrid rows={[
+          ["Status", deepCaptureStatusLabel(status?.consentStatus)],
+          ["Consent version", status?.deepCaptureConsentVersion ?? "-"],
+          ["Terms version", status?.deepCaptureTermsVersion ?? "-"],
+          ["Privacy version", status?.deepCapturePrivacyVersion ?? "-"],
+          ["Accepted by", status?.deepCaptureConsentAcceptedBy ?? "-"],
+          ["Accepted at", status?.deepCaptureConsentAcceptedAt ?? "-"],
+          ["Allowed domains", status?.allowedDomains?.join(", ") || "openlane.ca, openlane.com"],
+          ["Allowed hosts", status?.allowedHosts?.join(", ") || "app.openlane.ca"],
+          ["Data categories collected", status?.allowedDataCategories?.join(", ") || "visible vehicle/listing data, capped evidence"],
+          ["Denied categories", status?.deniedDataCategories?.join(", ") || "passwords, cookies, authorization headers, unrelated browsing data"],
+        ]} />
+        <InfoGrid rows={scopeRows} />
+        <InfoGrid rows={[
+          ["OpenLane observations", String(captureSummary.observationCount ?? 0)],
+          ["OpenLane outcomes", String(captureSummary.outcomeCount ?? 0)],
+          ["Eligible unsaved captures", String(captureSummary.eligibleUnsavedMarketListingCount ?? 0)],
+          ["Temporary capture retention", retentionSummary.temporaryCaptures ?? "Unsaved captures can expire or be deleted when eligible."],
+          ["Saved business records", retentionSummary.businessRecords ?? "Saved Deal Radar listings remain business records."],
+          ["Evidence minimization", retentionSummary.minimizedEvidence ?? "Stored evidence is capped and redacted."],
+        ]} />
+        <div className="flex flex-wrap gap-2">
+          <a className="secondary-button" href="/terms" target="_blank" rel="noreferrer">Terms</a>
+          <a className="secondary-button" href="/privacy" target="_blank" rel="noreferrer">Privacy</a>
+          <button
+            className="primary-button"
+            type="button"
+            disabled={!canManage || Boolean(working)}
+            onClick={() => runAction("accept", "Deep Capture enabled.", { captureScopes: Object.keys(deepCaptureScopeLabels).filter((scope) => scope !== "model_improvement"), modelImprovementOptIn: false })}
+          >
+            <ShieldCheck size={16} />
+            {working === "accept" ? "Working..." : "Enable Deep Capture"}
+          </button>
+          <button className="secondary-button" type="button" disabled={!canManage || Boolean(working)} onClick={() => runAction("withdraw", "Deep Capture withdrawn.")}>
+            <X size={16} />
+            Withdraw Deep Capture
+          </button>
+          <button className="secondary-button" type="button" disabled={!canManage || Boolean(working) || !status?.modelImprovementEnabled} onClick={() => runAction("disable_model_improvement", "Model improvement disabled.")}>
+            <ShieldCheck size={16} />
+            Disable Model Improvement
+          </button>
+          <button className="secondary-button" type="button" disabled={!canManage || Boolean(working)} onClick={() => runAction("export_audit", "Deep Capture audit exported.")}>
+            <Download size={16} />
+            Export Deep Capture Audit
+          </button>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={!canManage || Boolean(working)}
+            onClick={() => {
+              if (window.confirm("Delete eligible unsaved temporary Deep Capture data? Saved Deal Radar listings and business records are not deleted.")) {
+                runAction("delete_eligible_captures", "Eligible unsaved capture data deleted or sanitized.");
+              }
+            }}
+          >
+            <Trash2 size={16} />
+            Delete eligible unsaved capture data
+          </button>
+        </div>
+        {!canManage && <p className="text-xs text-slate-500">Only owners/admins can enable, withdraw, export, or delete eligible Deep Capture data.</p>}
+      </div>
+    </Panel>
+  );
+}
+
+function deepCaptureStatusLabel(status?: string) {
+  if (status === "active") return "Active";
+  if (status === "withdrawn") return "Withdrawn";
+  if (status === "requires_renewal") return "Requires renewal";
+  return "Not enabled";
+}
+
+function downloadJson(filename: string, payload: unknown) {
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 function MarketSnapDashboard({

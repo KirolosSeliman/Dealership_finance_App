@@ -537,7 +537,15 @@ export const importPayloadSchema = z.object({
 
 export const deepCaptureConsentActionSchema = z.object({
   organizationId: z.string().uuid(),
-  action: z.enum(["status", "accept", "withdraw"]),
+  action: z.enum([
+    "status",
+    "accept",
+    "withdraw",
+    "list_events",
+    "export_audit",
+    "delete_eligible_captures",
+    "disable_model_improvement",
+  ]),
   captureScopes: z.array(z.enum(marketSnapCaptureScopes)).max(marketSnapCaptureScopes.length).optional(),
   modelImprovementOptIn: z.boolean().optional(),
   extensionInstallationId: z.string().trim().min(8).max(120).optional().or(z.literal("")),
