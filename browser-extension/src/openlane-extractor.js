@@ -150,6 +150,7 @@
           ignoredMarketGuideSample: textRegions.marketGuideText?.slice(0, 300),
         },
         mediaFiltering: { rejected: mediaRejected },
+        carfaxEvidence: carfax.carfaxEvidence,
         purchaseStatus: purchaseEconomics.purchaseStatus,
         purchaseEconomics: purchaseEconomics.metadata,
         negotiation: postSaleOutcome.metadata,
@@ -157,6 +158,7 @@
       extractedFields: {
         ...Object.fromEntries(labelValues.entries()),
         classification,
+        carfaxEvidence: carfax.carfaxEvidence,
         vinEvidence: vinResult.evidence,
         mileageEvidence: evidenceSnippet(mainVisibleText, /\b(Odometer|Mileage|Kilometers)\b.{0,80}/i, "Odometer"),
         debug: {
@@ -182,7 +184,7 @@
 
     listing.warnings = [...warnings, ...(classification.warnings || []), ...(postSaleOutcome.warnings || [])];
     listing.extractionConfidenceScore = calculateExtractionConfidence(listing);
-    return compact(listing);
+    return root.DealerFlowOpenLaneExtractionContract?.applyOpenLaneExtractionContract?.(compact(listing)) || compact(listing);
   }
 
   function isOpenLaneVehiclePage(doc = document, href = location.href) {

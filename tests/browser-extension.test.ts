@@ -22,6 +22,7 @@ test("Market Snap extension injects on OpenLane Canada vehicle pages", () => {
   assert.ok(matches.includes("https://*.openlane.com/*"));
   assert.ok(scripts.includes("src/storage.js"));
   assert.ok(scripts.includes("src/api-client.js"));
+  assert.ok(scripts.includes("src/openlane-extraction-contract.js"));
   assert.ok(scripts.includes("src/openlane-page-classifier.js"));
   assert.ok(scripts.includes("src/openlane-extractor.js"));
   assert.ok(scripts.includes("src/market-snap-widget.js"));
@@ -181,6 +182,12 @@ test("OpenLane extractor captures core vehicle, price, and auction fields", () =
 });
 
 test("OpenLane extractor exposes the dedicated helper contract", () => {
+  const contract = readFileSync(join(repoRoot, "browser-extension/src/openlane-extraction-contract.js"), "utf8");
+
+  for (const marker of ["buildOpenLaneExtractionContract", "pageContext", "identity", "auctionObservation", "purchaseOutcome", "condition", "media", "carfax", "debug"]) {
+    assert.match(contract, new RegExp(marker));
+  }
+
   for (const helper of [
     "extractOpenLaneListing",
     "isOpenLaneVehiclePage",

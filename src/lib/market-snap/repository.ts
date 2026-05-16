@@ -448,6 +448,16 @@ function openLaneMetadata(input: MarketListingInput) {
     extractedFields: input.extractedFields ?? {},
     missingData: input.missingData ?? [],
     videoCount: input.videoCount ?? input.videos?.length ?? 0,
+    extractionContract: {
+      pageContext: input.pageContext,
+      identity: input.identity,
+      auctionObservation: input.auctionObservation,
+      purchaseOutcome: input.purchaseOutcome,
+      condition: input.condition,
+      media: input.media,
+      carfax: input.carfax,
+      debug: input.debug,
+    },
   };
 }
 

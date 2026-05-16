@@ -6,6 +6,7 @@ import test from "node:test";
 
 const repoRoot = process.cwd();
 const require = createRequire(import.meta.url);
+require("../browser-extension/src/openlane-extraction-contract.js");
 const classifier = require("../browser-extension/src/openlane-page-classifier.js") as {
   classifyOpenLanePageFromHtml: (html: string, href?: string) => {
     pageType: string;
@@ -30,6 +31,12 @@ test("OpenLane extractor identifies supported vehicle pages", () => {
 
 test("OpenLane extractor reads core auction fields from fixture HTML", () => {
   const listing = extractor.extractOpenLaneFixture(fixture("openlane-basic.html"), "https://www.openlane.ca/vehicle/123");
+  const pageContext = listing.pageContext as Record<string, unknown>;
+  const identity = listing.identity as { vin?: string; year?: number; make?: string; model?: string; evidence?: unknown[] };
+  const auctionObservation = listing.auctionObservation as { currentBid?: number; buyNowPrice?: number; evidence?: unknown[] };
+  const media = listing.media as { photoCountVisible?: number; photos?: unknown[]; evidence?: unknown[] };
+  const carfax = listing.carfax as { mentioned?: boolean; available?: boolean; urlStatus?: string; evidence?: unknown[] };
+  const debug = listing.debug as { warnings?: unknown[]; sectionMapSummary?: Record<string, unknown> };
 
   assert.equal(listing.vin, "2T3R1RFV5MW123456");
   assert.equal(listing.year, 2021);
@@ -41,7 +48,37 @@ test("OpenLane extractor reads core auction fields from fixture HTML", () => {
   assert.equal(listing.buyNowPrice, 22900);
   assert.equal(listing.location, "Toronto, ON");
   assert.equal(listing.province, "ON");
+  assert.equal(pageContext.pageType, "active_listing");
+  assert.equal(pageContext.captureKind, "observation");
+  assert.ok(Array.isArray(pageContext.decisiveEvidence));
+  assert.equal(identity.vin, "2T3R1RFV5MW123456");
+  assert.equal(identity.year, 2021);
+  assert.equal(identity.make, "Toyota");
+  assert.equal(identity.model, "RAV4");
+  assert.ok(Array.isArray(identity.evidence));
+  assert.equal(auctionObservation.currentBid, 18500);
+  assert.equal(auctionObservation.buyNowPrice, 22900);
+  assert.ok(Array.isArray(auctionObservation.evidence));
+  assert.equal(media.photoCountVisible, 1);
+  assert.ok(Array.isArray(media.photos));
+  assert.ok(Array.isArray(media.evidence));
+  assert.equal(carfax.available, listing.carfaxAvailable);
+  assert.equal(carfax.urlStatus, listing.carfaxUrlStatus);
+  assert.ok(Array.isArray(carfax.evidence));
+  assert.ok(debug.sectionMapSummary);
+  assert.ok(Array.isArray(debug.warnings));
   assert.ok(Number(listing.extractionConfidenceScore) > 50);
+});
+
+test("OpenLane extraction contract caps raw text and excludes secrets", () => {
+  const listing = extractor.extractOpenLaneFixture(
+    `${fixture("openlane-basic.html")}<section>session_token=abc123 SUPABASE_SERVICE_ROLE_KEY secret password hunter2 ${"x".repeat(14000)}</section>`,
+    "https://www.openlane.ca/vehicle/123",
+  );
+  const text = JSON.stringify(listing);
+
+  assert.ok(String(listing.rawVisibleText).length <= 12000);
+  assert.doesNotMatch(text, /SUPABASE_SERVICE_ROLE_KEY|session_token|hunter2|password/i);
 });
 
 test("OpenLane extractor captures Carfax, media, and normalized relative URLs", () => {

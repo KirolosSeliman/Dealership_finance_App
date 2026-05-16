@@ -257,6 +257,14 @@ export interface MarketListingInput {
   videos?: MarketListingVideo[];
   videoCount?: number;
   rawVisibleText?: string;
+  pageContext?: Record<string, unknown>;
+  identity?: Record<string, unknown>;
+  auctionObservation?: Record<string, unknown>;
+  purchaseOutcome?: Record<string, unknown>;
+  condition?: Record<string, unknown>;
+  media?: Record<string, unknown>;
+  carfax?: Record<string, unknown>;
+  debug?: Record<string, unknown>;
   openlaneMetadata?: Record<string, unknown>;
   extractedFields?: Record<string, unknown>;
   missingData?: string[];
