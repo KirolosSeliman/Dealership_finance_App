@@ -2,7 +2,7 @@
   const RAW_TEXT_LIMIT = 12000;
   const OPENLANE_LABELS = {
     vin: ["VIN", "Vehicle Identification Number"],
-    mileageKm: ["Mileage", "Odometer", "Kilometers"],
+    mileageKm: ["Mileage", "Odometer", "Odomètre", "Odometre", "Kilometers"],
     exteriorColor: ["Exterior Color", "Exterior Colour", "Color", "Colour"],
     interiorColor: ["Interior Color", "Interior Colour"],
     drivetrain: ["Drivetrain", "Drive Train"],
@@ -39,6 +39,7 @@
     const title = titleResult.title;
     const decodedTitle = extractYearMakeModelTrim(title || mainVisibleText);
     const vinResult = extractBestVin(doc, rawVisibleText, mainVisibleText);
+    const mileageResult = extractBestMileage(doc, mainVisibleText, rawVisibleText, labelValues);
     const media = options.includeMediaUrls === false ? { photos: [], videos: [] } : extractMedia(doc, href);
     const mediaRejected = [...(media.rejected || []), ...(doc.__openlaneMediaRejected || [])];
     const mediaCounts = extractMediaCounts(mainVisibleText);
@@ -50,7 +51,7 @@
     const currentBid = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(labelValues, OPENLANE_LABELS.currentBid);
     const buyNowPrice = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(labelValues, OPENLANE_LABELS.buyNowPrice);
     const listedPrice = isPurchaseOutcomePage ? undefined : buyNowPrice || currentBid || moneyFrom(mainVisibleText.match(moneyRegex())?.[0]);
-    const mileageKm = extractMileage(firstLabel(labelValues, OPENLANE_LABELS.mileageKm)) || extractMileage(mainVisibleText) || extractMileage(rawVisibleText);
+    const mileageKm = mileageResult.mileageKm;
     const vin = vinResult.vin;
     const province = provinceFrom(firstLabel(labelValues, OPENLANE_LABELS.location) || mainVisibleText);
     const disclosureText = findDisclosureText(mainVisibleText);
@@ -160,13 +161,15 @@
         classification,
         carfaxEvidence: carfax.carfaxEvidence,
         vinEvidence: vinResult.evidence,
-        mileageEvidence: evidenceSnippet(mainVisibleText, /\b(Odometer|Mileage|Kilometers)\b.{0,80}/i, "Odometer"),
+        mileageEvidence: mileageResult.evidence,
         debug: {
           classifierDecision: classification,
           decisiveEvidence: classification.decisiveEvidence || [],
           ignoredEvidence: classification.ignoredEvidence || [],
           titleCandidates: titleResult.candidates,
           vinCandidates: vinResult.candidates,
+          mileageCandidates: mileageResult.candidates,
+          candidateScores: titleResult.candidates,
           priceCandidates: purchaseEconomics.priceCandidates || [],
           mediaRejected,
           mainTextSample: mainVisibleText.slice(0, 800),
@@ -307,34 +310,49 @@
 
   function bestTitle(doc, text) {
     const candidates = [];
+    const addCandidate = (value, source, weight = 0) => {
+      if (!value) return;
+      candidates.push({ text: value, source, weight });
+    };
+    const sectionMap = doc.__openlaneTextRegions?.sectionMap || doc.__openlaneSectionMap;
+    const heroZoneText = sectionMap?.zones?.vehicleHero?.text || "";
+    for (const match of heroZoneText.matchAll(/\b(19|20)\d{2}[^\n]{3,100}/g)) {
+      addCandidate(match[0], "section-map:vehicleHero", 95);
+    }
     const h1 = normalizeSpace(doc.querySelector?.("h1")?.innerText || "");
-    if (h1) candidates.push({ text: h1, source: "h1" });
+    addCandidate(h1, "h1", 35);
     const testTitle = normalizeSpace(doc.querySelector?.("[data-testid*='title' i]")?.innerText || "");
-    if (testTitle) candidates.push({ text: testTitle, source: "data-testid-title" });
+    addCandidate(testTitle, "data-testid-title", 70);
     for (const match of String(doc.__openlaneHtml || "").matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi)) {
-      candidates.push({ text: stripTags(match[1]), source: "html-h1" });
+      addCandidate(stripTags(match[1]), "html-h1", 35);
+    }
+    for (const match of String(doc.__openlaneHtml || "").matchAll(/<h[2-3]\b[^>]*>([\s\S]*?\b(19|20)\d{2}[\s\S]*?)<\/h[2-3]>/gi)) {
+      addCandidate(stripTags(match[1]), "html-heading", 60);
     }
     const heroText = String(doc.__openlaneHtml || "").match(/<(?:section|div)\b[^>]*(?:vehicle-hero|vehicle-header|data-testid=["'][^"']*vehicle)[^>]*>[\s\S]{0,1200}?<\/(?:section|div)>/i)?.[0];
     const heroTitle = stripTags(heroText || "").match(/\b(19|20)\d{2}[^\n]{3,90}/)?.[0];
-    if (heroTitle) candidates.push({ text: heroTitle, source: "hero" });
+    addCandidate(heroTitle, "hero", 90);
     const docTitle = normalizeSpace(doc.title || "");
-    if (docTitle) candidates.push({ text: docTitle, source: "document-title" });
+    addCandidate(docTitle, "document-title", 25);
     const ignoredTitleText = [
       doc.__openlaneTextRegions?.marketGuideText,
       doc.__openlaneTextRegions?.footerText,
     ].filter(Boolean).join("\n");
     for (const match of ignoredTitleText.matchAll(/[^\n]*(Sales history of similar vehicles|Market overview|OPENLANE wholesale sales data|Subscribe now|Other conditions)[^\n]*/gi)) {
-      candidates.push({ text: match[0], source: "ignored-region" });
+      addCandidate(match[0], "ignored-region", -80);
     }
     for (const match of String(text || "").matchAll(/\b(19|20)\d{2}[^\n]{3,100}/g)) {
-      candidates.push({ text: match[0], source: "visible-text" });
+      addCandidate(match[0], "visible-text", 20);
     }
 
     const evaluated = candidates.map((candidate) => {
       const clean = cleanTitleCandidate(candidate.text);
-      return { ...candidate, text: clean, rejectedReason: rejectedTitleReason(clean) };
+      const rejectedReason = rejectedTitleReason(clean);
+      return { ...candidate, text: clean, rejectedReason, score: rejectedReason ? -100 + (candidate.weight || 0) : scoreTitleCandidate(clean, candidate) };
     }).filter((candidate) => candidate.text);
-    const accepted = evaluated.find((candidate) => !candidate.rejectedReason && /\b(19|20)\d{2}\b/.test(candidate.text));
+    const accepted = evaluated
+      .filter((candidate) => !candidate.rejectedReason && /\b(19|20)\d{2}\b/.test(candidate.text))
+      .sort((a, b) => b.score - a.score)[0];
     return { title: accepted?.text || "OpenLane vehicle", candidates: evaluated.slice(0, 12) };
   }
 
@@ -355,21 +373,79 @@
   }
 
   function cleanTitleCandidate(value) {
-    return normalizeSpace(String(value || "").replace(/\bVIN\b.*$/i, "").replace(/\bOdometer\b.*$/i, ""));
+    return normalizeSpace(String(value || "")
+      .replace(/\bVIN\b.*$/i, "")
+      .replace(/\bOdometer\b.*$/i, "")
+      .replace(/\b(front|rear|side|left|right|interior|exterior|avant|arriere|arrière)\b\.?$/i, ""));
   }
 
   function rejectedTitleReason(value) {
     if (!value) return "empty";
-    if (/\b(Sales history of similar vehicles|Market overview|OPENLANE wholesale sales data|Subscribe now|Other conditions|legal footer)\b/i.test(value)) return "non_vehicle_market_or_footer_text";
+    if (/\b(Sales history of similar vehicles|Historique des ventes|Market overview|OPENLANE wholesale sales data|Subscribe now|Other conditions|legal footer)\b/i.test(value)) return "non_vehicle_market_or_footer_text";
+    if (/\b(launched|encan d[eé]marr[eé])\b/i.test(value)) return "auction_status_text";
+    if (/\b(19|20)\d{2}\s+(?:a|à|at)?\s*\d{1,2}:\d{2}\s*(?:am|pm)?\b/i.test(value)) return "auction_datetime";
     if (!/\b(19|20)\d{2}\b/.test(value)) return "missing_year";
     if (value.split(/\s+/).length < 3) return "too_short";
     return "";
   }
 
+  function scoreTitleCandidate(value, candidate) {
+    const decoded = parseTitle(value);
+    let score = candidate.weight || 0;
+    if (decoded.year) score += 15;
+    if (decoded.make && /^[A-Z][A-Za-z-]+$/.test(decoded.make)) score += 14;
+    if (decoded.model && /^[A-Za-z0-9][A-Za-z0-9-]+$/.test(decoded.model)) score += 12;
+    if (decoded.trim) score += Math.min(12, decoded.trim.split(/\s+/).length * 3);
+    if (/\b(VIN|NIV|odometer|odom[eè]tre|mileage|km)\b/i.test(candidate.text || "")) score += 8;
+    if (/section-map:vehicleHero|hero|vehicle/i.test(candidate.source || "")) score += 20;
+    if (/ignored-region|document-title/i.test(candidate.source || "")) score -= 25;
+    return score;
+  }
+
   function extractMileage(value) {
     const text = String(value || "");
-    const match = text.match(/(?:odometer|mileage|kilometers|kilometres)?\D*([\d,.\s]+)\s?(km|kilometres|kilometers)\b/i);
+    const match = text.match(/(?:odometer|odom[eè]tre|mileage|kilometers|kilometres)?\D*([\d,.\s]+)\s?(km|kilometres|kilometers)\b/i);
     return match ? numberFrom(match[1]) : undefined;
+  }
+
+  function extractBestMileage(doc, mainText, rawText, labelValues) {
+    const candidates = [];
+    const sectionMap = doc.__openlaneTextRegions?.sectionMap || doc.__openlaneSectionMap;
+    addMileageCandidates(candidates, "label_value", firstLabel(labelValues, OPENLANE_LABELS.mileageKm), 80);
+    addMileageCandidates(candidates, "section-map:vehicleSpecs", sectionMap?.zones?.vehicleSpecs?.text, 75);
+    addMileageCandidates(candidates, "section-map:vehicleHero", sectionMap?.zones?.vehicleHero?.text, 55);
+    addMileageCandidates(candidates, "main_text", mainText, 35);
+    addMileageCandidates(candidates, "visible_text", rawText, 10);
+    for (const node of Array.from(doc.querySelectorAll?.("[aria-label], [title], [data-testid], [data-mileage], [data-odometer]") || [])) {
+      const attrs = ["aria-label", "title", "data-testid", "data-mileage", "data-odometer"].map((name) => node.getAttribute?.(name)).filter(Boolean).join(" ");
+      addMileageCandidates(candidates, "dom_attributes", attrs, 65);
+      addMileageCandidates(candidates, "dom_text", `${node.innerText || ""} ${node.textContent || ""}`, 55);
+    }
+    candidates.sort((a, b) => b.score - a.score);
+    const chosen = candidates[0];
+    return {
+      mileageKm: chosen?.mileageKm,
+      evidence: chosen ? { matchedLabel: chosen.source, sourceText: chosen.sourceText, score: chosen.score } : undefined,
+      candidates: candidates.slice(0, 10),
+    };
+  }
+
+  function addMileageCandidates(candidates, source, value, weight = 0) {
+    const text = String(value || "");
+    if (!text) return;
+    const regex = /(?:odometer|odom[eè]tre|mileage|kilometers|kilometres)?[^\d\n]{0,35}([\d][\d,.\s]{1,12})\s?(km|kilometres|kilometers)\b/gi;
+    for (const match of text.matchAll(regex)) {
+      const mileageKm = numberFrom(match[1]);
+      if (!Number.isFinite(mileageKm)) continue;
+      const sourceText = snippetAround(text, match[0]);
+      const hasLabel = /\b(odometer|odom[eè]tre|mileage|kilometers|kilometres)\b/i.test(sourceText);
+      candidates.push({
+        mileageKm,
+        source,
+        sourceText,
+        score: weight + (hasLabel ? 18 : 0) + (mileageKm > 0 ? 4 : 0),
+      });
+    }
   }
 
   function extractVin(value) {
@@ -759,13 +835,6 @@
 
   function countNearLabel(text, labelPattern) {
     return numberFrom(String(text).match(new RegExp(`\\b(\\d{1,3})\\s+${labelPattern}\\b`, "i"))?.[1]);
-  }
-
-  function evidenceSnippet(text, regex, matchedLabel) {
-    const match = String(text || "").match(regex);
-    if (!match) return undefined;
-    const index = Math.max(0, match.index ?? 0);
-    return compact({ matchedLabel, sourceText: String(text).slice(index, index + 180).trim() });
   }
 
   function snippetAround(text, needle) {

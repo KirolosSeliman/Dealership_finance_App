@@ -70,6 +70,31 @@ test("OpenLane section map isolates noisy French VDP regions", () => {
   assert.equal(classification.pageType, "active_listing");
 });
 
+test("OpenLane identity scoring rejects auction datetime titles and chooses vehicle identity", () => {
+  const listing = extractor.extractOpenLaneFixture(fixture("openlane-touareg-identity-noise.html"), "https://app.openlane.ca/vdp/touareg?tab=active");
+  const debug = listing.extractedFields as { debug?: { titleCandidates?: Array<{ text?: string; score?: number; rejectedReason?: string }>; vinCandidates?: unknown[]; mileageCandidates?: unknown[] } };
+
+  assert.equal(listing.title, "2013 Volkswagen Touareg 4dr TDI");
+  assert.equal(listing.year, 2013);
+  assert.equal(listing.make, "Volkswagen");
+  assert.equal(listing.model, "Touareg");
+  assert.match(String(listing.trim), /4dr TDI/);
+  assert.equal(listing.vin, "WVGEP9BP4DD012345");
+  assert.equal(listing.mileageKm, 176240);
+  assert.ok((debug.debug?.vinCandidates || []).length > 0);
+  assert.ok((debug.debug?.mileageCandidates || []).length > 0);
+  assert.ok((debug.debug?.titleCandidates || []).some((candidate) => /2026/.test(String(candidate.text)) && candidate.rejectedReason));
+});
+
+test("OpenLane identity debug explains missing VIN when no candidate exists", () => {
+  const listing = extractor.extractOpenLaneFixture(fixture("openlane-missing-data.html"), "https://www.openlane.ca/vehicle/missing");
+  const fields = listing.extractedFields as { debug?: { vinCandidates?: unknown[] } };
+
+  assert.equal(listing.vin, undefined);
+  assert.deepEqual(fields.debug?.vinCandidates, []);
+  assert.ok((listing.missingData as string[]).includes("vin"));
+});
+
 test("OpenLane extractor reads core auction fields from fixture HTML", () => {
   const listing = extractor.extractOpenLaneFixture(fixture("openlane-basic.html"), "https://www.openlane.ca/vehicle/123");
   const pageContext = listing.pageContext as Record<string, unknown>;
