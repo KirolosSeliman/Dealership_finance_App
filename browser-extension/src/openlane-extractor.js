@@ -584,7 +584,7 @@
       if (looksLikeImage(match[1])) addPhoto(photos, { url: match[1], source: "link" }, href, rejected);
       if (looksLikeVideo(match[1])) addVideo(videos, { url: match[1], source: "link" }, href);
     }
-    return { photos: dedupeByUrl(photos), videos: dedupeByUrl(videos), rejected };
+    return { photos: dedupeByUrl(photos).slice(0, 80), videos: dedupeByUrl(videos).slice(0, 20), rejected };
   }
 
   function extractCarfaxInfo(doc, href, text = "") {
@@ -609,6 +609,7 @@
         node.textContent,
       ].filter(Boolean).join(" "));
     }
+    for (const evidence of extractCarfaxEvidenceFromHtml(doc.__openlaneHtml || "")) add("html_node", evidence);
     add("html_attributes", extractAttributeText(doc.__openlaneHtml || ""));
     add("visible_text", text);
     const withUrl = candidates.find((candidate) => candidate.url);
@@ -621,6 +622,15 @@
       carfaxUrlStatus: carfaxUrl ? "url_found" : carfaxMentioned ? "text_only" : "missing",
       carfaxEvidence: candidates.slice(0, 8),
     };
+  }
+
+  function extractCarfaxEvidenceFromHtml(html) {
+    const evidence = [];
+    for (const match of String(html || "").matchAll(/<([a-z][a-z0-9-]*)\b[^>]*(?:carfax|href=|data-href=|data-url=|onclick=)[^>]*>(?:[\s\S]*?<\/\1>)?/gi)) {
+      const source = match[0];
+      if (/carfax/i.test(source)) evidence.push(`${source.match(/<[^>]+>/)?.[0] || ""} ${stripTags(source)}`.slice(0, 500));
+    }
+    return evidence;
   }
 
   function extractConditionText(text, labels) {
@@ -813,6 +823,7 @@
 
   function mediaRejectionReason(url, photo = {}) {
     const value = String(url || "");
+    if (/^data:/i.test(value)) return "embedded_media_blob";
     if (!value || /\bnull\b|undefined/i.test(value) || /\/vdp\/null(?:$|[?#])/i.test(value)) return "null_or_placeholder";
     if (/\.svg(?:$|[?#])/i.test(value)) return "svg_ui_asset";
     if (/openlane-logo|favicon|icon|sprite|fonts\.gstatic\.com|translate/i.test(value)) return "ui_logo_icon";

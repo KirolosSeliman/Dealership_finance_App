@@ -152,14 +152,45 @@ test("OpenLane extractor captures Carfax, media, and normalized relative URLs", 
   const media = extractor.extractOpenLaneFixture(fixture("openlane-with-photos-videos.html"), "https://www.openlane.ca/vehicle/456");
   const photos = media.photos as Array<{ url: string; source?: string }>;
   const videos = media.videos as Array<{ url: string }>;
+  const carfaxContract = carfax.carfax as { url?: string; urlStatus?: string; evidence?: unknown[] };
 
   assert.equal(carfax.carfaxUrl, "https://www.carfax.ca/report/ABC123");
   assert.equal(carfax.carfaxAvailable, true);
+  assert.equal(carfaxContract.url, "https://www.carfax.ca/report/ABC123");
+  assert.equal(carfaxContract.urlStatus, "url_found");
+  assert.ok((carfaxContract.evidence || []).length > 0);
   assert.ok(photos.some((photo) => photo.url === "https://www.openlane.ca/photos/f150-front.jpg"));
   assert.ok(photos.some((photo) => photo.source === "picture"));
   assert.equal(new Set(photos.map((photo) => photo.url)).size, photos.length);
   assert.ok(videos.some((video) => video.url.includes("f150-walkaround.mp4")));
   assert.ok(videos.some((video) => video.url.includes("vimeo.com")));
+});
+
+test("OpenLane Carfax and media extraction stays truthful for text-only and junk assets", () => {
+  const textOnly = extractor.extractOpenLaneFixture(fixture("openlane-vdp-purchased-selling-price.html"), "https://app.openlane.ca/vdp/3KPFL4A72HE119966");
+  const dataHref = extractor.extractOpenLaneFixture(`
+    <main>
+      <h1>2021 Toyota RAV4 LE</h1>
+      <p>VIN 2T3R1RFV5MW123456</p>
+      <p>Odometer 52,300 KM</p>
+      <button data-href="https://www.carfax.ca/report/DATAHREF123" aria-label="Open CARFAX report">CARFAX</button>
+      <img src="data:image/png;base64,AAA" alt="inline junk" width="1200" height="900" />
+      <img src="/favicon.ico" width="16" height="16" />
+      <img src="https://pub-us.kar-media.com/vehicle/2T3R1RFV5MW123456/front.jpg" width="1280" height="960" />
+      <span>13 total</span>
+    </main>
+  `, "https://app.openlane.ca/vdp/rav4");
+  const textOnlyCarfax = textOnly.carfax as { url?: string; urlStatus?: string };
+  const dataHrefCarfax = dataHref.carfax as { url?: string; urlStatus?: string };
+  const photos = dataHref.photos as Array<{ url: string }>;
+
+  assert.equal(textOnlyCarfax.url, undefined);
+  assert.equal(textOnlyCarfax.urlStatus, "text_only");
+  assert.equal(dataHrefCarfax.url, "https://www.carfax.ca/report/DATAHREF123");
+  assert.equal(dataHrefCarfax.urlStatus, "url_found");
+  assert.equal(dataHref.imageCount, 13);
+  assert.ok(photos.some((photo) => photo.url.includes("pub-us.kar-media.com")));
+  assert.ok(photos.every((photo) => !/data:image|favicon|openlane-logo|\/vdp\/null|fonts\.gstatic\.com|translate/i.test(photo.url)));
 });
 
 test("OpenLane extractor captures condition reports and missing data", () => {
