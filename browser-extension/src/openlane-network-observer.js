@@ -6,6 +6,7 @@
   const observations = [];
 
   function startOpenLaneNetworkObserver(settings = {}) {
+    if (!hasActiveDeepCaptureConsent(settings)) return { enabled: false, reason: "deep_capture_consent_required" };
     if (settings.observePageNetworkData !== true) return { enabled: false, reason: "disabled" };
     injectPageHook();
     root.addEventListener?.("message", onPageMessage);
@@ -14,6 +15,10 @@
 
   function stopOpenLaneNetworkObserver() {
     root.removeEventListener?.("message", onPageMessage);
+  }
+
+  function hasActiveDeepCaptureConsent(settings = {}) {
+    return Boolean(settings.deepCaptureEnabled && settings.deepCaptureConsentStatus === "active" && settings.deepCaptureConsentId);
   }
 
   function onPageMessage(event) {

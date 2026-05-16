@@ -30,8 +30,8 @@
 
   async function boot() {
     await waitForBody();
-    STATE.settings = await window.DealerFlowMarketSnapStorage.getSettings();
-    window.DealerFlowOpenLaneNetworkObserver?.startOpenLaneNetworkObserver?.(STATE.settings);
+    STATE.settings = await refreshDeepCaptureConsentState(await window.DealerFlowMarketSnapStorage.getSettings());
+    syncDeepCaptureObserver();
     STATE.captureRuntime = window.DealerFlowMarketSnapCaptureRuntime.createMarketSnapCaptureRuntime({
       api: window.DealerFlowMarketSnapApi,
       now: () => Date.now(),
@@ -90,7 +90,7 @@
       onOpenSettings: () => openSettings(),
       onSettingsSaved: (settings) => {
         STATE.settings = settings;
-        window.DealerFlowOpenLaneNetworkObserver?.startOpenLaneNetworkObserver?.(STATE.settings);
+        syncDeepCaptureObserver();
         STATE.widget?.render({ status: "idle", listing: STATE.listing, valuation: STATE.valuation, message: "Settings saved." });
       },
       onHidePage: () => hideCurrentPage(),
@@ -153,7 +153,8 @@
       return;
     }
 
-    await expandReadOnlySections();
+    if (hasActiveDeepCaptureConsent()) await expandReadOnlySections();
+    else STATE.safeExpansion = null;
     const listing = extractListing();
     if (!isVehicleListing(listing)) {
       STATE.widget?.render({ status: "warning", listing, message: "OpenLane vehicle data is still loading or incomplete." });
@@ -213,8 +214,10 @@
       includeMediaUrls: STATE.settings?.includeMediaUrls !== false,
       includeRawVisibleText: STATE.settings?.includeRawVisibleText !== false,
     });
-    const networkEvidence = window.DealerFlowOpenLaneNetworkObserver?.getOpenLaneNetworkEvidence?.() || [];
-    const withNetworkEvidence = window.DealerFlowOpenLaneNetworkObserver?.mergeNetworkEvidenceIntoListing?.(listing, networkEvidence) || listing;
+    const networkEvidence = hasActiveDeepCaptureConsent() ? window.DealerFlowOpenLaneNetworkObserver?.getOpenLaneNetworkEvidence?.() || [] : [];
+    const withNetworkEvidence = hasActiveDeepCaptureConsent()
+      ? window.DealerFlowOpenLaneNetworkObserver?.mergeNetworkEvidenceIntoListing?.(listing, networkEvidence) || listing
+      : listing;
     const merged = {
       ...withNetworkEvidence,
       pageType: classification.pageType,
@@ -223,13 +226,116 @@
       openlaneMetadata: { ...(withNetworkEvidence.openlaneMetadata || {}), classification },
     };
     if (STATE.safeExpansion) merged.openlaneMetadata.safeExpansion = STATE.safeExpansion;
-    if (STATE.settings?.debugMode) logExtractionDebug(merged);
-    return merged;
+    const gated = applyConsentGateToListing(merged);
+    if (STATE.settings?.debugMode) logExtractionDebug(gated);
+    return gated;
   }
 
   async function expandReadOnlySections() {
+    if (!hasActiveDeepCaptureConsent()) {
+      STATE.safeExpansion = null;
+      return null;
+    }
     STATE.safeExpansion = await window.DealerFlowOpenLaneSafeExpander?.expandOpenLaneReadOnlySections?.(document, { maxSteps: 8, waitMs: 120 });
     return STATE.safeExpansion;
+  }
+
+  async function refreshDeepCaptureConsentState(settings) {
+    if (!settings?.organizationId || !settings.deepCaptureEnabled) {
+      return window.DealerFlowMarketSnapStorage.saveSettings({
+        ...settings,
+        deepCaptureEnabled: false,
+        observePageNetworkData: false,
+        deepCaptureConsentStatus: settings?.deepCaptureConsentStatus === "withdrawn" ? "withdrawn" : "off",
+      });
+    }
+    try {
+      const response = await window.DealerFlowMarketSnapApi.getDeepCaptureConsentStatus(settings);
+      const active = response.consentStatus === "active";
+      return window.DealerFlowMarketSnapStorage.saveSettings({
+        ...settings,
+        deepCaptureEnabled: active,
+        observePageNetworkData: active,
+        deepCaptureConsentId: response.deepCaptureConsentId || "",
+        deepCaptureConsentVersion: response.deepCaptureConsentVersion || "",
+        deepCaptureConsentAcceptedAt: response.deepCaptureConsentAcceptedAt || "",
+        deepCaptureConsentStatus: active ? "active" : response.consentStatus || "off",
+      });
+    } catch (error) {
+      if (settings.debugMode) console.warn("Deep Capture consent status check failed", error);
+      return window.DealerFlowMarketSnapStorage.saveSettings({
+        ...settings,
+        deepCaptureEnabled: false,
+        observePageNetworkData: false,
+        deepCaptureConsentStatus: "paused",
+      });
+    }
+  }
+
+  function syncDeepCaptureObserver() {
+    if (hasActiveDeepCaptureConsent()) {
+      window.DealerFlowOpenLaneNetworkObserver?.startOpenLaneNetworkObserver?.(STATE.settings);
+      return;
+    }
+    window.DealerFlowOpenLaneNetworkObserver?.stopOpenLaneNetworkObserver?.();
+  }
+
+  function hasActiveDeepCaptureConsent() {
+    return Boolean(
+      STATE.settings?.deepCaptureEnabled
+        && STATE.settings?.deepCaptureConsentStatus === "active"
+        && STATE.settings?.deepCaptureConsentId,
+    );
+  }
+
+  function applyConsentGateToListing(listing) {
+    if (hasActiveDeepCaptureConsent()) {
+      return {
+        ...listing,
+        captureLevel: "deep_capture",
+        captureScopes: deepCaptureScopes(),
+        deepCaptureConsentId: STATE.settings.deepCaptureConsentId,
+        sourceEvidence: buildSourceEvidence(listing),
+      };
+    }
+    const basic = { ...listing };
+    for (const field of ["pageContext", "identity", "auctionObservation", "purchaseOutcome", "condition", "media", "carfax", "debug", "sourceEvidence", "deepCaptureConsentId"]) {
+      delete basic[field];
+    }
+    const metadata = { ...(basic.openlaneMetadata || {}) };
+    delete metadata.networkEvidence;
+    delete metadata.safeExpansion;
+    return {
+      ...basic,
+      captureLevel: "basic_dom",
+      captureScopes: ["dom_visible"],
+      openlaneMetadata: metadata,
+    };
+  }
+
+  function deepCaptureScopes() {
+    const scopes = [
+      "dom_visible",
+      "safe_read_only_expansion",
+      "network_response_observation",
+      "fee_outcome_capture",
+      "post_sale_outcome_capture",
+      "media_url_capture",
+    ];
+    if (STATE.settings?.modelImprovementOptIn) scopes.push("model_improvement");
+    return scopes;
+  }
+
+  function buildSourceEvidence(listing) {
+    const evidence = [{ scope: "dom_visible", evidenceType: "dom_text", sourceUrl: location.href, capturedAt: new Date().toISOString(), confidenceScore: listing.extractionConfidenceScore }];
+    if (STATE.safeExpansion) evidence.push({ scope: "safe_read_only_expansion", evidenceType: "expanded_section", sourceUrl: location.href, capturedAt: new Date().toISOString() });
+    for (const item of listing.openlaneMetadata?.networkEvidence || []) {
+      evidence.push({ scope: "network_response_observation", evidenceType: "network_response_summary", endpointPattern: item.endpointPattern, capturedAt: item.capturedAt });
+    }
+    if (listing.photos?.length || listing.videos?.length || listing.imageCount) evidence.push({ scope: "media_url_capture", evidenceType: "media_url", sourceUrl: location.href, capturedAt: new Date().toISOString() });
+    if (listing.buyPriceAuction || listing.totalInvoiceAmount || listing.finalAcquisitionCost) evidence.push({ scope: "fee_outcome_capture", evidenceType: "fee_outcome", sourceUrl: location.href, capturedAt: new Date().toISOString() });
+    if (listing.captureKind === "candidate_outcome" || listing.captureKind === "verified_outcome") evidence.push({ scope: "post_sale_outcome_capture", evidenceType: "post_sale_outcome", sourceUrl: location.href, capturedAt: new Date().toISOString() });
+    return evidence.slice(0, 50);
   }
 
   function classifyOpenLanePage() {

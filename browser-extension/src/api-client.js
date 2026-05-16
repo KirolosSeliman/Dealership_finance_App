@@ -46,6 +46,7 @@
     const payload = typeof error === "number" ? responsePayload : responsePayload || error?.payload;
     const message = String(payload?.message || payload?.error || error?.message || "Market Snap API failed.");
     if (status === 401) return "Dealer Flow needs you signed in on the same browser profile.";
+    if (status === 403 && message.includes("Deep Capture")) return message;
     if (status === 403) return "Dealer Flow rejected this organization or extension origin.";
     if (status === 429) return "Market Snap API is rate limited. Wait a moment before refreshing.";
     if (message.includes("Invalid request origin")) return "Dealer Flow blocked the extension origin. Add this extension ID to MARKET_SNAP_EXTENSION_ORIGINS.";
@@ -81,6 +82,28 @@
     });
   }
 
+  async function getDeepCaptureConsentStatus(first) {
+    const settings = first?.dealerFlowBaseUrl || first?.organizationId ? first : await getMarketSnapSettings();
+    validateMarketSnapSettings(settings);
+    return requestJson(settings, "/api/market-snap/deep-capture-consent", consentPayload(settings, "status"));
+  }
+
+  async function acceptDeepCaptureConsent(first, overrides = {}) {
+    const settings = first?.dealerFlowBaseUrl || first?.organizationId ? first : await getMarketSnapSettings();
+    validateMarketSnapSettings(settings);
+    return requestJson(settings, "/api/market-snap/deep-capture-consent", {
+      ...consentPayload(settings, "accept"),
+      captureScopes: overrides.captureScopes || defaultDeepCaptureScopes(settings),
+      modelImprovementOptIn: Boolean(overrides.modelImprovementOptIn ?? settings.modelImprovementOptIn),
+    });
+  }
+
+  async function withdrawDeepCaptureConsent(first) {
+    const settings = first?.dealerFlowBaseUrl || first?.organizationId ? first : await getMarketSnapSettings();
+    validateMarketSnapSettings(settings);
+    return requestJson(settings, "/api/market-snap/deep-capture-consent", consentPayload(settings, "withdraw"));
+  }
+
   async function requestArgs(first, second, third) {
     if (first?.dealerFlowBaseUrl || first?.organizationId) {
       return { settings: first, listing: second, valuation: third };
@@ -97,6 +120,28 @@
     return buildDealerFlowUrl("/market-snap", settings);
   }
 
+  function consentPayload(settings, action) {
+    return {
+      action,
+      organizationId: settings.organizationId,
+      extensionInstallationId: settings.extensionInstallationId || "",
+      source: "extension_options",
+    };
+  }
+
+  function defaultDeepCaptureScopes(settings) {
+    const scopes = [
+      "dom_visible",
+      "safe_read_only_expansion",
+      "network_response_observation",
+      "fee_outcome_capture",
+      "post_sale_outcome_capture",
+      "media_url_capture",
+    ];
+    if (settings.modelImprovementOptIn) scopes.push("model_improvement");
+    return scopes;
+  }
+
   window.DealerFlowMarketSnapApi = {
     getMarketSnapSettings,
     saveMarketSnapSettings,
@@ -105,6 +150,9 @@
     analyzeListing,
     saveListing,
     captureListing,
+    getDeepCaptureConsentStatus,
+    acceptDeepCaptureConsent,
+    withdrawDeepCaptureConsent,
     buildDealerFlowUrl,
     dealerFlowMarketSnapUrl,
     formatApiError,

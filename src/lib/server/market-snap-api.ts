@@ -1,7 +1,14 @@
 import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { assertSameOrigin, checkRateLimit, requireOrganizationRole, routeErrorResponse } from "@/lib/server/security";
-import { isMarketSnapDeepCapturePayload, requiredDeepCaptureScopes, requireMarketSnapDeepCaptureConsent } from "@/lib/server/market-snap-consent";
+import { DEEP_CAPTURE_CONSENT_VERSION, DEEP_CAPTURE_PRIVACY_VERSION, DEEP_CAPTURE_SCOPES, DEEP_CAPTURE_TERMS_VERSION } from "@/lib/market-snap/deep-capture-policy";
+import {
+  getActiveMarketSnapCaptureConsent,
+  isMarketSnapDeepCapturePayload,
+  recordMarketSnapConsentEvent,
+  requiredDeepCaptureScopes,
+  requireMarketSnapDeepCaptureConsent,
+} from "@/lib/server/market-snap-consent";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { mapExpense, mapVehicle } from "@/lib/supabase/mappers";
 import { runComparableEstimator, shouldRefreshVehicle } from "@/lib/market-snap/engine";
@@ -16,7 +23,8 @@ import {
   saveVehicleValuation,
   upsertMarketListingFromAnalysis,
 } from "@/lib/market-snap/repository";
-import { dealRadarQuerySchema, importPayloadSchema, marketListingPayloadSchema, saveListingSchema, valuationRequestSchema } from "@/lib/market-snap/validation";
+import { dealRadarQuerySchema, deepCaptureConsentActionSchema, importPayloadSchema, marketListingPayloadSchema, saveListingSchema, valuationRequestSchema } from "@/lib/market-snap/validation";
+import type { MarketSnapCaptureScope } from "@/types/market-snap";
 import type { MarketListingInput } from "@/types/market-snap";
 import type { Vehicle, VehicleExpense } from "@/types/domain";
 
@@ -50,6 +58,122 @@ export async function marketSnapOptions(request: Request) {
   return new Response(null, { status: 204, headers: marketSnapCorsHeaders(request) });
 }
 
+export async function deepCaptureConsent(request: Request) {
+  return withMarketSnapAuth(request, "market-snap-deep-capture-consent", async ({ client, userId, body }) => {
+    const payload = deepCaptureConsentActionSchema.parse(body);
+
+    if (payload.action === "status") {
+      await requireOrganizationRole(client, userId, payload.organizationId, ["owner", "admin", "member", "accountant", "viewer"]);
+      return NextResponse.json({ ok: true, ...(await buildDeepCaptureConsentStatus(client, payload.organizationId, userId)) });
+    }
+
+    await requireOrganizationRole(client, userId, payload.organizationId, ["owner", "admin"]);
+
+    if (payload.action === "withdraw") {
+      const active = await getActiveMarketSnapCaptureConsent(client, payload.organizationId, userId);
+      if (active) {
+        const { error } = await client
+          .from("market_snap_capture_consents")
+          .update({
+            status: "withdrawn",
+            withdrawn_at: new Date().toISOString(),
+            withdrawn_by_user_id: userId,
+          })
+          .eq("id", active.id)
+          .eq("organization_id", payload.organizationId);
+        if (error) throw error;
+        await recordMarketSnapConsentEvent(client, {
+          organizationId: payload.organizationId,
+          consentId: active.id,
+          eventType: "consent_withdrawn",
+          actorUserId: userId,
+          details: { source: payload.source },
+        });
+      }
+      return NextResponse.json({ ok: true, consentStatus: "withdrawn", deepCaptureEnabled: false });
+    }
+
+    const existing = await getActiveMarketSnapCaptureConsent(client, payload.organizationId, userId);
+    if (existing && isCurrentDeepCaptureConsent(existing)) {
+      return NextResponse.json({ ok: true, ...consentStatusPayload(existing, "active") });
+    }
+    if (existing) {
+      const { error } = await client
+        .from("market_snap_capture_consents")
+        .update({ status: "superseded", withdrawn_at: new Date().toISOString(), withdrawn_by_user_id: userId })
+        .eq("id", existing.id)
+        .eq("organization_id", payload.organizationId);
+      if (error) throw error;
+      await recordMarketSnapConsentEvent(client, {
+        organizationId: payload.organizationId,
+        consentId: existing.id,
+        eventType: "consent_version_superseded",
+        actorUserId: userId,
+        details: { source: payload.source },
+      });
+    }
+
+    const scopes = normalizeConsentScopes(payload.captureScopes, payload.modelImprovementOptIn);
+    const { data, error } = await client
+      .from("market_snap_capture_consents")
+      .insert({
+        organization_id: payload.organizationId,
+        user_id: userId,
+        status: "active",
+        consent_version: DEEP_CAPTURE_CONSENT_VERSION,
+        terms_version: DEEP_CAPTURE_TERMS_VERSION,
+        privacy_version: DEEP_CAPTURE_PRIVACY_VERSION,
+        capture_scopes: scopes,
+        allowed_domains: ["openlane.ca", "openlane.com"],
+        allowed_hosts: ["app.openlane.ca", "*.openlane.ca", "*.openlane.com"],
+        allowed_data_categories: [
+          "visible_vehicle_data",
+          "visible_listing_economics",
+          "condition_disclosures",
+          "media_url_metadata",
+          "capped_evidence",
+        ],
+        source: payload.source,
+        extension_installation_id: payload.extensionInstallationId || null,
+        accepted_by_user_id: userId,
+      })
+      .select("*")
+      .single();
+    if (error) throw error;
+
+    const consent = {
+      id: String(data.id),
+      organizationId: String(data.organization_id),
+      status: "active" as const,
+      consentVersion: String(data.consent_version),
+      termsVersion: String(data.terms_version),
+      privacyVersion: String(data.privacy_version),
+      captureScopes: Array.isArray(data.capture_scopes) ? data.capture_scopes as MarketSnapCaptureScope[] : scopes,
+      allowedHosts: Array.isArray(data.allowed_hosts) ? data.allowed_hosts.map(String) : [],
+      acceptedAt: String(data.accepted_at),
+    };
+
+    await recordMarketSnapConsentEvent(client, {
+      organizationId: payload.organizationId,
+      consentId: consent.id,
+      eventType: "consent_created",
+      actorUserId: userId,
+      details: { source: payload.source, captureScopes: scopes },
+    });
+    if (payload.modelImprovementOptIn) {
+      await recordMarketSnapConsentEvent(client, {
+        organizationId: payload.organizationId,
+        consentId: consent.id,
+        eventType: "model_improvement_enabled",
+        actorUserId: userId,
+        details: { source: payload.source },
+      });
+    }
+
+    return NextResponse.json({ ok: true, ...consentStatusPayload(consent, "active") });
+  });
+}
+
 function assertAllowedMarketSnapOrigin(request: Request) {
   const origin = request.headers.get("origin");
   if (!origin) return;
@@ -75,6 +199,58 @@ function allowedExtensionOrigins() {
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
+}
+
+async function buildDeepCaptureConsentStatus(client: Client, organizationId: string, userId: string) {
+  const consent = await getActiveMarketSnapCaptureConsent(client, organizationId, userId);
+  if (!consent) return { consentStatus: "off", deepCaptureEnabled: false };
+  if (!isCurrentDeepCaptureConsent(consent)) return consentStatusPayload(consent, "requires_renewal");
+  return consentStatusPayload(consent, "active");
+}
+
+function consentStatusPayload(
+  consent: {
+    id: string;
+    consentVersion: string;
+    termsVersion: string;
+    privacyVersion: string;
+    captureScopes: MarketSnapCaptureScope[];
+    acceptedAt: string;
+  },
+  consentStatus: "active" | "requires_renewal",
+) {
+  return {
+    consentStatus,
+    deepCaptureEnabled: consentStatus === "active",
+    deepCaptureConsentId: consent.id,
+    deepCaptureConsentVersion: consent.consentVersion,
+    deepCaptureTermsVersion: consent.termsVersion,
+    deepCapturePrivacyVersion: consent.privacyVersion,
+    deepCaptureConsentAcceptedAt: consent.acceptedAt,
+    captureScopes: consent.captureScopes,
+  };
+}
+
+function isCurrentDeepCaptureConsent(consent: { consentVersion: string; termsVersion: string; privacyVersion: string }) {
+  return consent.consentVersion === DEEP_CAPTURE_CONSENT_VERSION
+    && consent.termsVersion === DEEP_CAPTURE_TERMS_VERSION
+    && consent.privacyVersion === DEEP_CAPTURE_PRIVACY_VERSION;
+}
+
+function normalizeConsentScopes(scopes: readonly MarketSnapCaptureScope[] | undefined, modelImprovementOptIn?: boolean) {
+  const normalized = new Set<MarketSnapCaptureScope>([
+    "dom_visible",
+    "safe_read_only_expansion",
+    "network_response_observation",
+    "fee_outcome_capture",
+    "post_sale_outcome_capture",
+    "media_url_capture",
+  ]);
+  for (const scope of scopes ?? []) {
+    if (DEEP_CAPTURE_SCOPES.includes(scope)) normalized.add(scope);
+  }
+  if (!modelImprovementOptIn) normalized.delete("model_improvement");
+  return Array.from(normalized);
 }
 
 export async function analyzeListing(request: Request) {

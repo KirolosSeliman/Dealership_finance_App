@@ -510,6 +510,15 @@ export const importPayloadSchema = z.object({
   rows: z.array(importListingRowSchema).min(1).max(1000),
 });
 
+export const deepCaptureConsentActionSchema = z.object({
+  organizationId: z.string().uuid(),
+  action: z.enum(["status", "accept", "withdraw"]),
+  captureScopes: z.array(z.enum(marketSnapCaptureScopes)).max(marketSnapCaptureScopes.length).optional(),
+  modelImprovementOptIn: z.boolean().optional(),
+  extensionInstallationId: z.string().trim().min(8).max(120).optional().or(z.literal("")),
+  source: z.enum(["web_app_settings", "extension_options", "onboarding"]).default("extension_options"),
+});
+
 export const authorizedExtractionRequestSchema = z.object({
   organizationId: z.string().uuid(),
   html: z.string().min(1).max(1_000_000),

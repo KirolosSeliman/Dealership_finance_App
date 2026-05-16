@@ -20,13 +20,15 @@
       <label class="checkbox"><input id="autoAnalyze" type="checkbox" /> Auto-analyze supported OpenLane pages</label>
       <label class="checkbox"><input id="autoCapture" type="checkbox" /> Capture observations and outcomes</label>
       <label class="checkbox"><input id="autoSave" type="checkbox" /> Auto-save to Deal Radar after analysis</label>
-      <label class="checkbox"><input id="modelImprovementOptIn" type="checkbox" /> Allow verified outcomes for model improvement</label>
+      <label class="checkbox"><input id="deepCaptureEnabled" type="checkbox" /> Deep Capture</label>
+      <label class="checkbox"><input id="modelImprovementOptIn" type="checkbox" /> Model Improvement</label>
       <label class="checkbox"><input id="widgetCollapsed" type="checkbox" /> Start widget collapsed</label>
       <label class="checkbox"><input id="debugMode" type="checkbox" /> Debug mode</label>
       <label class="checkbox"><input id="includeMediaUrls" type="checkbox" /> Include visible media URLs</label>
       <label class="checkbox"><input id="includeRawVisibleText" type="checkbox" /> Include capped visible page text</label>
       <section class="notice">
         <h2>Deep Capture Mode</h2>
+        <p><strong id="deepCaptureStatusBadge">Off - consent needed</strong></p>
         <p>Deep Capture requires affirmative consent from an authorized Dealer Flow organization user before it is enabled. The client is authorized only to capture visible vehicle/listing/business data from pages they are allowed to access.</p>
         <ul>
           <li>Normal capture reads visible listing fields for Market Snap analysis.</li>
@@ -35,6 +37,13 @@
           <li>No CAPTCHA bypass. No anti-bot bypass. No login-wall bypass. No hidden request manipulation.</li>
           <li>No credential, cookie, token, or session capture. Consent can be withdrawn.</li>
         </ul>
+        <p>View captured JSON and Copy extracted JSON are available in the in-page widget. Copied debug payloads redact secrets before they leave the page.</p>
+        <div class="button-row">
+          <button id="refreshDeepCaptureConsent" type="button">Check status</button>
+          <button id="acceptDeepCaptureConsent" type="button">Accept / renew consent</button>
+          <button id="withdrawDeepCaptureConsent" type="button">Withdraw consent</button>
+        </div>
+        <p class="muted">Status labels: Off - consent needed; On - active consent; Paused - backend unreachable; Requires renewal - consent version changed.</p>
       </section>
       <label class="checkbox"><input id="observePageNetworkData" type="checkbox" /> Deep Capture: observe page-generated OpenLane JSON responses after consent</label>
       <p class="muted">Use only authorized/user-assisted listing capture. This extension does not bypass login walls, CAPTCHAs, rate limits, access controls, or platform restrictions.</p>

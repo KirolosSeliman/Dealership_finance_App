@@ -111,6 +111,12 @@ button {
   padding-left: 18px;
 }
 
+.button-row {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 1fr;
+}
+
 .empty,
 #status,
 .muted {

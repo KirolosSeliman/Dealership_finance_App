@@ -39,6 +39,7 @@
             <label><input name="autoAnalyze" type="checkbox" /> Auto-analyze</label>
             <label><input name="autoCapture" type="checkbox" /> Capture observations/outcomes</label>
             <label><input name="autoSave" type="checkbox" /> Auto-save to Deal Radar</label>
+            <label><input name="deepCaptureEnabled" type="checkbox" /> Deep Capture</label>
             <label><input name="modelImprovementOptIn" type="checkbox" /> Model improvement opt-in</label>
             <label><input name="observePageNetworkData" type="checkbox" /> Observe page network data</label>
             <label><input name="includeMediaUrls" type="checkbox" /> Include media URLs</label>
@@ -180,6 +181,7 @@
     if (!listing && !valuation) return "";
     return [
       pill("Carfax", carfaxLabel(listing)),
+      pill("Deep Capture", listing?.captureLevel === "deep_capture" ? "On - active consent" : "Off - consent needed"),
       pill("Photos", String(listing?.imageCount ?? listing?.photos?.length ?? 0)),
       pill("Videos", String(listing?.videoCount ?? listing?.videos?.length ?? 0)),
       pill("Warnings", String((valuation?.warnings || listing?.warnings || []).length)),
