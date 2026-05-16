@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { assertSameOrigin, checkRateLimit, requireOrganizationRole, routeErrorResponse } from "@/lib/server/security";
+import { isMarketSnapDeepCapturePayload, requiredDeepCaptureScopes, requireMarketSnapDeepCaptureConsent } from "@/lib/server/market-snap-consent";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { mapExpense, mapVehicle } from "@/lib/supabase/mappers";
 import { runComparableEstimator, shouldRefreshVehicle } from "@/lib/market-snap/engine";
@@ -90,6 +91,15 @@ export async function captureListing(request: Request) {
   return withMarketSnapAuth(request, "market-snap-capture-listing", async ({ client, userId, body }) => {
     const listing = marketListingPayloadSchema.parse(body);
     await requireOrganizationRole(client, userId, listing.organizationId, ["owner", "admin", "member"]);
+    if (isMarketSnapDeepCapturePayload(listing)) {
+      await requireMarketSnapDeepCaptureConsent(
+        client,
+        listing.organizationId,
+        userId,
+        requiredDeepCaptureScopes(listing),
+        listing.deepCaptureConsentId,
+      );
+    }
     const captureStorage = await persistOpenLaneCapture(client, listing, userId);
     return NextResponse.json({ ok: true, captureStorage });
   });
@@ -100,6 +110,15 @@ export async function saveListing(request: Request) {
     const payload = saveListingSchema.parse(body);
     await requireOrganizationRole(client, userId, payload.organizationId, ["owner", "admin", "member"]);
     const listing: MarketListingInput = { ...payload.listing, organizationId: payload.organizationId };
+    if (isMarketSnapDeepCapturePayload(listing)) {
+      await requireMarketSnapDeepCaptureConsent(
+        client,
+        payload.organizationId,
+        userId,
+        requiredDeepCaptureScopes(listing),
+        listing.deepCaptureConsentId,
+      );
+    }
     const comparables = await fetchMarketComparables(client, payload.organizationId, listing);
     const valuation = runComparableEstimator({ organizationId: payload.organizationId, listing, comparables });
     const marketListingId = await upsertMarketListingFromAnalysis(client, listing, valuation);

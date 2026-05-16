@@ -27,6 +27,15 @@ export type OpenLanePageType =
   | "unknown";
 export type MarketCaptureKind = "observation" | "candidate_outcome" | "verified_outcome" | "manual_confirmation";
 export type OutcomeConfidence = "low" | "medium" | "high" | "verified";
+export type MarketSnapCaptureLevel = "basic_dom" | "deep_capture";
+export type MarketSnapCaptureScope =
+  | "dom_visible"
+  | "safe_read_only_expansion"
+  | "network_response_observation"
+  | "fee_outcome_capture"
+  | "post_sale_outcome_capture"
+  | "media_url_capture"
+  | "model_improvement";
 export type PriceSemantic =
   | "observation"
   | "candidate_wholesale_label"
@@ -49,6 +58,23 @@ export interface CaptureEvidence {
     | "user_confirmation";
   sourceText?: string;
   sourceUrl?: string;
+  capturedAt?: string;
+  confidenceScore?: number;
+}
+
+export interface MarketSnapSourceEvidence {
+  scope: MarketSnapCaptureScope;
+  evidenceType?:
+    | "dom_text"
+    | "expanded_section"
+    | "network_response_summary"
+    | "fee_outcome"
+    | "post_sale_outcome"
+    | "media_url"
+    | "manual_confirmation";
+  sourceText?: string;
+  sourceUrl?: string;
+  endpointPattern?: string;
   capturedAt?: string;
   confidenceScore?: number;
 }
@@ -165,6 +191,10 @@ export interface MarketListingInput {
   sourceType?: MarketSourceType;
   pageType?: OpenLanePageType;
   captureKind?: MarketCaptureKind;
+  captureLevel?: MarketSnapCaptureLevel;
+  captureScopes?: MarketSnapCaptureScope[];
+  deepCaptureConsentId?: string;
+  sourceEvidence?: MarketSnapSourceEvidence[];
   outcomeConfidence?: OutcomeConfidence;
   priceSemantics?: Partial<Record<
     | "listedPrice"

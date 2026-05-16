@@ -2,6 +2,16 @@ export const DEEP_CAPTURE_CONSENT_VERSION = "deep-capture-consent-2026-05-16";
 export const DEEP_CAPTURE_TERMS_VERSION = "deep-capture-terms-2026-05-16";
 export const DEEP_CAPTURE_PRIVACY_VERSION = "deep-capture-privacy-2026-05-16";
 
+export const DEEP_CAPTURE_SCOPES = [
+  "dom_visible",
+  "safe_read_only_expansion",
+  "network_response_observation",
+  "fee_outcome_capture",
+  "post_sale_outcome_capture",
+  "media_url_capture",
+  "model_improvement",
+] as const;
+
 export const DEEP_CAPTURE_LEGAL_REVIEW_NOTICE =
   "This is a product/legal draft and must be reviewed by qualified legal counsel before production rollout.";
 

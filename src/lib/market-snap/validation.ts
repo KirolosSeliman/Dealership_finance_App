@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { DEEP_CAPTURE_SCOPES } from "@/lib/market-snap/deep-capture-policy";
 
 export const marketTypes = [
   "clean_retail_market",
@@ -24,6 +25,8 @@ export const openLanePageTypes = [
   "unknown",
 ] as const;
 export const marketCaptureKinds = ["observation", "candidate_outcome", "verified_outcome", "manual_confirmation"] as const;
+export const marketSnapCaptureLevels = ["basic_dom", "deep_capture"] as const;
+export const marketSnapCaptureScopes = DEEP_CAPTURE_SCOPES;
 export const outcomeConfidenceLevels = ["low", "medium", "high", "verified"] as const;
 export const priceSemanticValues = [
   "observation",
@@ -107,6 +110,23 @@ const captureEvidenceSchema = z.object({
   ]),
   sourceText: z.string().trim().max(1000).optional(),
   sourceUrl: optionalHttpUrl,
+  capturedAt: z.string().datetime().optional(),
+  confidenceScore: score,
+}).strict();
+const sourceEvidenceSchema = z.object({
+  scope: z.enum(marketSnapCaptureScopes),
+  evidenceType: z.enum([
+    "dom_text",
+    "expanded_section",
+    "network_response_summary",
+    "fee_outcome",
+    "post_sale_outcome",
+    "media_url",
+    "manual_confirmation",
+  ]).optional(),
+  sourceText: z.string().trim().max(1000).optional(),
+  sourceUrl: optionalHttpUrl,
+  endpointPattern: z.string().trim().min(1).max(240).optional(),
   capturedAt: z.string().datetime().optional(),
   confidenceScore: score,
 }).strict();
@@ -265,6 +285,10 @@ const marketListingPayloadBaseSchema = z.object({
   sourceType: z.enum(marketSourceTypes).optional(),
   pageType: z.enum(openLanePageTypes).optional(),
   captureKind: z.enum(marketCaptureKinds).optional(),
+  captureLevel: z.enum(marketSnapCaptureLevels).optional(),
+  captureScopes: z.array(z.enum(marketSnapCaptureScopes)).max(marketSnapCaptureScopes.length).optional(),
+  deepCaptureConsentId: z.string().uuid().optional(),
+  sourceEvidence: z.array(sourceEvidenceSchema).max(50).optional(),
   outcomeConfidence: z.enum(outcomeConfidenceLevels).optional(),
   priceSemantics: z.partialRecord(z.enum(priceSemanticFields), z.enum(priceSemanticValues)).optional(),
   outcomeEvidence: z.array(captureEvidenceSchema).max(20).optional(),
