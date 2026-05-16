@@ -13,14 +13,22 @@
     new RegExp(`\\b(${SENSITIVE_KEY_PATTERN})\\b\\s*[:=]?\\s*[^\\s"'<>]+`, "gi"),
     /\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b/g,
     /\bsk_(?:live|test|proj)_[A-Za-z0-9_-]{16,}\b/g,
+    /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g,
+    /\b(?:\+?1[-.\s]?)?\(?[2-9]\d{2}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g,
   ];
 
   function applyOpenLaneExtractionContract(listing = {}) {
     const safeListing = sanitizeExtractionValue(listing);
     const structured = buildOpenLaneExtractionContract(safeListing);
+    const fieldEvidence = buildFieldEvidence(safeListing, structured);
     return compact({
       ...safeListing,
       ...structured,
+      fieldEvidence,
+      debug: compact({
+        ...(structured.debug || {}),
+        fieldEvidenceSummary: summarizeFieldEvidence(fieldEvidence),
+      }),
       openlaneMetadata: {
         ...(safeListing.openlaneMetadata || {}),
         extractionContractVersion: "openlane-deep-v1",
@@ -131,6 +139,183 @@
     };
   }
 
+  function buildFieldEvidence(listing, structured) {
+    const evidence = {};
+    const consentId = listing.deepCaptureConsentId;
+    const pageType = listing.pageType;
+    const captureKind = listing.captureKind;
+    const capturedAt = listing.capturedAt || new Date().toISOString();
+
+    for (const field of [
+      "vin",
+      "year",
+      "make",
+      "model",
+      "trim",
+      "mileageKm",
+      "currentBid",
+      "currentOffer",
+      "bestOffer",
+      "buyNowPrice",
+      "soldPriceCandidate",
+      "acceptedAmount",
+      "finalBidAmount",
+      "buyPriceAuction",
+      "totalInvoiceAmount",
+      "finalAcquisitionCost",
+      "carfaxUrl",
+      "carfaxUrlStatus",
+      "imageCount",
+      "videoCount",
+    ]) {
+      if (listing[field] !== undefined && listing[field] !== "") {
+        addFieldEvidence(evidence, field, listing[field], {
+          sourceType: sourceTypeForFlatField(field, listing),
+          sourceName: "OpenLane DOM",
+          sourceText: sourceTextForField(field, listing, structured),
+          pageType,
+          captureKind,
+          confidenceScore: scoreEvidence({ field, sourceType: sourceTypeForFlatField(field, listing), pageType, captureKind }),
+          capturedAt,
+          consentId,
+        });
+      }
+    }
+
+    const networkCandidates = listing.extractedFields?.debug?.networkCandidates?.fieldCandidates || [];
+    for (const candidate of networkCandidates) {
+      addFieldEvidence(evidence, candidate.field, candidate.value, {
+        sourceType: "network_json",
+        sourceName: candidate.source,
+        sourceText: candidate.sourceText,
+        endpointPattern: candidate.endpointPattern,
+        pageType,
+        captureKind,
+        confidenceScore: candidate.confidence || 92,
+        capturedAt: candidate.capturedAt || capturedAt,
+        consentId,
+      });
+    }
+
+    return Object.fromEntries(Object.entries(evidence).map(([field, items]) => [
+      field,
+      items.map(redactEvidence).sort(compareEvidence),
+    ]));
+  }
+
+  function addFieldEvidence(map, field, value, options = {}) {
+    if (!field || value === undefined || value === "") return;
+    const item = redactEvidence({
+      field,
+      value,
+      normalizedValue: normalizeEvidenceValue(field, value),
+      sourceType: options.sourceType || "fallback_regex",
+      sourceName: options.sourceName,
+      sourceText: options.sourceText,
+      endpointPattern: options.endpointPattern,
+      pageType: options.pageType,
+      captureKind: options.captureKind,
+      confidenceScore: options.confidenceScore ?? scoreEvidence({ field, sourceType: options.sourceType, pageType: options.pageType, captureKind: options.captureKind }),
+      capturedAt: options.capturedAt || new Date().toISOString(),
+      consentId: options.consentId,
+    });
+    map[field] = map[field] || [];
+    map[field].push(item);
+  }
+
+  function chooseBestEvidence(items = []) {
+    return items.slice().sort(compareEvidence)[0];
+  }
+
+  function normalizeEvidenceValue(field, value) {
+    if (value === undefined || value === null) return value;
+    if (field === "vin") return String(value).trim().toUpperCase();
+    if (/price|bid|offer|fee|tax|total|cost|amount/i.test(field)) return numberFromValue(value);
+    if (field === "mileageKm") return numberFromValue(value);
+    if (field === "year") return numberFromValue(value);
+    if (typeof value === "string") return value.trim();
+    return value;
+  }
+
+  function redactEvidence(item = {}) {
+    const redacted = { ...item };
+    if (redacted.sourceText !== undefined) redacted.sourceText = sanitizeText(String(redacted.sourceText)).slice(0, 1000);
+    return compact(redacted);
+  }
+
+  function scoreEvidence(item = {}) {
+    const sourceScore = {
+      fee_page: 98,
+      manual_confirmation: 98,
+      post_sale_page: item.captureKind === "verified_outcome" ? 94 : 78,
+      network_json: 92,
+      dom_attribute: 90,
+      dom_label: 85,
+      safe_expansion: 82,
+      section_map: 75,
+      fallback_regex: 55,
+    }[item.sourceType] ?? 55;
+    if (["currentBid", "currentOffer", "bestOffer", "buyNowPrice"].includes(item.field) && item.captureKind === "observation") return Math.min(sourceScore, 92);
+    if (["buyPriceAuction", "totalInvoiceAmount", "finalAcquisitionCost"].includes(item.field) && item.pageType === "fee_details") return Math.max(sourceScore, 98);
+    return sourceScore;
+  }
+
+  function summarizeFieldEvidence(fieldEvidence = {}) {
+    return Object.fromEntries(Object.entries(fieldEvidence).map(([field, items]) => {
+      const best = chooseBestEvidence(items);
+      return [field, best ? {
+        sourceType: best.sourceType,
+        confidenceScore: best.confidenceScore,
+        endpointPattern: best.endpointPattern,
+        captureKind: best.captureKind,
+      } : undefined];
+    }).filter(([, value]) => value));
+  }
+
+  function compareEvidence(a, b) {
+    const confidence = Number(b.confidenceScore || 0) - Number(a.confidenceScore || 0);
+    if (confidence !== 0) return confidence;
+    const priority = sourcePriority(b.sourceType) - sourcePriority(a.sourceType);
+    if (priority !== 0) return priority;
+    return String(a.sourceName || a.sourceText || "").localeCompare(String(b.sourceName || b.sourceText || ""));
+  }
+
+  function sourcePriority(sourceType) {
+    return {
+      fee_page: 9,
+      manual_confirmation: 9,
+      post_sale_page: 8,
+      network_json: 7,
+      dom_attribute: 6,
+      dom_label: 5,
+      safe_expansion: 4,
+      section_map: 3,
+      fallback_regex: 1,
+    }[sourceType] ?? 0;
+  }
+
+  function sourceTypeForFlatField(field, listing) {
+    if (field === "vin" && listing.extractedFields?.vinEvidence?.source === "data-vin") return "dom_attribute";
+    if (field === "mileageKm" && listing.extractedFields?.mileageEvidence) return "dom_label";
+    if (["buyPriceAuction", "totalInvoiceAmount", "finalAcquisitionCost"].includes(field) && listing.pageType === "fee_details") return "fee_page";
+    if (["soldPriceCandidate", "acceptedAmount", "finalBidAmount"].includes(field) && listing.pageType === "post_sale") return "post_sale_page";
+    if (field === "carfaxUrl" || field === "carfaxUrlStatus") return listing.carfaxUrl ? "dom_attribute" : "dom_label";
+    return "dom_label";
+  }
+
+  function sourceTextForField(field, listing, structured) {
+    if (field === "vin") return listing.extractedFields?.vinEvidence?.sourceText || structured.identity?.evidence?.[0]?.sourceText;
+    if (field === "mileageKm") return listing.extractedFields?.mileageEvidence?.sourceText || structured.identity?.evidence?.[1]?.sourceText;
+    if (field === "conditionReportText") return structured.condition?.conditionReportText;
+    if (field === "carfaxUrl" || field === "carfaxUrlStatus") return listing.carfax?.evidence?.[0]?.sourceText || listing.carfaxUrl || listing.carfaxUrlStatus;
+    return String(listing[field] ?? "");
+  }
+
+  function numberFromValue(value) {
+    const number = Number(String(value).replace(/[^0-9.-]/g, ""));
+    return Number.isFinite(number) ? number : value;
+  }
+
   function sanitizeExtractionValue(value) {
     if (typeof value === "string") return sanitizeText(value);
     if (Array.isArray(value)) return value.map(sanitizeExtractionValue);
@@ -193,7 +378,16 @@
     return Object.fromEntries(Object.entries(object).filter(([, value]) => value !== undefined && value !== "" && !(Array.isArray(value) && value.length === 0)));
   }
 
-  const api = { applyOpenLaneExtractionContract, buildOpenLaneExtractionContract, sanitizeExtractionValue };
+  const api = {
+    applyOpenLaneExtractionContract,
+    buildOpenLaneExtractionContract,
+    sanitizeExtractionValue,
+    addFieldEvidence,
+    chooseBestEvidence,
+    normalizeEvidenceValue,
+    redactEvidence,
+    scoreEvidence,
+  };
   root.DealerFlowOpenLaneExtractionContract = api;
   if (typeof module !== "undefined") module.exports = api;
 })(typeof window !== "undefined" ? window : globalThis);

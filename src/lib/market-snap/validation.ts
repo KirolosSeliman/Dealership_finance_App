@@ -130,6 +130,30 @@ const sourceEvidenceSchema = z.object({
   capturedAt: z.string().datetime().optional(),
   confidenceScore: score,
 }).strict();
+const extractionFieldEvidenceSchema = z.object({
+  field: z.string().trim().min(1).max(80),
+  value: z.unknown(),
+  normalizedValue: z.unknown().optional(),
+  sourceType: z.enum([
+    "dom_label",
+    "dom_attribute",
+    "section_map",
+    "network_json",
+    "safe_expansion",
+    "fee_page",
+    "post_sale_page",
+    "manual_confirmation",
+    "fallback_regex",
+  ]),
+  sourceName: z.string().trim().max(120).optional(),
+  sourceText: z.string().trim().max(1000).optional(),
+  endpointPattern: z.string().trim().max(240).optional(),
+  pageType: z.string().trim().max(80).optional(),
+  captureKind: z.string().trim().max(80).optional(),
+  confidenceScore: z.coerce.number().finite().min(0).max(100),
+  capturedAt: z.string().datetime(),
+  consentId: z.string().uuid().optional(),
+}).strict();
 
 export const conditionFeaturesSchema = z.object({
   rust: z.object({
@@ -371,6 +395,7 @@ const marketListingPayloadBaseSchema = z.object({
   media: safeDeepRecord(40_000, 240).optional(),
   carfax: safeDeepRecord(12_000).optional(),
   debug: safeDeepRecord(30_000, 160).optional(),
+  fieldEvidence: z.record(z.string(), z.array(extractionFieldEvidenceSchema).max(20)).optional(),
   openlaneMetadata: safeDeepRecord(40_000, 200).optional(),
   extractedFields: safeDeepRecord(30_000, 160).optional(),
   missingData: z.array(z.string().trim().min(1).max(80)).max(50).optional(),

@@ -79,6 +79,30 @@ export interface MarketSnapSourceEvidence {
   confidenceScore?: number;
 }
 
+export interface ExtractionFieldEvidence {
+  field: string;
+  value: unknown;
+  normalizedValue?: unknown;
+  sourceType:
+    | "dom_label"
+    | "dom_attribute"
+    | "section_map"
+    | "network_json"
+    | "safe_expansion"
+    | "fee_page"
+    | "post_sale_page"
+    | "manual_confirmation"
+    | "fallback_regex";
+  sourceName?: string;
+  sourceText?: string;
+  endpointPattern?: string;
+  pageType?: string;
+  captureKind?: string;
+  confidenceScore: number;
+  capturedAt: string;
+  consentId?: string;
+}
+
 export interface RustFeatures {
   rustDetected?: boolean;
   rustSeverity?: RustSeverity;
@@ -299,6 +323,7 @@ export interface MarketListingInput {
   media?: Record<string, unknown>;
   carfax?: Record<string, unknown>;
   debug?: Record<string, unknown>;
+  fieldEvidence?: Record<string, ExtractionFieldEvidence[]>;
   openlaneMetadata?: Record<string, unknown>;
   extractedFields?: Record<string, unknown>;
   missingData?: string[];
