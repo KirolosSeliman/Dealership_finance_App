@@ -17,6 +17,7 @@
         "src/storage.js",
         "src/api-client.js",
         "src/openlane-extraction-contract.js",
+        "src/openlane-section-map.js",
         "src/openlane-page-classifier.js",
         "src/openlane-extractor.js",
         "src/market-snap-widget.js",

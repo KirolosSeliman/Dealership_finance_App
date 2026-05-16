@@ -111,6 +111,8 @@
 
   function extractDocumentRegions(doc) {
     if (doc.__openlaneTextRegions) return doc.__openlaneTextRegions;
+    const sectionMap = root.DealerFlowOpenLaneSectionMap?.buildOpenLaneSectionMap?.(doc);
+    if (sectionMap) return root.DealerFlowOpenLaneSectionMap.regionsFromMap(sectionMap);
     const sidebarText = textFromNodes(doc.querySelectorAll?.("aside, nav, [class*='sidebar' i], [class*='navigation' i]") || []);
     const footerText = textFromNodes(doc.querySelectorAll?.("footer, [class*='footer' i], [class*='legal' i]") || []);
     const marketGuideText = textFromNodes(doc.querySelectorAll?.("[class*='market' i], [class*='sales-history' i], [data-testid*='sales-history' i]") || []);
@@ -125,6 +127,8 @@
   }
 
   function extractHtmlRegions(html) {
+    const sectionMap = root.DealerFlowOpenLaneSectionMap?.buildOpenLaneSectionMapFromHtml?.(html);
+    if (sectionMap) return root.DealerFlowOpenLaneSectionMap.regionsFromMap(sectionMap);
     const source = String(html || "");
     const sidebarText = stripTags(matchesHtml(source, /<(aside|nav)\b[\s\S]*?<\/\1>/gi).join("\n"));
     const footerText = stripTags(matchesHtml(source, /<footer\b[\s\S]*?<\/footer>/gi).join("\n"));

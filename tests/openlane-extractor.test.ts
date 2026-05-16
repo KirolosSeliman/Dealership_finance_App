@@ -7,6 +7,13 @@ import test from "node:test";
 const repoRoot = process.cwd();
 const require = createRequire(import.meta.url);
 require("../browser-extension/src/openlane-extraction-contract.js");
+const sectionMap = require("../browser-extension/src/openlane-section-map.js") as {
+  buildOpenLaneSectionMapFromHtml: (html: string, href?: string) => {
+    mainText: string;
+    ignoredEvidence: Array<{ marker: string; zone?: string; sourceText?: string }>;
+    zones: Record<string, { text?: string; ignored?: boolean; evidence?: unknown[] }>;
+  };
+};
 const classifier = require("../browser-extension/src/openlane-page-classifier.js") as {
   classifyOpenLanePageFromHtml: (html: string, href?: string) => {
     pageType: string;
@@ -27,6 +34,40 @@ test("OpenLane extractor identifies supported vehicle pages", () => {
 
   assert.equal(extractor.isOpenLaneVehiclePage({ body: { innerText: text }, images: [{}, {}] }, "https://www.openlane.ca/vehicle/123"), true);
   assert.equal(extractor.isOpenLaneVehiclePage({ body: { innerText: "Search results" }, images: [] }, "https://www.openlane.ca/search"), false);
+});
+
+test("OpenLane section map isolates noisy English VDP regions", () => {
+  const html = fixture("openlane-vdp-purchased-selling-price.html");
+  const map = sectionMap.buildOpenLaneSectionMapFromHtml(html, "https://app.openlane.ca/vdp/3KPFL4A72HE119966");
+  const classification = classifier.classifyOpenLanePageFromHtml(html, "https://app.openlane.ca/vdp/3KPFL4A72HE119966");
+
+  assert.match(String(map.zones.vehicleHero.text), /2017 Kia Forte/);
+  assert.match(String(map.zones.gallery.text), /13 total/);
+  assert.match(String(map.zones.disclosuresCondition.text), /CARFAX report/);
+  assert.match(String(map.zones.purchasePanel.text), /Selling price\s+4 000 \$/);
+  assert.match(String(map.zones.marketGuide.text), /Sales history of similar vehicles/);
+  assert.equal(map.zones.marketGuide.ignored, true);
+  assert.equal(map.zones.sidebar.ignored, true);
+  assert.doesNotMatch(map.mainText, /Sales history of similar vehicles/);
+  assert.ok(map.ignoredEvidence.some((item) => item.zone === "sidebar"));
+  assert.ok(map.ignoredEvidence.some((item) => item.zone === "marketGuide"));
+  assert.notEqual(classification.pageType, "purchase_list");
+});
+
+test("OpenLane section map isolates noisy French VDP regions", () => {
+  const html = fixture("openlane-french-vdp-noisy-sidebar.html");
+  const map = sectionMap.buildOpenLaneSectionMapFromHtml(html, "https://app.openlane.ca/vdp/fr-vehicle?tab=active");
+  const classification = classifier.classifyOpenLanePageFromHtml(html, "https://app.openlane.ca/vdp/fr-vehicle?tab=active");
+
+  assert.match(String(map.zones.vehicleHero.text), /2020 Honda Civic/);
+  assert.match(String(map.zones.bidPanel.text), /Offre actuelle\s+15 200 \$/);
+  assert.match(String(map.zones.vehicleSpecs.text), /Odomètre\s+82 100 KM/);
+  assert.match(String(map.zones.disclosuresCondition.text), /Divulgations et condition/);
+  assert.match(String(map.zones.dealerNotes.text), /Note du concessionnaire vendeur/);
+  assert.match(String(map.zones.marketGuide.text), /Historique des ventes/);
+  assert.doesNotMatch(map.mainText, /ACHATS\s+Parcourir\s+En attente\s+Fermeture\s+Achats/);
+  assert.doesNotMatch(map.mainText, /Historique des ventes/);
+  assert.equal(classification.pageType, "active_listing");
 });
 
 test("OpenLane extractor reads core auction fields from fixture HTML", () => {

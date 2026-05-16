@@ -6,6 +6,7 @@ import test from "node:test";
 
 const repoRoot = process.cwd();
 const require = createRequire(import.meta.url);
+require("../browser-extension/src/openlane-section-map.js");
 const openLaneExtractor = require("../browser-extension/src/openlane-extractor.js") as {
   extractOpenLaneFixture: (html: string, href?: string) => Record<string, unknown>;
   extractVisibleText: (doc: { body?: { innerText?: string; textContent?: string } }) => string;
@@ -23,6 +24,7 @@ test("Market Snap extension injects on OpenLane Canada vehicle pages", () => {
   assert.ok(scripts.includes("src/storage.js"));
   assert.ok(scripts.includes("src/api-client.js"));
   assert.ok(scripts.includes("src/openlane-extraction-contract.js"));
+  assert.ok(scripts.includes("src/openlane-section-map.js"));
   assert.ok(scripts.includes("src/openlane-page-classifier.js"));
   assert.ok(scripts.includes("src/openlane-extractor.js"));
   assert.ok(scripts.includes("src/market-snap-widget.js"));
@@ -183,9 +185,13 @@ test("OpenLane extractor captures core vehicle, price, and auction fields", () =
 
 test("OpenLane extractor exposes the dedicated helper contract", () => {
   const contract = readFileSync(join(repoRoot, "browser-extension/src/openlane-extraction-contract.js"), "utf8");
+  const sectionMap = readFileSync(join(repoRoot, "browser-extension/src/openlane-section-map.js"), "utf8");
 
   for (const marker of ["buildOpenLaneExtractionContract", "pageContext", "identity", "auctionObservation", "purchaseOutcome", "condition", "media", "carfax", "debug"]) {
     assert.match(contract, new RegExp(marker));
+  }
+  for (const marker of ["buildOpenLaneSectionMap", "buildOpenLaneSectionMapFromHtml", "vehicleHero", "disclosuresCondition", "dealerNotes", "marketGuide", "sidebar"]) {
+    assert.match(sectionMap, new RegExp(marker));
   }
 
   for (const helper of [
