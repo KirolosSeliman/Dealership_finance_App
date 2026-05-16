@@ -118,6 +118,68 @@ Complete in Chrome and Brave before shipping the extension:
 
 Before signing off, also confirm auto-analyze is on, auto-save is off by default, include media URLs is on, raw visible text is capped, Refresh analysis updates the same widget, Copy JSON copies listing and valuation data without media blobs or secrets, and dynamic OpenLane navigation updates extraction after content loads.
 
+## OpenLane Live Verification Matrix
+
+This matrix requires a real authorized OpenLane login and a Dealer Flow organization configured in the same browser profile. Do not use private APIs, background crawling, CAPTCHA bypass, login bypass, proxy evasion, or Carfax paywall bypass. Capture only the visible page the user opened.
+
+Run the matrix in Chrome and Brave:
+
+| Scenario | Required result |
+| --- | --- |
+| French active VDP | Widget appears, title/year/make/model/trim are correct, visible VIN and mileage are extracted, current bid or offer is observation-only, no outcome row is created. |
+| English active VDP | Widget appears, active price remains observation-only, Carfax/media/disclosures are truthful, no duplicate widget after refresh or route changes. |
+| VDP with purchase selling price | Page is not classified as `purchase_list`; selling price maps to `buyPriceAuction`; invoice/final acquisition stay blank unless total/fees are visible. |
+| Purchase fee details | Buy price, fees, taxes, total invoice, and final acquisition cost stay separate; verified outcome evidence is present. |
+| Post-sale pending | Candidate outcome is captured, pending/counter/sold values do not become verified training labels. |
+| Post-sale accepted | Accepted amount becomes verified outcome only with accepted/visible evidence. |
+| Carfax URL page | Widget says URL found when an actual link is visible; text-only pages say visible URL missing. |
+| Video page | Photo/video counts and URLs are clean; logos/icons/translate assets are excluded. |
+| Bid update page | Changing bid/offer changes Copy JSON and capture fingerprint; no outcome row is created from active bid changes. |
+| Unsupported/search page | No intrusive widget; no capture spam; popup/settings remain usable. |
+
+For every scenario record:
+
+- Widget appears only when appropriate.
+- Vehicle identity, VIN, mileage, current price state, Carfax state, media counts, disclosures, dealer notes, warnings, and missing data match the visible page.
+- Copy JSON includes normalized extraction, legacy payload, section map summary, candidate scores, safe-expansion result, network summaries if enabled, backend response, and capture response.
+- Refresh updates the same widget without duplicate overlays.
+- Save to Deal Radar stores only visible, capped, safe metadata.
+- No secret tokens, session data, data URLs, raw HTML blobs, or hidden/private data are captured.
+
+## OpenLane Supabase Verification Queries
+
+Run after the live matrix against the staging or production Supabase project used for the test organization. Replace `<organization_id>` with the Dealer Flow organization ID.
+
+```sql
+select id, vin, fallback_key, title, mileage_km, last_seen_at
+from openlane_vehicle_identities
+where organization_id = '<organization_id>'
+order by last_seen_at desc
+limit 20;
+
+select id, page_type, capture_kind, current_bid, buy_now_price, photo_count, captured_at, observation_fingerprint
+from openlane_observations
+where organization_id = '<organization_id>'
+order by captured_at desc
+limit 20;
+
+select id, source_page_type, capture_kind, confidence_level, sold_price_candidate, accepted_amount, buy_price_auction, total_invoice_amount, final_acquisition_cost, is_training_eligible, captured_at
+from openlane_outcomes
+where organization_id = '<organization_id>'
+order by captured_at desc
+limit 20;
+```
+
+Supabase sign-off requires:
+
+- Active VDP bid/offer changes create observation rows only.
+- Purchase fee and accepted post-sale pages create outcome rows only when visible evidence supports them.
+- Candidate outcomes are not training eligible.
+- Verified/manual outcomes are training eligible only when evidence is present.
+- `openlane_vehicle_identities`, `openlane_observations`, and `openlane_outcomes` are organization-scoped by RLS.
+- Viewer/accountant roles cannot write captures; owner/admin/member can capture only for their organization.
+- No duplicate spam appears after refresh, route changes, or repeated widget rendering.
+
 ## Market Snap OpenLane Packaging Checklist
 
 - `browser-extension/manifest.json` loads without errors as an unpacked Manifest V3 extension.

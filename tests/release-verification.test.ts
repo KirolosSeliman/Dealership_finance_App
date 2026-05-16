@@ -24,12 +24,40 @@ test("release checklist covers automated, migration, deployment, role, desktop, 
     "Vercel And Runtime Checklist",
     "Manual Desktop Browser Checklist",
     "Manual Mobile Checklist",
+    "OpenLane Live Verification Matrix",
+    "OpenLane Supabase Verification Queries",
     "Role Matrix",
     "Private beta",
     "Official launch",
     "Not ready",
   ]) {
     assert.ok(checklist.includes(required), `release checklist missing ${required}`);
+  }
+});
+
+test("release checklist requires real OpenLane live matrix and Supabase capture checks", () => {
+  const checklist = readFileSync(join(repoRoot, "docs/release-checklist.md"), "utf8");
+
+  for (const required of [
+    "French active VDP",
+    "English active VDP",
+    "VDP with purchase selling price",
+    "Purchase fee details",
+    "Post-sale pending",
+    "Post-sale accepted",
+    "Carfax URL page",
+    "Video page",
+    "Bid update page",
+    "Unsupported/search page",
+    "openlane_vehicle_identities",
+    "openlane_observations",
+    "openlane_outcomes",
+    "current bid or offer is observation-only",
+    "Candidate outcomes are not training eligible",
+    "Viewer/accountant roles cannot write captures",
+    "duplicate overlays",
+  ]) {
+    assert.ok(checklist.includes(required), `release checklist missing OpenLane release item: ${required}`);
   }
 });
 
