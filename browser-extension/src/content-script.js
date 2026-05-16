@@ -31,6 +31,7 @@
   async function boot() {
     await waitForBody();
     STATE.settings = await window.DealerFlowMarketSnapStorage.getSettings();
+    window.DealerFlowOpenLaneNetworkObserver?.startOpenLaneNetworkObserver?.(STATE.settings);
     STATE.captureRuntime = window.DealerFlowMarketSnapCaptureRuntime.createMarketSnapCaptureRuntime({
       api: window.DealerFlowMarketSnapApi,
       now: () => Date.now(),
@@ -89,6 +90,7 @@
       onOpenSettings: () => openSettings(),
       onSettingsSaved: (settings) => {
         STATE.settings = settings;
+        window.DealerFlowOpenLaneNetworkObserver?.startOpenLaneNetworkObserver?.(STATE.settings);
         STATE.widget?.render({ status: "idle", listing: STATE.listing, valuation: STATE.valuation, message: "Settings saved." });
       },
       onHidePage: () => hideCurrentPage(),
@@ -211,12 +213,14 @@
       includeMediaUrls: STATE.settings?.includeMediaUrls !== false,
       includeRawVisibleText: STATE.settings?.includeRawVisibleText !== false,
     });
+    const networkEvidence = window.DealerFlowOpenLaneNetworkObserver?.getOpenLaneNetworkEvidence?.() || [];
+    const withNetworkEvidence = window.DealerFlowOpenLaneNetworkObserver?.mergeNetworkEvidenceIntoListing?.(listing, networkEvidence) || listing;
     const merged = {
-      ...listing,
+      ...withNetworkEvidence,
       pageType: classification.pageType,
       captureKind: classification.captureKind,
       outcomeConfidence: classification.outcomeConfidence,
-      openlaneMetadata: { ...(listing.openlaneMetadata || {}), classification },
+      openlaneMetadata: { ...(withNetworkEvidence.openlaneMetadata || {}), classification },
     };
     if (STATE.safeExpansion) merged.openlaneMetadata.safeExpansion = STATE.safeExpansion;
     if (STATE.settings?.debugMode) logExtractionDebug(merged);

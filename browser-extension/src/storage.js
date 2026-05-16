@@ -10,6 +10,7 @@
     debugMode: false,
     includeMediaUrls: true,
     includeRawVisibleText: true,
+    observePageNetworkData: false,
   };
 
   async function getSettings() {
@@ -33,6 +34,7 @@
       debugMode: Boolean(values.debugMode),
       includeMediaUrls: values.includeMediaUrls !== false,
       includeRawVisibleText: values.includeRawVisibleText !== false,
+      observePageNetworkData: Boolean(values.observePageNetworkData),
     };
     await chrome.storage.sync.set(normalized);
     return normalized;

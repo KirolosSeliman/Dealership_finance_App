@@ -8,6 +8,7 @@ const widgetCollapsedInput = document.getElementById("widgetCollapsed");
 const debugModeInput = document.getElementById("debugMode");
 const includeMediaUrlsInput = document.getElementById("includeMediaUrls");
 const includeRawVisibleTextInput = document.getElementById("includeRawVisibleText");
+const observePageNetworkDataInput = document.getElementById("observePageNetworkData");
 const statusEl = document.getElementById("status");
 
 loadSettings();
@@ -24,6 +25,7 @@ async function loadSettings() {
   debugModeInput.checked = Boolean(settings.debugMode);
   includeMediaUrlsInput.checked = settings.includeMediaUrls !== false;
   includeRawVisibleTextInput.checked = settings.includeRawVisibleText !== false;
+  observePageNetworkDataInput.checked = Boolean(settings.observePageNetworkData);
 }
 
 document.getElementById("saveSettings").addEventListener("click", async () => {
@@ -50,6 +52,7 @@ document.getElementById("saveSettings").addEventListener("click", async () => {
     debugMode: debugModeInput.checked,
     includeMediaUrls: includeMediaUrlsInput.checked,
     includeRawVisibleText: includeRawVisibleTextInput.checked,
+    observePageNetworkData: observePageNetworkDataInput.checked,
   });
   statusEl.textContent = saved.organizationId
     ? "Settings saved. Refresh OpenLane tabs to apply changes."

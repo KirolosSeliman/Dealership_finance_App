@@ -19,6 +19,7 @@
         "src/openlane-extraction-contract.js",
         "src/openlane-section-map.js",
         "src/openlane-page-classifier.js",
+        "src/openlane-network-observer.js",
         "src/openlane-safe-expander.js",
         "src/openlane-extractor.js",
         "src/market-snap-widget.js",
@@ -27,6 +28,12 @@
       ],
       "css": ["styles/widget.css"],
       "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["src/openlane-network-page-hook.js"],
+      "matches": ["https://*.openlane.com/*", "https://*.openlane.ca/*"]
     }
   ]
 }

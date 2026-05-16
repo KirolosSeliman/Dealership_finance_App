@@ -7,6 +7,11 @@ import test from "node:test";
 const repoRoot = process.cwd();
 const require = createRequire(import.meta.url);
 require("../browser-extension/src/openlane-section-map.js");
+const networkObserver = require("../browser-extension/src/openlane-network-observer.js") as {
+  extractCandidatesFromNetworkPayload: (payload: unknown, url?: string) => { vinCandidates: Array<{ vin: string }>; mediaCandidates: Array<{ url: string }>; conditionCandidates: Array<{ text: string }>; sanitizedKeys: string[] };
+  sanitizeNetworkPayload: (payload: unknown) => unknown;
+  mergeNetworkEvidenceIntoListing: (listing: Record<string, unknown>, evidence: unknown[]) => Record<string, unknown>;
+};
 const safeExpander = require("../browser-extension/src/openlane-safe-expander.js") as {
   expandOpenLaneReadOnlySections: (doc: { querySelectorAll: (selector: string) => unknown[] }, options?: { maxSteps?: number; waitMs?: number }) => Promise<{ clicked: Array<{ label: string }>; skipped: Array<{ reason: string; label: string }>; snapshots: Array<{ text: string }> }>;
   classifyExpansionControl: (control: unknown) => { safe: boolean; reason: string; label: string };
@@ -30,6 +35,7 @@ test("Market Snap extension injects on OpenLane Canada vehicle pages", () => {
   assert.ok(scripts.includes("src/openlane-extraction-contract.js"));
   assert.ok(scripts.includes("src/openlane-section-map.js"));
   assert.ok(scripts.includes("src/openlane-page-classifier.js"));
+  assert.ok(scripts.includes("src/openlane-network-observer.js"));
   assert.ok(scripts.includes("src/openlane-safe-expander.js"));
   assert.ok(scripts.includes("src/openlane-extractor.js"));
   assert.ok(scripts.includes("src/market-snap-widget.js"));
@@ -54,6 +60,7 @@ test("Market Snap extension uses in-page OpenLane widget instead of popup-only a
   assert.match(contentScript, /disconnected/);
   assert.match(contentScript, /expandReadOnlySections/);
   assert.match(contentScript, /DealerFlowOpenLaneSafeExpander/);
+  assert.match(contentScript, /DealerFlowOpenLaneNetworkObserver/);
   assert.match(contentScript, /createMarketSnapWidget/);
   assert.match(contentScript, /MARKET_SNAP_ANALYZE/);
   assert.match(widget, /dealer-flow-market-snap-widget/);
@@ -137,7 +144,7 @@ test("Market Snap extension settings and API client are shared and secret-free",
   const options = readFileSync(join(repoRoot, "browser-extension/src/options.js"), "utf8");
   const popup = readFileSync(join(repoRoot, "browser-extension/src/popup.js"), "utf8");
 
-  for (const setting of ["dealerFlowBaseUrl", "organizationId", "autoAnalyze", "autoCapture", "autoSave", "modelImprovementOptIn", "widgetCollapsed", "debugMode", "includeMediaUrls", "includeRawVisibleText"]) {
+  for (const setting of ["dealerFlowBaseUrl", "organizationId", "autoAnalyze", "autoCapture", "autoSave", "modelImprovementOptIn", "widgetCollapsed", "debugMode", "includeMediaUrls", "includeRawVisibleText", "observePageNetworkData"]) {
     assert.match(storage, new RegExp(setting));
   }
   for (const fn of ["getMarketSnapSettings", "saveMarketSnapSettings", "validateMarketSnapSettings", "analyzeListing", "saveListing", "buildDealerFlowUrl", "formatApiError"]) {
@@ -194,6 +201,8 @@ test("OpenLane extractor exposes the dedicated helper contract", () => {
   const contract = readFileSync(join(repoRoot, "browser-extension/src/openlane-extraction-contract.js"), "utf8");
   const sectionMap = readFileSync(join(repoRoot, "browser-extension/src/openlane-section-map.js"), "utf8");
   const expander = readFileSync(join(repoRoot, "browser-extension/src/openlane-safe-expander.js"), "utf8");
+  const network = readFileSync(join(repoRoot, "browser-extension/src/openlane-network-observer.js"), "utf8");
+  const pageHook = readFileSync(join(repoRoot, "browser-extension/src/openlane-network-page-hook.js"), "utf8");
 
   for (const marker of ["buildOpenLaneExtractionContract", "pageContext", "identity", "auctionObservation", "purchaseOutcome", "condition", "media", "carfax", "debug"]) {
     assert.match(contract, new RegExp(marker));
@@ -204,6 +213,11 @@ test("OpenLane extractor exposes the dedicated helper contract", () => {
   for (const marker of ["expandOpenLaneReadOnlySections", "SAFE_LABEL_PATTERN", "DANGEROUS_LABEL_PATTERN", "maxSteps", "snapshotOpenLaneReadOnlySections"]) {
     assert.match(expander, new RegExp(marker));
   }
+  for (const marker of ["startOpenLaneNetworkObserver", "extractCandidatesFromNetworkPayload", "sanitizeNetworkPayload", "mergeNetworkEvidenceIntoListing"]) {
+    assert.match(network, new RegExp(marker));
+  }
+  assert.match(pageHook, /originalFetch/);
+  assert.match(pageHook, /XMLHttpRequest/);
 
   for (const helper of [
     "extractOpenLaneListing",
@@ -253,6 +267,37 @@ test("OpenLane safe expander opens read-only sections and skips dangerous contro
   assert.ok(result.clicked.some((item) => /Disclosures/i.test(item.label)));
   assert.ok(result.skipped.some((item) => item.reason === "dangerous_label" && /Place bid/i.test(item.label)));
   assert.ok(result.snapshots.some((snapshot) => /Hidden disclosure text/i.test(snapshot.text)));
+});
+
+test("OpenLane network observer extracts only sanitized page-generated vehicle candidates", () => {
+  const payload = {
+    vehicle: {
+      vin: "2T3R1RFV5MW123456",
+      photos: ["https://pub-us.kar-media.com/vehicle/2T3R1RFV5MW123456/front.jpg", "https://app.openlane.ca/openlane-logo.svg"],
+      condition: {
+        mechanical: "check engine light on",
+        disclosure: "Transmission hesitation",
+      },
+    },
+    sessionToken: "eyJaaaaaaaaaaaaaaaaaaaaaaaa.eyJbbbbbbbbbbbbbbbbbbbbbbbb.cccccccccccccccccccccccc",
+    customerEmail: "buyer@example.com",
+  };
+  const candidates = networkObserver.extractCandidatesFromNetworkPayload(payload, "https://app.openlane.ca/api/vdp/2T3R1RFV5MW123456");
+  const sanitized = JSON.stringify(networkObserver.sanitizeNetworkPayload(payload));
+  const merged = networkObserver.mergeNetworkEvidenceIntoListing({ listingUrl: "https://app.openlane.ca/vdp/test" }, [{
+    capturedAt: "2026-05-15T00:00:00.000Z",
+    endpointPattern: "app.openlane.ca/api/vdp/:id",
+    sanitizedKeys: candidates.sanitizedKeys,
+    candidates,
+  }]);
+
+  assert.equal(candidates.vinCandidates[0]?.vin, "2T3R1RFV5MW123456");
+  assert.ok(candidates.mediaCandidates.some((item) => item.url.includes("pub-us.kar-media.com")));
+  assert.equal(candidates.mediaCandidates.some((item) => /logo/i.test(item.url)), false);
+  assert.ok(candidates.conditionCandidates.some((item) => /check engine/i.test(item.text)));
+  assert.doesNotMatch(sanitized, /buyer@example\.com|eyJaaaaaaaa/i);
+  assert.equal(merged.vin, "2T3R1RFV5MW123456");
+  assert.match(String(merged.conditionReportText), /check engine light on/);
 });
 
 test("OpenLane extractor caps raw visible text at the prompt limit", () => {
