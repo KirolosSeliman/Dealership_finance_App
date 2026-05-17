@@ -93,11 +93,7 @@ create index if not exists openlane_outcomes_retention_idx
   on openlane_outcomes (organization_id, expires_at)
   where expires_at is not null;
 
-drop function if exists market_snap_training_export_quality_report(uuid);
-drop view if exists openlane_verified_wholesale_training;
-drop view if exists openlane_acquisition_cost_training;
-
-create view openlane_verified_wholesale_training
+create or replace view public.openlane_verified_wholesale_training
 with (security_invoker = true) as
 select
   o.organization_id,
@@ -142,7 +138,7 @@ where o.is_training_eligible = true
   and coalesce(o.negotiation_status, '') <> 'Pending'
   and coalesce(o.buy_price_auction, o.accepted_amount, o.negotiated_amount, o.final_bid_amount) is not null;
 
-create view openlane_acquisition_cost_training
+create or replace view public.openlane_acquisition_cost_training
 with (security_invoker = true) as
 select
   o.organization_id,
@@ -191,7 +187,7 @@ where o.is_training_eligible = true
   and o.outcome_type = 'purchase_fee_details'
   and coalesce(o.final_acquisition_cost, o.total_invoice_amount) is not null;
 
-create or replace function cleanup_market_snap_deep_capture_retention()
+create or replace function public.cleanup_market_snap_deep_capture_retention()
 returns table(expired_openlane_observations integer, sanitized_openlane_outcomes integer)
 language plpgsql
 security definer
@@ -224,7 +220,7 @@ begin
 end;
 $$;
 
-create or replace function market_snap_training_export_quality_report(p_organization_id uuid)
+create or replace function public.market_snap_training_export_quality_report(p_organization_id uuid)
 returns table(dataset_name text, usable_records bigint, rejected_reason text, rejected_records bigint)
 language sql
 stable
@@ -267,10 +263,25 @@ as $$
     and coalesce(paper_sale_price, 0) <= 0;
 $$;
 
-grant select on openlane_verified_wholesale_training to authenticated;
-grant select on openlane_acquisition_cost_training to authenticated;
-grant execute on function market_snap_training_export_quality_report(uuid) to authenticated;
-revoke execute on function cleanup_market_snap_deep_capture_retention() from public;
-revoke execute on function cleanup_market_snap_deep_capture_retention() from anon;
-revoke execute on function cleanup_market_snap_deep_capture_retention() from authenticated;
-grant execute on function cleanup_market_snap_deep_capture_retention() to service_role;
+do $$
+begin
+  if exists (select 1 from pg_roles where rolname = 'authenticated') then
+    execute 'grant select on public.openlane_verified_wholesale_training to authenticated';
+    execute 'grant select on public.openlane_acquisition_cost_training to authenticated';
+    execute 'grant execute on function public.market_snap_training_export_quality_report(uuid) to authenticated';
+  end if;
+
+  execute 'revoke execute on function public.cleanup_market_snap_deep_capture_retention() from public';
+
+  if exists (select 1 from pg_roles where rolname = 'anon') then
+    execute 'revoke execute on function public.cleanup_market_snap_deep_capture_retention() from anon';
+  end if;
+
+  if exists (select 1 from pg_roles where rolname = 'authenticated') then
+    execute 'revoke execute on function public.cleanup_market_snap_deep_capture_retention() from authenticated';
+  end if;
+
+  if exists (select 1 from pg_roles where rolname = 'service_role') then
+    execute 'grant execute on function public.cleanup_market_snap_deep_capture_retention() to service_role';
+  end if;
+end $$;

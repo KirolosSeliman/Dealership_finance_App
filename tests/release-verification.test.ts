@@ -123,12 +123,15 @@ test("all hardening migrations required for release are present in filename orde
 });
 
 test("Deep Capture retention cleanup is restricted to service role before release", () => {
-  const sql = readFileSync(join(repoRoot, "supabase/migrations/20260527_deep_capture_release_security_hardening.sql"), "utf8");
+  const retentionMigration = readFileSync(join(repoRoot, "supabase/migrations/20260526_deep_capture_retention_training_guards.sql"), "utf8");
+  const hardeningMigration = readFileSync(join(repoRoot, "supabase/migrations/20260527_deep_capture_release_security_hardening.sql"), "utf8");
+  const sql = `${retentionMigration}\n${hardeningMigration}`;
 
-  assert.match(sql, /revoke execute on function (public\.)?cleanup_market_snap_deep_capture_retention\(\) from public/i);
-  assert.match(sql, /revoke execute on function (public\.)?cleanup_market_snap_deep_capture_retention\(\) from anon/i);
-  assert.match(sql, /revoke execute on function (public\.)?cleanup_market_snap_deep_capture_retention\(\) from authenticated/i);
-  assert.match(sql, /grant execute on function (public\.)?cleanup_market_snap_deep_capture_retention\(\) to service_role/i);
+  assert.match(sql, /execute 'revoke execute on function public\.cleanup_market_snap_deep_capture_retention\(\) from public'/i);
+  assert.match(sql, /where rolname = 'anon'[\s\S]+execute 'revoke execute on function public\.cleanup_market_snap_deep_capture_retention\(\) from anon'/i);
+  assert.match(sql, /where rolname = 'authenticated'[\s\S]+execute 'revoke execute on function public\.cleanup_market_snap_deep_capture_retention\(\) from authenticated'/i);
+  assert.match(sql, /where rolname = 'service_role'[\s\S]+execute 'grant execute on function public\.cleanup_market_snap_deep_capture_retention\(\) to service_role'/i);
+  assert.doesNotMatch(sql.replace(/execute\s+'[^']+'/gi, ""), /\b(grant|revoke)\s+execute\s+on\s+function\s+(public\.)?cleanup_market_snap_deep_capture_retention\(\)/i);
 });
 
 test("release hardening migrations do not contain unguarded destructive core data operations", () => {

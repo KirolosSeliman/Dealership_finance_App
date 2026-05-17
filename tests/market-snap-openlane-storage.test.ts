@@ -112,11 +112,14 @@ test("Deep Capture retention migration links consent, caps evidence, and protect
   assert.match(migration, /is_training_eligible = false or/i);
   assert.match(migration, /model_improvement_opted_in = true/i);
   assert.match(migration, /cleanup_market_snap_deep_capture_retention/i);
-  assert.match(migration, /drop function if exists market_snap_training_export_quality_report\(uuid\)/i);
-  assert.match(migration, /drop view if exists openlane_verified_wholesale_training/i);
-  assert.match(migration, /drop view if exists openlane_acquisition_cost_training/i);
-  assert.match(migration, /grant execute on function cleanup_market_snap_deep_capture_retention\(\) to service_role/i);
-  assert.doesNotMatch(migration, /grant execute on function cleanup_market_snap_deep_capture_retention\(\) to authenticated/i);
+  assert.match(migration, /create or replace view public\.openlane_verified_wholesale_training/i);
+  assert.match(migration, /create or replace view public\.openlane_acquisition_cost_training/i);
+  assert.match(migration, /create or replace function public\.market_snap_training_export_quality_report\(p_organization_id uuid\)/i);
+  assert.doesNotMatch(migration, /drop function if exists market_snap_training_export_quality_report/i);
+  assert.doesNotMatch(migration, /drop view if exists openlane_(verified_wholesale|acquisition_cost)_training/i);
+  assert.match(migration, /where rolname = 'service_role'[\s\S]+execute 'grant execute on function public\.cleanup_market_snap_deep_capture_retention\(\) to service_role'/i);
+  assert.match(migration, /where rolname = 'authenticated'[\s\S]+execute 'revoke execute on function public\.cleanup_market_snap_deep_capture_retention\(\) from authenticated'/i);
+  assert.doesNotMatch(migration.replace(/execute\s+'[^']+'/gi, ""), /\bgrant\s+execute\s+on\s+function\s+(public\.)?cleanup_market_snap_deep_capture_retention\(\)\s+to\s+authenticated/i);
   assert.doesNotMatch(migration, /\bdelete\s+from\s+(vehicles|sales|vehicle_expenses|cash_transactions|deal_radar_saved_listings)/i);
 });
 

@@ -12,12 +12,18 @@ begin
       and p.proname = 'cleanup_market_snap_deep_capture_retention'
       and pg_get_function_identity_arguments(p.oid) = ''
   ) then
-    revoke execute on function cleanup_market_snap_deep_capture_retention() from public;
-    revoke execute on function cleanup_market_snap_deep_capture_retention() from anon;
-    revoke execute on function cleanup_market_snap_deep_capture_retention() from authenticated;
+    execute 'revoke execute on function public.cleanup_market_snap_deep_capture_retention() from public';
+
+    if exists (select 1 from pg_roles where rolname = 'anon') then
+      execute 'revoke execute on function public.cleanup_market_snap_deep_capture_retention() from anon';
+    end if;
+
+    if exists (select 1 from pg_roles where rolname = 'authenticated') then
+      execute 'revoke execute on function public.cleanup_market_snap_deep_capture_retention() from authenticated';
+    end if;
 
     if exists (select 1 from pg_roles where rolname = 'service_role') then
-      grant execute on function cleanup_market_snap_deep_capture_retention() to service_role;
+      execute 'grant execute on function public.cleanup_market_snap_deep_capture_retention() to service_role';
     end if;
   end if;
 end $$;
