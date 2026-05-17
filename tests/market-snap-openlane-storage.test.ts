@@ -99,6 +99,13 @@ test("OpenLane capture storage migration is append-only, RLS-protected, and orga
 test("Deep Capture retention migration links consent, caps evidence, and protects training labels", () => {
   const migration = readFileSync(join(repoRoot, "supabase/migrations/20260526_deep_capture_retention_training_guards.sql"), "utf8");
 
+  assert.match(migration, /create table if not exists market_snap_capture_consents/i);
+  assert.match(migration, /create table if not exists market_snap_capture_consent_events/i);
+  assert.ok(
+    migration.search(/create table if not exists market_snap_capture_consents/i) < migration.search(/references market_snap_capture_consents\(id\)/i),
+    "20260526 must bootstrap consent tables before adding foreign keys to them",
+  );
+
   for (const table of ["openlane_vehicle_identities", "openlane_observations", "openlane_outcomes"]) {
     assert.match(migration, new RegExp(`alter table ${table}`, "i"));
     assert.match(migration, /consent_id uuid references market_snap_capture_consents\(id\) on delete set null/i);
