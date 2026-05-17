@@ -61,6 +61,31 @@ test("release checklist requires real OpenLane live matrix and Supabase capture 
   }
 });
 
+test("Deep Capture release QA checklist covers consent, extension, persistence, deployment, and rollback", () => {
+  const checklist = readFileSync(join(repoRoot, "docs/release-checklist.md"), "utf8");
+  const qa = readFileSync(join(repoRoot, "docs/deep-capture-release-qa.md"), "utf8");
+
+  assert.match(checklist, /docs\/deep-capture-release-qa\.md/);
+  for (const required of [
+    "Final release notes",
+    "Migration checklist",
+    "Vercel deployment checklist",
+    "Supabase migration checklist",
+    "Chrome/Brave extension packaging checklist",
+    "Rollback plan",
+    "Known limitations",
+    "Security/privacy assurance statement",
+    "Confirm Deep Capture is off before consent",
+    "Confirm Deep Capture badge is active",
+    "Confirm network evidence appears only in sanitized debug/copy payload",
+    "Confirm backend rejects deep capture",
+    "Confirm model improvement can be off while Deep Capture is on",
+    "Confirm current bid is not training label",
+  ]) {
+    assert.ok(qa.includes(required), `Deep Capture release QA missing ${required}`);
+  }
+});
+
 test("release verification workflow is CI-ready without production credentials", () => {
   const workflowPath = join(repoRoot, ".github/workflows/release-verification.yml");
   assert.equal(existsSync(workflowPath), true);
@@ -84,12 +109,26 @@ test("all hardening migrations required for release are present in filename orde
     "20260520_persistent_rate_limiting.sql",
     "20260521_market_snap_calibration_guardrails.sql",
     "20260522_openlane_extension_payload.sql",
+    "20260523_openlane_capture_storage.sql",
+    "20260524_market_snap_training_export_safety.sql",
+    "20260525_market_snap_deep_capture_consent.sql",
+    "20260526_deep_capture_retention_training_guards.sql",
+    "20260527_deep_capture_release_security_hardening.sql",
   ];
 
   for (const name of required) {
     assert.ok(migrationNames.includes(name), `missing required migration ${name}`);
   }
   assert.deepEqual([...migrationNames].sort(), migrationNames);
+});
+
+test("Deep Capture retention cleanup is restricted to service role before release", () => {
+  const sql = readFileSync(join(repoRoot, "supabase/migrations/20260527_deep_capture_release_security_hardening.sql"), "utf8");
+
+  assert.match(sql, /revoke execute on function (public\.)?cleanup_market_snap_deep_capture_retention\(\) from public/i);
+  assert.match(sql, /revoke execute on function (public\.)?cleanup_market_snap_deep_capture_retention\(\) from anon/i);
+  assert.match(sql, /revoke execute on function (public\.)?cleanup_market_snap_deep_capture_retention\(\) from authenticated/i);
+  assert.match(sql, /grant execute on function (public\.)?cleanup_market_snap_deep_capture_retention\(\) to service_role/i);
 });
 
 test("release hardening migrations do not contain unguarded destructive core data operations", () => {

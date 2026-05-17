@@ -95,6 +95,8 @@ Complete in a fresh desktop browser session:
 
 Complete in Chrome and Brave before shipping the extension:
 
+Deep Capture has a dedicated release QA companion at `docs/deep-capture-release-qa.md`. Complete that checklist before enabling Deep Capture for a real organization.
+
 1. Run Dealer Flow locally.
 2. Apply migrations if needed.
 3. Log into Dealer Flow.
