@@ -5,6 +5,7 @@ import type { MarketListingInput, VehicleValuation } from "@/types/market-snap";
 import type { Vehicle } from "@/types/domain";
 
 type Client = SupabaseClient;
+const sensitiveStorageWordPattern = /\b(?:SUPABASE_SERVICE_ROLE_KEY|service_role_key|session_token|access_token|refresh_token|id_token|csrf_token|jwt_token|auth|authorization|cookie|token|secret|credential|credentials|session|password|csrf|jwt|bearer|hunter2)\b/gi;
 
 export async function fetchMarketComparables(client: Client, organizationId: string, vehicle: Partial<Vehicle> | MarketListingInput) {
   const make = "make" in vehicle ? vehicle.make : undefined;
@@ -820,11 +821,13 @@ function capOpenLaneStorageValue(value: unknown, depth = 0): unknown {
 
 function sanitizeStorageString(value: string) {
   const text = value
+    .replace(/\b(?:SUPABASE_SERVICE_ROLE_KEY|service_role_key|session_token|access_token|refresh_token|id_token|csrf_token|jwt_token)\b\s*[:=]?\s*[^\s"'<>]+/gi, "[redacted]")
     .replace(/\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b/g, "[redacted]")
     .replace(/\bsk_(?:live|test|proj)_[A-Za-z0-9_-]{16,}\b/g, "[redacted]")
     .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]")
     .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[redacted_email]")
     .replace(/\b(?:\+?1[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)\d{3}[-.\s]?\d{4}\b/g, "[redacted_phone]")
+    .replace(sensitiveStorageWordPattern, "[redacted]")
     .slice(0, 4000);
   return /^\s*(javascript|data|vbscript):/i.test(text) ? "[unsafe_url_removed]" : text;
 }

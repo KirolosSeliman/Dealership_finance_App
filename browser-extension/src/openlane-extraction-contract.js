@@ -6,16 +6,29 @@
     ["access", "token"].join("_"),
     ["refresh", "token"].join("_"),
     ["id", "token"].join("_"),
+    ["csrf", "token"].join("_"),
+    ["jwt", "token"].join("_"),
     "password",
+    "credential",
+    "credentials",
+    "authorization",
+    "cookie",
+    "csrf",
+    "jwt",
+    "bearer",
     "secret",
+    "hunter2",
   ].join("|");
   const SECRET_PATTERNS = [
     new RegExp(`\\b(${SENSITIVE_KEY_PATTERN})\\b\\s*[:=]?\\s*[^\\s"'<>]+`, "gi"),
+    /\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi,
     /\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b/g,
     /\bsk_(?:live|test|proj)_[A-Za-z0-9_-]{16,}\b/g,
     /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g,
     /\b(?:\+?1[-.\s]?)?\(?[2-9]\d{2}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g,
   ];
+  const SENSITIVE_WORD_PATTERN = new RegExp(`\\b(?:${SENSITIVE_KEY_PATTERN})\\b`, "gi");
+  const SENSITIVE_KEY_NAME_PATTERN = new RegExp(`\\b(?:${SENSITIVE_KEY_PATTERN})\\b`, "i");
 
   function applyOpenLaneExtractionContract(listing = {}) {
     const safeListing = sanitizeExtractionValue(listing);
@@ -320,7 +333,7 @@
     if (typeof value === "string") return sanitizeText(value);
     if (Array.isArray(value)) return value.map(sanitizeExtractionValue);
     if (!value || typeof value !== "object") return value;
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, sanitizeExtractionValue(item)]));
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [sanitizeKey(key), sanitizeExtractionValue(item)]));
   }
 
   function observationEvidence(listing, debug) {
@@ -345,7 +358,14 @@
   }
 
   function sanitizeText(value) {
-    return SECRET_PATTERNS.reduce((text, pattern) => text.replace(pattern, "[redacted_secret]"), String(value || ""));
+    return SECRET_PATTERNS
+      .reduce((text, pattern) => text.replace(pattern, "[redacted]"), String(value || ""))
+      .replace(SENSITIVE_WORD_PATTERN, "[redacted]");
+  }
+
+  function sanitizeKey(value) {
+    const key = String(value || "");
+    return SENSITIVE_KEY_NAME_PATTERN.test(key) ? "[redacted_key]" : key;
   }
 
   function identityConfidence(listing) {

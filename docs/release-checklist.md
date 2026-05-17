@@ -22,6 +22,8 @@ npm run verify:release
 
 The automated suite must remain deterministic and must not require production Supabase, Vercel, R2, or private credentials.
 
+If a local generated `.next/dev/types/routes.d.ts` syntax error appears, delete `.next` and rerun `npm run build` before treating it as a source failure. Do not edit generated `.next` files or commit the cache.
+
 ## Required Automated Coverage
 
 - Tax calculations: purchase tax by source, expense tax, sale tax, period filtering, PDF/CSV/JSON export escaping.

@@ -93,6 +93,33 @@ test("OpenLane evidence redaction strips sensitive source text", () => {
   assert.match(JSON.stringify(redacted), /\[redacted/);
 });
 
+test("OpenLane extraction contract redacts sensitive standalone words and nested keys", () => {
+  const listing = contract.applyOpenLaneExtractionContract({
+    organizationId,
+    sourceName: "OpenLane",
+    listingUrl: "https://app.openlane.ca/vdp/123",
+    pageType: "active_listing",
+    captureKind: "observation",
+    title: "2021 Toyota RAV4",
+    rawVisibleText: "session_token password hunter2 SUPABASE_SERVICE_ROLE_KEY",
+    extractedFields: {
+      session_token: "abc123",
+      nested: {
+        authorization: "Bearer secret-token-value",
+        sourceText: "password hunter2",
+      },
+    },
+    openlaneMetadata: {
+      debug: {
+        service_role_key: "should not survive",
+      },
+    },
+  });
+
+  assert.doesNotMatch(JSON.stringify(listing), /SUPABASE_SERVICE_ROLE_KEY|service_role_key|session_token|authorization|hunter2|password|secret-token-value/i);
+  assert.match(JSON.stringify(listing), /\[redacted/);
+});
+
 test("Market Snap validation accepts capped normalized field evidence", () => {
   const parsed = marketListingPayloadSchema.safeParse({
     organizationId,
