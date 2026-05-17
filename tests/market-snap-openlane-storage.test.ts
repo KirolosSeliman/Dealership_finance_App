@@ -112,6 +112,11 @@ test("Deep Capture retention migration links consent, caps evidence, and protect
   assert.match(migration, /is_training_eligible = false or/i);
   assert.match(migration, /model_improvement_opted_in = true/i);
   assert.match(migration, /cleanup_market_snap_deep_capture_retention/i);
+  assert.match(migration, /drop function if exists market_snap_training_export_quality_report\(uuid\)/i);
+  assert.match(migration, /drop view if exists openlane_verified_wholesale_training/i);
+  assert.match(migration, /drop view if exists openlane_acquisition_cost_training/i);
+  assert.match(migration, /grant execute on function cleanup_market_snap_deep_capture_retention\(\) to service_role/i);
+  assert.doesNotMatch(migration, /grant execute on function cleanup_market_snap_deep_capture_retention\(\) to authenticated/i);
   assert.doesNotMatch(migration, /\bdelete\s+from\s+(vehicles|sales|vehicle_expenses|cash_transactions|deal_radar_saved_listings)/i);
 });
 

@@ -93,7 +93,11 @@ create index if not exists openlane_outcomes_retention_idx
   on openlane_outcomes (organization_id, expires_at)
   where expires_at is not null;
 
-create or replace view openlane_verified_wholesale_training
+drop function if exists market_snap_training_export_quality_report(uuid);
+drop view if exists openlane_verified_wholesale_training;
+drop view if exists openlane_acquisition_cost_training;
+
+create view openlane_verified_wholesale_training
 with (security_invoker = true) as
 select
   o.organization_id,
@@ -138,7 +142,7 @@ where o.is_training_eligible = true
   and coalesce(o.negotiation_status, '') <> 'Pending'
   and coalesce(o.buy_price_auction, o.accepted_amount, o.negotiated_amount, o.final_bid_amount) is not null;
 
-create or replace view openlane_acquisition_cost_training
+create view openlane_acquisition_cost_training
 with (security_invoker = true) as
 select
   o.organization_id,
@@ -220,6 +224,53 @@ begin
 end;
 $$;
 
+create or replace function market_snap_training_export_quality_report(p_organization_id uuid)
+returns table(dataset_name text, usable_records bigint, rejected_reason text, rejected_records bigint)
+language sql
+stable
+as $$
+  select 'openlane_wholesale'::text, count(*)::bigint, null::text, 0::bigint
+  from openlane_verified_wholesale_training
+  where organization_id = p_organization_id
+    and is_org_member(p_organization_id)
+  union all
+  select 'openlane_acquisition_cost'::text, count(*)::bigint, null::text, 0::bigint
+  from openlane_acquisition_cost_training
+  where organization_id = p_organization_id
+    and is_org_member(p_organization_id)
+  union all
+  select 'dealer_flow_retail'::text, count(*)::bigint, null::text, 0::bigint
+  from dealer_flow_retail_training
+  where organization_id = p_organization_id
+    and is_org_member(p_organization_id)
+  union all
+  select 'openlane_outcomes'::text, 0::bigint, 'candidate_outcome'::text, count(*)::bigint
+  from openlane_outcomes
+  where organization_id = p_organization_id
+    and is_org_member(p_organization_id)
+    and capture_kind = 'candidate_outcome'
+  union all
+  select 'openlane_outcomes'::text, 0::bigint, 'missing_verified_label'::text, count(*)::bigint
+  from openlane_outcomes
+  where organization_id = p_organization_id
+    and is_org_member(p_organization_id)
+    and is_training_eligible = true
+    and capture_kind in ('verified_outcome','manual_confirmation')
+    and coalesce(buy_price_auction, negotiated_amount, accepted_amount, final_bid_amount, final_acquisition_cost, total_invoice_amount) is null
+  union all
+  select 'dealer_flow_retail'::text, 0::bigint, 'missing_retail_sale_price'::text, count(*)::bigint
+  from sales
+  where organization_id = p_organization_id
+    and is_org_member(p_organization_id)
+    and status = 'active'
+    and voided_at is null
+    and coalesce(paper_sale_price, 0) <= 0;
+$$;
+
 grant select on openlane_verified_wholesale_training to authenticated;
 grant select on openlane_acquisition_cost_training to authenticated;
-grant execute on function cleanup_market_snap_deep_capture_retention() to authenticated;
+grant execute on function market_snap_training_export_quality_report(uuid) to authenticated;
+revoke execute on function cleanup_market_snap_deep_capture_retention() from public;
+revoke execute on function cleanup_market_snap_deep_capture_retention() from anon;
+revoke execute on function cleanup_market_snap_deep_capture_retention() from authenticated;
+grant execute on function cleanup_market_snap_deep_capture_retention() to service_role;
