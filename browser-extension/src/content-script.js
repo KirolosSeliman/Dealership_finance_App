@@ -16,11 +16,13 @@
     valuation: null,
     backendResponse: null,
     captureResponse: null,
+    saveResult: null,
     safeExpansion: null,
     hiddenPageUrl: "",
     lastSignature: "",
     currentUrl: location.href,
     running: false,
+    saving: false,
     timer: 0,
     observer: null,
     readyRetries: 0,
@@ -116,6 +118,7 @@
     STATE.valuation = null;
     STATE.backendResponse = null;
     STATE.captureResponse = null;
+    STATE.saveResult = null;
     STATE.lastSignature = "";
   }
 
@@ -180,6 +183,7 @@
     STATE.valuation = null;
     STATE.backendResponse = null;
     STATE.captureResponse = null;
+    STATE.saveResult = null;
     scheduleRuntime(ROUTE_CHANGE_DEBOUNCE_MS, "route-change");
   }
 
@@ -372,12 +376,15 @@
   }
 
   function deepCaptureRuntimeState() {
+    const networkEvidenceCount = window.DealerFlowOpenLaneNetworkObserver?.getOpenLaneNetworkEvidence?.().length || 0;
+    const observerStatus = window.DealerFlowOpenLaneNetworkObserver?.getOpenLaneNetworkObserverStatus?.() || STATE.networkObserverStatus || { enabled: false, reason: "unknown" };
     return {
       active: hasActiveDeepCaptureConsent(),
       consentStatus: STATE.settings?.deepCaptureConsentStatus || "off",
       consentIdPresent: Boolean(STATE.settings?.deepCaptureConsentId),
       observePageNetworkData: Boolean(STATE.settings?.observePageNetworkData),
-      networkObserver: STATE.networkObserverStatus || { enabled: false, reason: "unknown" },
+      networkEvidenceCount,
+      networkObserver: { ...observerStatus, observationCount: networkEvidenceCount },
     };
   }
 
@@ -426,6 +433,8 @@
   }
 
   async function saveToDealRadar() {
+    if (STATE.saving) return;
+    STATE.saving = true;
     try {
       if (!STATE.listing) STATE.listing = extractListing();
       const settingsError = settingsProblem(STATE.settings);
@@ -433,13 +442,17 @@
         STATE.widget?.render({ status: "disconnected", listing: STATE.listing, valuation: STATE.valuation, message: settingsError });
         return;
       }
-      STATE.widget?.render({ status: "analyzing", listing: STATE.listing, valuation: STATE.valuation, message: "Saving to Deal Radar..." });
+      STATE.saveResult = null;
+      STATE.widget?.render({ status: "saving", listing: STATE.listing, valuation: STATE.valuation, message: "Saving to Deal Radar..." });
       const payload = await window.DealerFlowMarketSnapApi.saveListing(STATE.settings, STATE.listing, STATE.valuation);
       STATE.backendResponse = payload;
+      STATE.saveResult = payload;
       STATE.valuation = payload.valuation || STATE.valuation;
-      STATE.widget?.render({ status: "saved", listing: STATE.listing, valuation: STATE.valuation, message: "Saved to Deal Radar." });
+      STATE.widget?.render({ status: "saved", listing: STATE.listing, valuation: STATE.valuation, saveResult: payload, message: "Saved to Deal Radar." });
     } catch (error) {
       STATE.widget?.render({ status: "error", listing: STATE.listing, valuation: STATE.valuation, message: formatError(error) });
+    } finally {
+      STATE.saving = false;
     }
   }
 

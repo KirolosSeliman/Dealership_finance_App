@@ -116,6 +116,24 @@ test("OpenLane extractor rejects VIN barcode label noise and keeps rejection rea
   assert.equal(debug.debug?.vinCandidates?.some((candidate) => candidate.vin === "BARCODE"), false);
 });
 
+test("OpenLane extractor rejects invalid VIN candidates containing I O or Q", () => {
+  const listing = extractor.extractOpenLaneFixture(`
+    <main class="vdp-page">
+      <section class="vehicle-hero">
+        <h1>2017 Hyundai Tucson AWD</h1>
+        <p>VIN KM8JICA4OHU12345Q</p>
+      </section>
+      <section class="vehicle-specs">Odometer 111,486 KM</section>
+      <section class="bid-panel">Current Bid $4,600</section>
+      <span>23 total photos</span>
+    </main>
+  `, "https://app.openlane.ca/vdp/hyundai-tucson");
+  const debug = listing.extractedFields as { debug?: { vinCandidates?: Array<{ candidate?: string; rejectedReason?: string }> } };
+
+  assert.equal(listing.vin, undefined);
+  assert.ok(debug.debug?.vinCandidates?.some((candidate) => candidate.candidate === "KM8JICA4OHU12345Q" && /invalid/i.test(String(candidate.rejectedReason))));
+});
+
 test("OpenLane mileage resolver chooses odometer over transport distance", () => {
   const listing = extractor.extractOpenLaneFixture(`
     <main class="vdp-page">
@@ -151,6 +169,22 @@ test("OpenLane CARFAX resolver extracts relative and data URL metadata without f
   `, "https://app.openlane.ca/vdp/hyundai-tucson");
 
   assert.equal(listing.carfaxUrl, "https://app.openlane.ca/reports/carfax/TUCSON123");
+  assert.equal(listing.carfaxUrlStatus, "url_found");
+});
+
+test("OpenLane CARFAX resolver extracts data-url metadata", () => {
+  const listing = extractor.extractOpenLaneFixture(`
+    <main class="vdp-page">
+      <h1>2017 Hyundai Tucson AWD</h1>
+      <p>VIN KM8J3CA46HU123456</p>
+      <p>Odometer 111,486 KM</p>
+      <button aria-label="View CARFAX Canada report" data-url="/vehicle-history/carfax/TUCSON456">CARFAX Canada</button>
+      <section class="bid-panel">Current Bid $4,600</section>
+      <span>23 total photos</span>
+    </main>
+  `, "https://app.openlane.ca/vdp/hyundai-tucson");
+
+  assert.equal(listing.carfaxUrl, "https://app.openlane.ca/vehicle-history/carfax/TUCSON456");
   assert.equal(listing.carfaxUrlStatus, "url_found");
 });
 

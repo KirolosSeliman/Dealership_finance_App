@@ -126,12 +126,16 @@
     shadow.querySelector(".meta").innerHTML = metaHtml(state.listing, state.valuation);
     shadow.querySelector(".quality-body").innerHTML = dataQualityHtml(state.listing, state.valuation);
     shadow.querySelector(".settings-drawer").hidden = !state.settingsOpen;
-    shadow.querySelector(".messages").innerHTML = messagesHtml(state.listing, state.valuation, state.message);
+    shadow.querySelector(".messages").innerHTML = messagesHtml(state.listing, state.valuation, state.message, state.saveResult);
+    const saveButton = shadow.querySelector("[data-action='save']");
+    saveButton.disabled = state.status === "saving";
+    saveButton.textContent = state.status === "saving" ? "Saving..." : "Save";
   }
 
   function statusText(state) {
     if (state.status === "detecting") return "OpenLane vehicle detected.";
     if (state.status === "extracting") return "Extracting visible OpenLane data...";
+    if (state.status === "saving") return "Saving to Deal Radar...";
     if (state.status === "loading" || state.status === "analyzing") return "Analyzing visible OpenLane page...";
     if (state.status === "disconnected") return state.message || "Connect Dealer Flow in Market Snap settings.";
     if (state.status === "warning") return state.message || "Vehicle data is incomplete.";
@@ -189,15 +193,24 @@
     ].join("");
   }
 
-  function messagesHtml(listing, valuation, message) {
+  function messagesHtml(listing, valuation, message, saveResult) {
     const items = [
       message,
+      savedResultLabel(saveResult),
       ...conditionWarningItems(listing).slice(0, 3),
       ...(valuation?.warnings || listing?.warnings || []).slice(0, 4),
       ...(valuation?.missingData || listing?.missingData || []).slice(0, 4).map((field) => `Missing: ${field}`),
     ].filter(Boolean);
     if (items.length === 0) return "";
     return `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
+  }
+
+  function savedResultLabel(saveResult) {
+    if (!saveResult?.id && !saveResult?.marketListingId) return "";
+    return `Saved IDs: ${[
+      saveResult.id ? `Deal Radar ${saveResult.id}` : "",
+      saveResult.marketListingId ? `Market listing ${saveResult.marketListingId}` : "",
+    ].filter(Boolean).join(" / ")}`;
   }
 
   function dataQualityHtml(listing, valuation) {
@@ -252,9 +265,10 @@
 
   function deepCaptureRuntimeLabel(runtime = {}) {
     const observer = runtime.networkObserver || {};
+    const count = Number(runtime.networkEvidenceCount ?? observer.observationCount ?? 0);
     return runtime.active
-      ? `active, consent ${runtime.consentIdPresent ? "present" : "missing"}, network ${observer.enabled ? "on" : observer.reason || "off"}`
-      : `${runtime.consentStatus || "off"}, consent ${runtime.consentIdPresent ? "present" : "missing"}, network ${observer.reason || "off"}`;
+      ? `active, consent ${runtime.consentIdPresent ? "present" : "missing"}, network ${observer.enabled ? "on" : observer.reason || "off"}, evidence ${count}`
+      : `${runtime.consentStatus || "off"}, consent ${runtime.consentIdPresent ? "present" : "missing"}, network ${observer.reason || "off"}, evidence ${count}`;
   }
 
   function priceStateLabel(listing) {

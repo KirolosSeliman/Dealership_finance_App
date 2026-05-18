@@ -7,17 +7,26 @@
   const VEHICLE_KEY = /\b(vehicle|vin|listing|inventory|vdp|photo|image|media|condition|disclosure|damage|mechanical|history|note|purchase|fee|price)\b/i;
   const TEXT_FIELD = new Set(["make", "model", "trim", "sellerName", "location", "auctionStatus", "saleDate", "runNumber", "lane", "lotNumber", "stockNumber", "titleStatus", "carfaxUrl", "carfaxUrlStatus"]);
   const observations = [];
+  let observerStatus = { enabled: false, reason: "stopped", observationCount: 0 };
 
   function startOpenLaneNetworkObserver(settings = {}) {
-    if (!hasActiveDeepCaptureConsent(settings)) return { enabled: false, reason: "deep_capture_consent_required" };
-    if (settings.observePageNetworkData !== true) return { enabled: false, reason: "disabled" };
+    if (!hasActiveDeepCaptureConsent(settings)) {
+      observerStatus = { enabled: false, reason: "deep_capture_consent_required", observationCount: observations.length };
+      return getOpenLaneNetworkObserverStatus();
+    }
+    if (settings.observePageNetworkData !== true) {
+      observerStatus = { enabled: false, reason: "disabled", observationCount: observations.length };
+      return getOpenLaneNetworkObserverStatus();
+    }
     injectPageHook();
     root.addEventListener?.("message", onPageMessage);
-    return { enabled: true, reason: "observing_page_generated_responses" };
+    observerStatus = { enabled: true, reason: "observing_page_generated_responses", observationCount: observations.length };
+    return getOpenLaneNetworkObserverStatus();
   }
 
   function stopOpenLaneNetworkObserver() {
     root.removeEventListener?.("message", onPageMessage);
+    observerStatus = { enabled: false, reason: "stopped", observationCount: observations.length };
   }
 
   function hasActiveDeepCaptureConsent(settings = {}) {
@@ -44,11 +53,16 @@
     };
     observations.unshift(observation);
     observations.splice(MAX_OBSERVATIONS);
+    observerStatus = { ...observerStatus, observationCount: observations.length };
     return observation;
   }
 
   function getOpenLaneNetworkEvidence() {
     return observations.slice();
+  }
+
+  function getOpenLaneNetworkObserverStatus() {
+    return { ...observerStatus, observationCount: observations.length };
   }
 
   function mergeNetworkEvidenceIntoListing(listing = {}, evidence = getOpenLaneNetworkEvidence()) {
@@ -376,7 +390,7 @@
       });
   }
 
-  const api = { startOpenLaneNetworkObserver, stopOpenLaneNetworkObserver, rememberNetworkPayload, getOpenLaneNetworkEvidence, extractCandidatesFromNetworkPayload, sanitizeNetworkPayload, mergeNetworkEvidenceIntoListing };
+  const api = { startOpenLaneNetworkObserver, stopOpenLaneNetworkObserver, rememberNetworkPayload, getOpenLaneNetworkEvidence, getOpenLaneNetworkObserverStatus, extractCandidatesFromNetworkPayload, sanitizeNetworkPayload, mergeNetworkEvidenceIntoListing };
   root.DealerFlowOpenLaneNetworkObserver = api;
   if (typeof module !== "undefined") module.exports = api;
 })(typeof window !== "undefined" ? window : globalThis);

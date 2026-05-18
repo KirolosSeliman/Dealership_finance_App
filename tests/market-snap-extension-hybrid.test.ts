@@ -79,6 +79,34 @@ test("content script listens for settings changes and refreshes runtime settings
   assert.match(contentScript, /refreshRuntimeSettings/);
 });
 
+test("content script prevents duplicate save requests while save is in progress", () => {
+  const contentScript = readFileSync(join(repoRoot, "browser-extension/src/content-script.js"), "utf8");
+
+  assert.match(contentScript, /saving:\s*false/);
+  assert.match(contentScript, /if\s*\(STATE\.saving\)\s*return/);
+  assert.match(contentScript, /STATE\.saving\s*=\s*true/);
+  assert.match(contentScript, /STATE\.saving\s*=\s*false/);
+});
+
+test("content script and widget expose Deep Capture network evidence count", () => {
+  const contentScript = readFileSync(join(repoRoot, "browser-extension/src/content-script.js"), "utf8");
+  const widget = readFileSync(join(repoRoot, "browser-extension/src/market-snap-widget.js"), "utf8");
+
+  assert.match(contentScript, /networkEvidenceCount/);
+  assert.match(widget, /networkEvidenceCount/);
+});
+
+test("widget disables Save while saving and displays saved listing ids", () => {
+  const contentScript = readFileSync(join(repoRoot, "browser-extension/src/content-script.js"), "utf8");
+  const widget = readFileSync(join(repoRoot, "browser-extension/src/market-snap-widget.js"), "utf8");
+
+  assert.match(contentScript, /status:\s*"saving"/);
+  assert.match(contentScript, /saveResult:\s*payload/);
+  assert.match(widget, /saveButton\.disabled\s*=/);
+  assert.match(widget, /state\.status === "saving"/);
+  assert.match(widget, /marketListingId/);
+});
+
 function extensionContext(overrides: Record<string, unknown> = {}): ExtensionContext {
   const syncStore = (overrides.syncStore as Record<string, unknown>) || {};
   const localStore: Record<string, unknown> = {};

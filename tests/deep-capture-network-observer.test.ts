@@ -4,7 +4,8 @@ import test from "node:test";
 
 const require = createRequire(import.meta.url);
 const networkObserver = require("../browser-extension/src/openlane-network-observer.js") as {
-  startOpenLaneNetworkObserver: (settings: Record<string, unknown>) => { enabled: boolean; reason: string };
+  startOpenLaneNetworkObserver: (settings: Record<string, unknown>) => { enabled: boolean; reason: string; observationCount?: number };
+  getOpenLaneNetworkObserverStatus: () => { enabled: boolean; reason: string; observationCount: number };
   stopOpenLaneNetworkObserver: () => void;
   rememberNetworkPayload: (body: unknown, url?: string, contentType?: string) => unknown;
   extractCandidatesFromNetworkPayload: (payload: unknown, url?: string) => {
@@ -20,12 +21,30 @@ const networkObserver = require("../browser-extension/src/openlane-network-obser
 
 test("OpenLane network observer consent gate fails closed and enables only with active consent", () => {
   assert.equal(networkObserver.startOpenLaneNetworkObserver({ observePageNetworkData: true }).enabled, false);
-  assert.equal(networkObserver.startOpenLaneNetworkObserver({
+  const started = networkObserver.startOpenLaneNetworkObserver({
     observePageNetworkData: true,
     deepCaptureEnabled: true,
     deepCaptureConsentStatus: "active",
     deepCaptureConsentId: "33333333-3333-4333-8333-333333333333",
-  }).enabled, true);
+  });
+  assert.equal(started.enabled, true);
+  assert.equal(typeof started.observationCount, "number");
+  networkObserver.stopOpenLaneNetworkObserver();
+});
+
+test("OpenLane network observer status reports current evidence count", () => {
+  networkObserver.startOpenLaneNetworkObserver({
+    observePageNetworkData: true,
+    deepCaptureEnabled: true,
+    deepCaptureConsentStatus: "active",
+    deepCaptureConsentId: "33333333-3333-4333-8333-333333333333",
+  });
+  const before = networkObserver.getOpenLaneNetworkObserverStatus().observationCount;
+  networkObserver.rememberNetworkPayload(JSON.stringify({ vehicle: { vin: "KM8J3CA46HU123456" } }), "https://app.openlane.ca/api/vdp/KM8J3CA46HU123456", "application/json");
+  const after = networkObserver.getOpenLaneNetworkObserverStatus();
+
+  assert.equal(after.enabled, true);
+  assert.equal(after.observationCount, before + 1);
   networkObserver.stopOpenLaneNetworkObserver();
 });
 
@@ -34,6 +53,7 @@ test("OpenLane network observer ignores irrelevant and auth/session endpoints", 
 
   assert.equal(networkObserver.rememberNetworkPayload(body, "https://app.openlane.ca/api/profile/me", "application/json"), undefined);
   assert.equal(networkObserver.rememberNetworkPayload(body, "https://app.openlane.ca/oauth/session", "application/json"), undefined);
+  assert.equal(networkObserver.rememberNetworkPayload(body, "https://app.openlane.ca/api/user/vehicles/123", "application/json"), undefined);
   assert.equal(networkObserver.rememberNetworkPayload(body, "https://app.openlane.ca/api/vdp/123", "application/json") !== undefined, true);
 });
 

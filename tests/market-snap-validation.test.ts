@@ -412,6 +412,48 @@ test("Market Snap validation rejects mileage that is evidenced as transport dist
   assert.equal(result.success, false);
 });
 
+test("Market Snap validation rejects invalid VIN and accepts safe odometer evidence", () => {
+  assert.equal(marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "active_listing",
+    captureKind: "observation",
+    title: "2017 Hyundai Tucson AWD",
+    vin: "KM8JICA4OHU12345Q",
+    year: 2017,
+    make: "Hyundai",
+    model: "Tucson",
+    mileageKm: 111486,
+  }).success, false);
+
+  assert.equal(marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "active_listing",
+    captureKind: "observation",
+    title: "2017 Hyundai Tucson AWD",
+    vin: "KM8J3CA46HU123456",
+    year: 2017,
+    make: "Hyundai",
+    model: "Tucson",
+    mileageKm: 111486,
+    fieldEvidence: {
+      mileageKm: [{
+        field: "mileageKm",
+        value: 111486,
+        normalizedValue: 111486,
+        sourceType: "dom_label",
+        sourceName: "OpenLane DOM",
+        sourceText: "Vehicle information Odometer 111,486 KM",
+        confidenceScore: 90,
+        capturedAt: "2026-05-17T12:00:00.000Z",
+      }],
+    },
+  }).success, true);
+});
+
 test("Market Snap import validation allows row source override", () => {
   assert.equal(importPayloadSchema.safeParse({
     organizationId,
