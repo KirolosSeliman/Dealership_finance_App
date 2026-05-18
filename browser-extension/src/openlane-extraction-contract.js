@@ -8,6 +8,8 @@
     ["id", "token"].join("_"),
     ["csrf", "token"].join("_"),
     ["jwt", "token"].join("_"),
+    "session",
+    "token",
     "password",
     "credential",
     "credentials",

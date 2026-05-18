@@ -158,6 +158,42 @@ test("OpenLane extractor recovers VIN from generic safe parent data attributes a
   assert.equal(fromAriaLabel.vin, "3KPFL4A72HE119966");
 });
 
+test("OpenLane extractor safe DOM attribute path is self-contained and redacts sensitive attributes", () => {
+  assert.equal((globalThis as { DealerFlowOpenLaneStableCapture?: unknown }).DealerFlowOpenLaneStableCapture, undefined);
+
+  const listing = extractor.extractOpenLaneFixture(`
+    <main class="vdp-page">
+      <section
+        class="vehicle-hero"
+        data-vehicle='{"vin":"3KPFL4A72HE119966"}'
+        data-token="secret-token-value"
+        data-session="openlane-session-value">
+        <h1>2017 Kia Forte LX</h1>
+        <p>Odometer 158,569 KM</p>
+      </section>
+      <button
+        aria-label="View CARFAX Canada report"
+        data-href="/vehicle-history/carfax/FORTE123"
+        data-token="secret-token-value">
+        CARFAX Canada
+      </button>
+      <section class="bid-panel">Current Bid $4,000</section>
+      <span>13 total photos</span>
+    </main>
+  `, "https://app.openlane.ca/vdp/data-attribute-only");
+  const serializedEvidence = JSON.stringify({
+    fieldEvidence: listing.fieldEvidence,
+    extractedFields: listing.extractedFields,
+    openlaneMetadata: listing.openlaneMetadata,
+  });
+
+  assert.equal(listing.vin, "3KPFL4A72HE119966");
+  assert.equal(listing.carfaxUrl, "https://app.openlane.ca/vehicle-history/carfax/FORTE123");
+  assert.equal(listing.carfaxUrlStatus, "url_found");
+  assert.match(serializedEvidence, /safe_dom_attributes/);
+  assert.doesNotMatch(serializedEvidence, /secret-token-value|openlane-session-value|data-token|data-session/i);
+});
+
 test("OpenLane extractor rejects invalid VIN candidates containing I O or Q", () => {
   const listing = extractor.extractOpenLaneFixture(`
     <main class="vdp-page">
