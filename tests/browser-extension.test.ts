@@ -96,6 +96,15 @@ test("Market Snap widget exposes draggable, settings, and data-quality controls"
     "autoCapture",
     "modelImprovementOptIn",
     "data-quality",
+    "Capture debug",
+    "Page type",
+    "Capture kind",
+    "Capture level",
+    "Readiness",
+    "Capture blocked reason",
+    "VIN status",
+    "VIN evidence source",
+    "VIN candidates",
     "Price state",
     "Current offer",
     "Best offer",
@@ -104,8 +113,12 @@ test("Market Snap widget exposes draggable, settings, and data-quality controls"
     "carfaxUrlStatus",
     "Carfax status",
     "Carfax URL",
-    "Carfax evidence",
+    "Carfax evidence source",
     "Carfax warning",
+    "Network observer",
+    "Network evidence count",
+    "Missing data",
+    "Extraction confidence",
     "VIN evidence",
     "Price evidence",
     "Condition warnings",
@@ -119,6 +132,7 @@ test("Market Snap widget exposes draggable, settings, and data-quality controls"
     "Evidence",
     "observePageNetworkData",
     "data-action=\"hide\"",
+    "redactSensitiveText",
   ]) {
     assert.match(widget, new RegExp(marker));
   }
@@ -140,9 +154,13 @@ test("Market Snap copy JSON includes normalized extraction, runtime evidence, an
   assert.match(contentScript, /candidateScores/);
   assert.match(contentScript, /safeExpansion/);
   assert.match(contentScript, /networkEvidence/);
+  assert.match(contentScript, /readinessSummary/);
+  assert.match(contentScript, /buildReadinessSummary/);
   assert.match(contentScript, /outcomeEvidence/);
   assert.match(contentScript, /debug/);
   assert.match(contentScript, /basic DOM extraction may miss VIN\/Carfax/);
+  assert.match(contentScript, /VIN missing\. Capture blocked to avoid bad data/);
+  assert.match(contentScript, /Ready to capture/);
   assert.match(contentScript, /logExtractionDebug/);
   assert.match(contentScript, /ignored evidence/);
   assert.match(contentScript, /section map/);

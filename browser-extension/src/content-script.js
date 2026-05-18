@@ -371,6 +371,7 @@
         sourceEvidence: buildSourceEvidence(listing),
         openlaneMetadata: {
           ...(listing.openlaneMetadata || {}),
+          debugMode: Boolean(STATE.settings?.debugMode),
           deepCaptureRuntime: deepCaptureRuntimeState(),
         },
       };
@@ -386,7 +387,7 @@
       ...basic,
       captureLevel: "basic_dom",
       captureScopes: ["dom_visible"],
-      openlaneMetadata: { ...metadata, deepCaptureRuntime: deepCaptureRuntimeState() },
+      openlaneMetadata: { ...metadata, debugMode: Boolean(STATE.settings?.debugMode), deepCaptureRuntime: deepCaptureRuntimeState() },
     };
   }
 
@@ -497,6 +498,7 @@
       carfax: listing.carfax || null,
       debug: listing.debug || null,
     };
+    const readinessSummary = buildReadinessSummary(listing);
     const sectionMap = {
       summary: listing.openlaneMetadata?.sectionMapSummary || listing.debug?.sectionMapSummary || null,
       textRegions: listing.openlaneMetadata?.textRegions || null,
@@ -511,10 +513,36 @@
       candidateScores: debug.candidateScores || debug.titleCandidates || [],
       safeExpansion: listing.openlaneMetadata?.safeExpansion || STATE.safeExpansion || null,
       networkEvidence: listing.openlaneMetadata?.networkEvidence || [],
+      readinessSummary,
       outcomeEvidence,
       debug,
       backendResponse: STATE.backendResponse,
       captureResponse: STATE.captureResponse,
+    });
+  }
+
+  function buildReadinessSummary(listing = {}) {
+    const readiness = listing.openlaneMetadata?.stableCaptureReadiness || {};
+    const runtime = listing.openlaneMetadata?.deepCaptureRuntime || {};
+    return sanitizeDebugValue({
+      pageType: listing.pageType,
+      captureKind: listing.captureKind,
+      captureLevel: listing.captureLevel,
+      readyToCapture: Boolean(readiness.readyToCapture),
+      readinessState: readiness.state || "",
+      blockedReason: readiness.blockedReason || "",
+      vin: listing.vin || "",
+      vinStatus: readiness.vinStatus || (!listing.vin ? "missing" : /^[A-HJ-NPR-Z0-9]{17}$/i.test(String(listing.vin)) ? "found" : "invalid"),
+      vinEvidenceSource: listing.fieldEvidence?.vin?.[0]?.sourceType || listing.extractedFields?.vinEvidence?.matchedLabel || "",
+      vinCandidateCount: listing.extractedFields?.debug?.vinCandidates?.length || 0,
+      carfaxStatus: readiness.carfaxStatus || listing.carfaxUrlStatus || "missing",
+      carfaxUrl: listing.carfaxUrl || "",
+      carfaxEvidenceSource: listing.openlaneMetadata?.carfaxEvidence?.[0]?.source || listing.carfax?.evidence?.[0]?.source || "",
+      networkObserver: runtime.networkObserver || null,
+      networkEvidenceCount: runtime.networkEvidenceCount ?? listing.openlaneMetadata?.networkEvidence?.length ?? 0,
+      safeExpansion: listing.openlaneMetadata?.safeExpansion || null,
+      missingData: readiness.missingData || listing.missingData || [],
+      extractionConfidence: listing.extractionConfidenceScore,
     });
   }
 
@@ -554,9 +582,11 @@
   }
 
   function readinessMessage(readiness = {}) {
-    if (readiness.state === "unsupported_page") return "OpenLane vehicle data is still loading or this page is not a supported capture page.";
-    if (readiness.state === "incomplete_identity") return "OpenLane vehicle identity is incomplete. Waiting for VIN or stronger vehicle details before capture.";
-    if (readiness.state === "pending_vehicle_data") return "OpenLane vehicle data is still loading. Market Snap will retry before capture.";
+    if (readiness.state === "unsupported_page") return "Vehicle data is still loading.";
+    if (readiness.state === "incomplete_identity" && readiness.vinStatus !== "found") return "VIN missing. Capture blocked to avoid bad data.";
+    if (readiness.state === "incomplete_identity") return "OpenLane vehicle identity is incomplete. Waiting for stronger vehicle details before capture.";
+    if (readiness.state === "pending_vehicle_data") return "Vehicle data is still loading.";
+    if (readiness.state === "ready_to_capture") return "Ready to capture.";
     return readiness.blockedReason || "OpenLane vehicle data is incomplete.";
   }
 

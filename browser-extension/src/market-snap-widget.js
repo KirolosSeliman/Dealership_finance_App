@@ -30,7 +30,7 @@
           <div class="metrics"></div>
           <div class="meta"></div>
           <details class="data-quality">
-            <summary>Data quality</summary>
+            <summary>Capture debug</summary>
             <div class="quality-body"></div>
           </details>
           <form class="settings-drawer" hidden>
@@ -125,6 +125,7 @@
     shadow.querySelector(".metrics").innerHTML = state.valuation ? `${detectedHtml(state.listing)}${metricsHtml(state.valuation)}` : detectedHtml(state.listing);
     shadow.querySelector(".meta").innerHTML = metaHtml(state.listing, state.valuation);
     shadow.querySelector(".quality-body").innerHTML = dataQualityHtml(state.listing, state.valuation);
+    shadow.querySelector(".data-quality").open = shouldOpenDebugPanel(state);
     shadow.querySelector(".settings-drawer").hidden = !state.settingsOpen;
     shadow.querySelector(".messages").innerHTML = messagesHtml(state.listing, state.valuation, state.message, state.saveResult);
     const saveButton = shadow.querySelector("[data-action='save']");
@@ -142,6 +143,7 @@
     if (state.status === "error") return state.message || "Market Snap could not analyze this page.";
     if (state.status === "saved") return "Saved to Deal Radar.";
     if (state.valuation) return "Analysis ready.";
+    if (state.listing && readinessSummary(state.listing).readyToCapture) return "Ready to capture.";
     if (state.listing) return "Vehicle detected. Waiting for analysis.";
     return "Detecting OpenLane vehicle...";
   }
@@ -194,8 +196,12 @@
   }
 
   function messagesHtml(listing, valuation, message, saveResult) {
+    const readiness = readinessSummary(listing);
     const items = [
       message,
+      readiness.blockedReason ? `Capture blocked: ${readiness.blockedReason}` : "",
+      listing?.carfaxUrlStatus === "text_only" ? "Carfax text found, but no URL is visible." : "",
+      listing && listing.captureLevel !== "deep_capture" ? "Deep Capture off: VIN/Carfax may be incomplete on dynamic OpenLane pages." : "",
       savedResultLabel(saveResult),
       ...conditionWarningItems(listing).slice(0, 3),
       ...(valuation?.warnings || listing?.warnings || []).slice(0, 4),
@@ -224,27 +230,53 @@
     const networkCandidates = debug.networkCandidates || {};
     const safeExpansion = listing?.openlaneMetadata?.safeExpansion;
     const deepCaptureRuntime = listing?.openlaneMetadata?.deepCaptureRuntime || {};
+    const readiness = readinessSummary(listing);
+    const vinCandidates = debug.vinCandidates || [];
     return [
-      `<p>Confidence: ${escapeHtml(valuation?.confidenceScore ?? listing?.extractionConfidenceScore ?? "-")}</p>`,
-      `<p>Warnings: ${escapeHtml(warnings.length)}</p>`,
-      `<p>Missing: ${escapeHtml(missing.length)}</p>`,
-      `<p>Classifier: ${escapeHtml(listing?.pageType || "-")} / ${escapeHtml(listing?.captureKind || "-")}</p>`,
-      `<p>Top evidence: ${escapeHtml(topEvidenceLabel(evidence, debug))}</p>`,
-      `<p>Carfax status: ${escapeHtml(carfaxStatusLabel(listing))}</p>`,
+      `<p>Page type: ${safeHtml(listing?.pageType || "-")}</p>`,
+      `<p>Capture kind: ${safeHtml(listing?.captureKind || "-")}</p>`,
+      `<p>Capture level: ${safeHtml(listing?.captureLevel || "basic_dom")}</p>`,
+      `<p>Readiness: ${safeHtml(readiness.state || "-")}</p>`,
+      `<p>Capture blocked reason: ${safeHtml(readiness.blockedReason || "-")}</p>`,
+      `<p>VIN: ${safeHtml(listing?.vin || "-")}</p>`,
+      `<p>VIN status: ${safeHtml(readiness.vinStatus || vinStatusLabel(listing) || "-")}</p>`,
+      `<p>VIN evidence source: ${safeHtml(vinEvidenceSource(listing, debug))}</p>`,
+      `<p>VIN candidates: ${safeHtml(String(vinCandidates.length || 0))}</p>`,
+      `<p>Carfax status: ${safeHtml(carfaxStatusLabel(listing))}</p>`,
       `<p>Carfax URL: ${listing?.carfaxUrl ? `<a href="${escapeHtml(listing.carfaxUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(listing.carfaxUrl)}</a>` : "-"}</p>`,
-      `<p>Carfax evidence: ${escapeHtml(carfaxEvidenceLabel(listing))}</p>`,
-      listing?.carfaxUrlStatus === "text_only" ? `<p>Carfax warning: ${escapeHtml("Visible text only; URL was not available in page evidence.")}</p>` : "",
-      `<p>VIN evidence: ${escapeHtml(debug.vinCandidates?.[0]?.source || listing?.extractedFields?.vinEvidence?.matchedLabel || "-")}</p>`,
-      `<p>Price evidence: ${escapeHtml(debug.priceCandidates?.[0]?.label || "-")}</p>`,
-      `<p>Condition warnings: ${escapeHtml(conditionWarningItems(listing).length)}</p>`,
-      `<p>Dealer notes: ${escapeHtml(condition.dealerNotes ? "visible" : "-")}</p>`,
-      `<p>Rejected candidates: ${escapeHtml(rejectedCandidates)}</p>`,
-      `<p>Network candidates: ${escapeHtml(networkCandidateCount(networkCandidates))}</p>`,
-      `<p>Deep Capture runtime: ${escapeHtml(deepCaptureRuntimeLabel(deepCaptureRuntime))}</p>`,
-      `<p>Safe expansion: ${escapeHtml(safeExpansion ? `${safeExpansion.clicked?.length || 0} opened / ${safeExpansion.skipped?.length || 0} skipped` : "-")}</p>`,
+      `<p>Carfax evidence source: ${safeHtml(carfaxEvidenceLabel(listing))}</p>`,
+      listing?.carfaxUrlStatus === "text_only" ? `<p>Carfax warning: ${safeHtml("Visible text only; URL was not available in page evidence.")}</p>` : "",
+      `<p>Network observer: ${safeHtml(networkObserverLabel(deepCaptureRuntime))}</p>`,
+      `<p>Network evidence count: ${safeHtml(String(networkEvidenceCount(listing, deepCaptureRuntime)))}</p>`,
+      `<p>Safe expansion: ${safeHtml(safeExpansion ? `${safeExpansion.clicked?.length || 0} opened / ${safeExpansion.skipped?.length || 0} skipped` : "-")}</p>`,
+      `<p>Missing data: ${safeHtml(missing.join(", ") || "-")}</p>`,
+      `<p>Extraction confidence: ${safeHtml(valuation?.confidenceScore ?? listing?.extractionConfidenceScore ?? "-")}</p>`,
+      `<p>Warnings: ${safeHtml(warnings.length)}</p>`,
+      `<p>Top evidence: ${safeHtml(topEvidenceLabel(evidence, debug))}</p>`,
+      `<p>Price evidence: ${safeHtml(debug.priceCandidates?.[0]?.label || "-")}</p>`,
+      `<p>Condition warnings: ${safeHtml(conditionWarningItems(listing).length)}</p>`,
+      `<p>Dealer notes: ${safeHtml(condition.dealerNotes ? "visible" : "-")}</p>`,
+      `<p>Rejected candidates: ${safeHtml(rejectedCandidates)}</p>`,
+      `<p>Network candidates: ${safeHtml(networkCandidateCount(networkCandidates))}</p>`,
+      `<p>Deep Capture runtime: ${safeHtml(deepCaptureRuntimeLabel(deepCaptureRuntime))}</p>`,
       `<p>Evidence</p>`,
-      `<ul>${evidence.slice(0, 4).map((item) => `<li>${escapeHtml(item.sourceText || item.marker || item.evidenceType || "visible_page_text")}</li>`).join("")}</ul>`,
+      `<ul>${evidence.slice(0, 4).map((item) => `<li>${safeHtml(item.sourceText || item.marker || item.evidenceType || "visible_page_text")}</li>`).join("")}</ul>`,
     ].join("");
+  }
+
+  function shouldOpenDebugPanel(state) {
+    const listing = state.listing || {};
+    const readiness = readinessSummary(listing);
+    return Boolean(
+      state.status === "warning"
+        || state.status === "error"
+        || state.debugMode
+        || listing.openlaneMetadata?.debugMode
+        || readiness.blockedReason
+        || !listing.vin
+        || listing.carfaxUrlStatus === "text_only"
+        || listing.carfaxUrlStatus === "missing",
+    );
   }
 
   function conditionWarningItems(listing) {
@@ -275,6 +307,40 @@
     const first = evidence?.[0];
     if (!first) return "-";
     return [first.source, first.endpointPattern, first.urlStatus].filter(Boolean).join(" / ") || first.text || first.sourceText || "-";
+  }
+
+  function readinessSummary(listing = {}) {
+    const readiness = listing?.openlaneMetadata?.stableCaptureReadiness || {};
+    return {
+      readyToCapture: Boolean(readiness.readyToCapture),
+      state: readiness.state || "",
+      blockedReason: readiness.blockedReason || "",
+      vinStatus: readiness.vinStatus || vinStatusLabel(listing),
+      carfaxStatus: readiness.carfaxStatus || carfaxStatusLabel(listing),
+      missingData: readiness.missingData || listing.missingData || [],
+    };
+  }
+
+  function vinStatusLabel(listing = {}) {
+    if (!listing?.vin) return "missing";
+    return /^[A-HJ-NPR-Z0-9]{17}$/i.test(String(listing.vin)) ? "found" : "invalid";
+  }
+
+  function vinEvidenceSource(listing, debug = {}) {
+    return debug.vinCandidates?.[0]?.source
+      || listing?.fieldEvidence?.vin?.[0]?.sourceType
+      || listing?.extractedFields?.vinEvidence?.matchedLabel
+      || "-";
+  }
+
+  function networkObserverLabel(runtime = {}) {
+    const observer = runtime.networkObserver || {};
+    if (observer.enabled) return "enabled";
+    return observer.reason || "disabled";
+  }
+
+  function networkEvidenceCount(listing, runtime = {}) {
+    return Number(runtime.networkEvidenceCount ?? runtime.networkObserver?.observationCount ?? listing?.openlaneMetadata?.networkEvidence?.length ?? 0);
   }
 
   function networkCandidateCount(candidates) {
@@ -396,6 +462,17 @@
 
   function escapeHtml(value) {
     return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[char]));
+  }
+
+  function safeHtml(value) {
+    return escapeHtml(redactSensitiveText(value));
+  }
+
+  function redactSensitiveText(value) {
+    return String(value ?? "")
+      .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, "[redacted]")
+      .replace(/\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b/g, "[redacted]")
+      .replace(/\b(?:auth|authorization|cookie|token|secret|credential|session|password|csrf|jwt)\s*[:=]\s*[^,\s"'<>]+/gi, "[redacted]");
   }
 
   function widgetCss() {
