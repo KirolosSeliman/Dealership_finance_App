@@ -96,6 +96,18 @@ test("release verification workflow is CI-ready without production credentials",
   assert.doesNotMatch(workflow, /SUPABASE_SERVICE_ROLE_KEY|R2_SECRET_ACCESS_KEY|CRON_SECRET/);
 });
 
+test("Vercel cron schedules stay compatible with Hobby deployment limits", () => {
+  const vercelConfig = JSON.parse(readFileSync(join(repoRoot, "vercel.json"), "utf8")) as { crons?: Array<{ path?: string; schedule?: string }> };
+  const readme = readFileSync(join(repoRoot, "README.md"), "utf8");
+
+  assert.ok(Array.isArray(vercelConfig.crons));
+  for (const cron of vercelConfig.crons ?? []) {
+    assert.match(String(cron.path || ""), /^\//);
+    assert.equal(runsAtMostOncePerDay(String(cron.schedule || "")), true, `${cron.path} schedule is not Hobby-compatible`);
+  }
+  assert.match(readme, /once daily so the project can deploy on Vercel Hobby/i);
+});
+
 test("all hardening migrations required for release are present in filename order", () => {
   const migrationNames = readdirSync(join(repoRoot, "supabase/migrations")).filter((name) => name.endsWith(".sql")).sort();
   const required = [
@@ -121,6 +133,20 @@ test("all hardening migrations required for release are present in filename orde
   }
   assert.deepEqual([...migrationNames].sort(), migrationNames);
 });
+
+function runsAtMostOncePerDay(schedule: string) {
+  const parts = schedule.trim().split(/\s+/);
+  if (parts.length !== 5) return false;
+  const [minute, hour, dayOfMonth, month, dayOfWeek] = parts;
+  const dailyDateScope = dayOfMonth === "*" && month === "*" && dayOfWeek === "*";
+  return dailyDateScope && isSingleCronValue(minute, 0, 59) && isSingleCronValue(hour, 0, 23);
+}
+
+function isSingleCronValue(value: string, min: number, max: number) {
+  if (!/^\d+$/.test(value)) return false;
+  const number = Number(value);
+  return Number.isInteger(number) && number >= min && number <= max;
+}
 
 test("Deep Capture retention cleanup is restricted to service role before release", () => {
   const retentionMigration = readFileSync(join(repoRoot, "supabase/migrations/20260526_deep_capture_retention_training_guards.sql"), "utf8");
