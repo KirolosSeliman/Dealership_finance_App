@@ -1,0 +1,24 @@
+{
+  "_fixtureNote": "Synthetic fixture: allowed OpenLane vehicle JSON with CARFAX metadata plus sensitive fields that must be redacted.",
+  "vehicle": {
+    "vin": "KM8J3CA46HU123456",
+    "year": 2017,
+    "make": "Hyundai",
+    "model": "Tucson",
+    "odometerKm": 111486,
+    "currentBid": 4600,
+    "carfax": {
+      "provider": "CARFAX Canada",
+      "reportUrl": "/vehicle-history/carfax/TUCSON999"
+    },
+    "photos": [
+      "https://pub-us.kar-media.com/vehicle/KM8J3CA46HU123456/front.jpg"
+    ]
+  },
+  "authToken": "eyJaaaaaaaaaaaaaaaaaaaaaaaa.eyJbbbbbbbbbbbbbbbbbbbbbbbb.cccccccccccccccccccccccc",
+  "requestHeaders": {
+    "authorization": "Bearer should-not-appear",
+    "cookie": "session=secret"
+  },
+  "buyerEmail": "buyer@example.com"
+}
