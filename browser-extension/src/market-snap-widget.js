@@ -230,6 +230,10 @@
       `<p>Missing: ${escapeHtml(missing.length)}</p>`,
       `<p>Classifier: ${escapeHtml(listing?.pageType || "-")} / ${escapeHtml(listing?.captureKind || "-")}</p>`,
       `<p>Top evidence: ${escapeHtml(topEvidenceLabel(evidence, debug))}</p>`,
+      `<p>Carfax status: ${escapeHtml(carfaxStatusLabel(listing))}</p>`,
+      `<p>Carfax URL: ${listing?.carfaxUrl ? `<a href="${escapeHtml(listing.carfaxUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(listing.carfaxUrl)}</a>` : "-"}</p>`,
+      `<p>Carfax evidence: ${escapeHtml(carfaxEvidenceLabel(listing))}</p>`,
+      listing?.carfaxUrlStatus === "text_only" ? `<p>Carfax warning: ${escapeHtml("Visible text only; URL was not available in page evidence.")}</p>` : "",
       `<p>VIN evidence: ${escapeHtml(debug.vinCandidates?.[0]?.source || listing?.extractedFields?.vinEvidence?.matchedLabel || "-")}</p>`,
       `<p>Price evidence: ${escapeHtml(debug.priceCandidates?.[0]?.label || "-")}</p>`,
       `<p>Condition warnings: ${escapeHtml(conditionWarningItems(listing).length)}</p>`,
@@ -257,6 +261,20 @@
     if (title?.text) return `${title.source || "title"} (${title.score || 0})`;
     const first = evidence?.[0];
     return first?.sourceText || first?.marker || first?.evidenceType || "-";
+  }
+
+  function carfaxStatusLabel(listing) {
+    if (!listing) return "-";
+    if (listing.carfaxUrlStatus === "url_found") return "url_found";
+    if (listing.carfaxUrlStatus === "text_only") return "text_only";
+    return listing.carfaxUrlStatus || "missing";
+  }
+
+  function carfaxEvidenceLabel(listing) {
+    const evidence = listing?.openlaneMetadata?.carfaxEvidence || listing?.carfax?.evidence || listing?.extractedFields?.carfaxEvidence || [];
+    const first = evidence?.[0];
+    if (!first) return "-";
+    return [first.source, first.endpointPattern, first.urlStatus].filter(Boolean).join(" / ") || first.text || first.sourceText || "-";
   }
 
   function networkCandidateCount(candidates) {

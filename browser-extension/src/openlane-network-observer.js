@@ -99,6 +99,7 @@
         merged[candidate.field] = candidate.value;
       }
     }
+    normalizeMergedCarfax(merged, candidates.fieldCandidates || []);
     if ((!merged.photos || !merged.photos.length) && candidates.mediaCandidates.length) {
       merged.photos = candidates.mediaCandidates.slice(0, 80).map((item) => ({ url: item.value || item.url, source: "observed_network" }));
       merged.imageCount = Math.max(Number(merged.imageCount || 0), merged.photos.length);
@@ -110,6 +111,32 @@
       merged.openlaneMetadata.transportEvidence = candidates.transportCandidates.slice(0, 12);
     }
     return root.DealerFlowOpenLaneExtractionContract?.applyOpenLaneExtractionContract?.(merged) || merged;
+  }
+
+  function normalizeMergedCarfax(merged, fieldCandidates = []) {
+    const carfaxUrlCandidate = fieldCandidates.find((candidate) => candidate.field === "carfaxUrl" && candidate.value);
+    const carfaxTextCandidate = fieldCandidates.find((candidate) => candidate.field === "carfaxUrlStatus" && candidate.value === "text_only");
+    if (!carfaxUrlCandidate && !carfaxTextCandidate && !merged.carfaxUrl && !merged.carfaxUrlStatus) return;
+
+    if (carfaxUrlCandidate && !merged.carfaxUrl) merged.carfaxUrl = carfaxUrlCandidate.value;
+    merged.carfaxMentioned = true;
+    merged.carfaxAvailable = true;
+    merged.carfaxUrlStatus = merged.carfaxUrl ? "url_found" : "text_only";
+    merged.openlaneMetadata = {
+      ...(merged.openlaneMetadata || {}),
+      carfaxEvidence: [
+        ...(merged.openlaneMetadata?.carfaxEvidence || []),
+        ...[carfaxUrlCandidate, carfaxTextCandidate].filter(Boolean).map((candidate) => ({
+          source: "network_json",
+          endpointPattern: candidate.endpointPattern,
+          text: candidate.sourceText,
+          url: candidate.field === "carfaxUrl" ? candidate.value : undefined,
+          urlStatus: candidate.field === "carfaxUrl" ? "url_found" : "text_only",
+          capturedAt: candidate.capturedAt,
+          confidenceScore: candidate.confidence,
+        })),
+      ].slice(0, 12),
+    };
   }
 
   function extractCandidatesFromNetworkPayload(payload, url = "") {
@@ -151,7 +178,9 @@
           priceCandidates.push(candidate);
           fieldCandidates.push(candidate);
         } else if (field && TEXT_FIELD.has(field) && safeTextFieldValue(value)) {
-          fieldCandidates.push(candidateRecord(field, field === "carfaxUrl" ? carfaxUrlCandidate(value, url) || value : cleanTextValue(value), key, endpoint, confidenceForKey(key), value, capturedAt));
+          if (field !== "carfaxUrl") {
+            fieldCandidates.push(candidateRecord(field, cleanTextValue(value), key, endpoint, confidenceForKey(key), value, capturedAt));
+          }
         }
       } else if (typeof value === "number") {
         const field = inferFieldName(key, value);

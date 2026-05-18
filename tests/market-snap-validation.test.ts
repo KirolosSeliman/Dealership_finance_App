@@ -88,6 +88,55 @@ test("Market Snap validation accepts rich OpenLane extension payloads", () => {
   assert.equal(Array.isArray(result.data?.openlaneMetadata?.networkEvidence), true);
 });
 
+test("Market Snap validation preserves normalized CARFAX status and evidence", () => {
+  const result = marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    marketType: "auction_market",
+    listingUrl: "https://app.openlane.ca/vdp/KM8J3CA46HU123456",
+    title: "2017 Hyundai Tucson",
+    year: 2017,
+    make: "Hyundai",
+    model: "Tucson",
+    vin: "KM8J3CA46HU123456",
+    mileageKm: 111486,
+    pageType: "active_listing",
+    captureKind: "observation",
+    carfaxMentioned: true,
+    carfaxAvailable: true,
+    carfaxUrl: "https://app.openlane.ca/vehicle-history/carfax/TUCSON999",
+    carfaxUrlStatus: "url_found",
+    carfax: {
+      mentioned: true,
+      available: true,
+      url: "https://app.openlane.ca/vehicle-history/carfax/TUCSON999",
+      urlStatus: "url_found",
+      evidence: [{ source: "network_json", sourceText: "/vehicle-history/carfax/TUCSON999" }],
+    },
+    fieldEvidence: {
+      carfaxUrl: [{
+        field: "carfaxUrl",
+        value: "https://app.openlane.ca/vehicle-history/carfax/TUCSON999",
+        normalizedValue: "https://app.openlane.ca/vehicle-history/carfax/TUCSON999",
+        sourceType: "network_json",
+        sourceName: "vehicle.carfax.reportUrl",
+        sourceText: "/vehicle-history/carfax/TUCSON999",
+        endpointPattern: "app.openlane.ca/api/vdp/:id",
+        pageType: "active_listing",
+        captureKind: "observation",
+        confidenceScore: 92,
+        capturedAt: "2026-05-17T12:00:00.000Z",
+      }],
+    },
+    extractionConfidenceScore: 88,
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.data?.carfaxUrlStatus, "url_found");
+  assert.equal(result.data?.fieldEvidence?.carfaxUrl?.[0]?.sourceType, "network_json");
+});
+
 test("Market Snap validation rejects unsafe OpenLane media URLs and oversized raw text", () => {
   assert.equal(marketListingPayloadSchema.safeParse({
     organizationId,

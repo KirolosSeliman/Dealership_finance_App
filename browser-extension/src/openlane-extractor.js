@@ -683,6 +683,7 @@
         node.textContent,
       ].filter(Boolean).join(" "));
     }
+    add("safe_dom_attributes", extractSafeDomAttributeText(doc));
     for (const evidence of extractCarfaxEvidenceFromHtml(doc.__openlaneHtml || "")) add("html_node", evidence);
     add("html_attributes", extractAttributeText(doc.__openlaneHtml || ""));
     add("visible_text", text);
@@ -701,6 +702,7 @@
   function carfaxUrlCandidate(value) {
     const raw = String(value || "");
     const absolute = raw.match(/https?:\/\/[^\s"'<>)]*(?:carfax|report|history)[^\s"'<>)]*/i)?.[0];
+    if (absolute && /\.(?:svg|png|jpe?g|webp|avif|css|js)(?:$|[?#])/i.test(absolute)) return undefined;
     if (absolute) return absolute;
     const relative = raw.match(/\/[A-Za-z0-9._~:/?#[\]@!$&()*+,;=%-]*(?:carfax|report|history)[A-Za-z0-9._~:/?#[\]@!$&()*+,;=%-]*/i)?.[0];
     if (relative && !/\.(?:svg|png|jpe?g|webp|avif|css|js)(?:$|[?#])/i.test(relative)) return relative;
