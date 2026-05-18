@@ -38,8 +38,10 @@ test("Market Snap extension injects on OpenLane Canada vehicle pages", () => {
   assert.ok(scripts.includes("src/openlane-network-observer.js"));
   assert.ok(scripts.includes("src/openlane-safe-expander.js"));
   assert.ok(scripts.includes("src/openlane-extractor.js"));
+  assert.ok(scripts.includes("src/openlane-stable-capture.js"));
   assert.ok(scripts.includes("src/market-snap-widget.js"));
   assert.ok(scripts.includes("src/content-script.js"));
+  assert.ok(scripts.indexOf("src/openlane-stable-capture.js") < scripts.indexOf("src/content-script.js"));
   assert.ok(css.includes("styles/widget.css"));
   assert.equal(manifest.permissions.includes("tabs"), false);
   assert.equal(manifest.permissions.includes("webRequest"), false);
@@ -52,6 +54,8 @@ test("Market Snap extension uses in-page OpenLane widget instead of popup-only a
 
   assert.match(contentScript, /__dealerFlowMarketSnapRuntime/);
   assert.match(contentScript, /waitForVehiclePage/);
+  assert.match(contentScript, /extractStableOpenLaneListing/);
+  assert.match(contentScript, /readyToCapture/);
   assert.match(contentScript, /classifyOpenLanePage/);
   assert.match(contentScript, /MAX_READY_RETRIES/);
   assert.match(contentScript, /MutationObserver/);

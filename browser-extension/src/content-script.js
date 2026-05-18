@@ -202,19 +202,19 @@
     STATE.phase = "extracting";
 
     if (!STATE.settings?.autoAnalyze && !force) {
-      updateListingOnly();
+      await updateListingOnly();
       return;
     }
 
-    if (hasActiveDeepCaptureConsent()) await expandReadOnlySections();
-    else STATE.safeExpansion = null;
-    const listing = extractListing({ force });
-    if (!isVehicleListing(listing)) {
-      STATE.widget?.render({ status: "warning", listing, message: "OpenLane vehicle data is still loading or incomplete." });
-      return;
-    }
-
+    const stableCapture = await extractStableListing({ force });
+    const listing = stableCapture.listing;
     STATE.listing = listing;
+    STATE.safeExpansion = stableCapture.safeExpansion || null;
+    if (!stableCapture.readiness.readyToCapture || !isVehicleListing(listing)) {
+      STATE.widget?.render({ status: "warning", listing, message: readinessMessage(stableCapture.readiness) });
+      return;
+    }
+
     const settingsError = settingsProblem(STATE.settings);
     if (settingsError) {
       STATE.widget?.render({ status: "disconnected", listing, valuation: STATE.valuation, message: settingsError });
@@ -256,12 +256,27 @@
     });
   }
 
-  function updateListingOnly() {
-    const listing = extractListing();
-    if (!isVehicleListing(listing)) return;
+  async function updateListingOnly() {
+    const stableCapture = await extractStableListing({ force: false });
+    const listing = stableCapture.listing;
+    if (!isVehicleListing(listing) && !listing?.title) return;
     STATE.phase = "idle";
     STATE.listing = listing;
-    STATE.widget?.render({ status: "idle", listing, message: "Auto-analyze is off. Use Refresh to analyze this page." });
+    STATE.safeExpansion = stableCapture.safeExpansion || null;
+    STATE.widget?.render({
+      status: stableCapture.readiness.readyToCapture ? "idle" : "warning",
+      listing,
+      message: stableCapture.readiness.readyToCapture ? "Auto-analyze is off. Use Refresh to analyze this page." : readinessMessage(stableCapture.readiness),
+    });
+  }
+
+  async function extractStableListing({ force = false } = {}) {
+    if (force) clearExtractionCache();
+    return window.DealerFlowOpenLaneStableCapture.extractStableOpenLaneListing(document, location.href, STATE.settings, {
+      onSafeExpansion: (safeExpansion) => {
+        STATE.safeExpansion = safeExpansion;
+      },
+    });
   }
 
   function extractListing({ force = false } = {}) {
@@ -436,7 +451,13 @@
     if (STATE.saving) return;
     STATE.saving = true;
     try {
-      if (!STATE.listing) STATE.listing = extractListing();
+      const stableCapture = await extractStableListing({ force: true });
+      STATE.listing = stableCapture.listing;
+      STATE.safeExpansion = stableCapture.safeExpansion || null;
+      if (!stableCapture.readiness.readyToCapture) {
+        STATE.widget?.render({ status: "warning", listing: STATE.listing, valuation: STATE.valuation, message: readinessMessage(stableCapture.readiness) });
+        return;
+      }
       const settingsError = settingsProblem(STATE.settings);
       if (settingsError) {
         STATE.widget?.render({ status: "disconnected", listing: STATE.listing, valuation: STATE.valuation, message: settingsError });
@@ -530,6 +551,13 @@
     } catch (error) {
       return formatError(error);
     }
+  }
+
+  function readinessMessage(readiness = {}) {
+    if (readiness.state === "unsupported_page") return "OpenLane vehicle data is still loading or this page is not a supported capture page.";
+    if (readiness.state === "incomplete_identity") return "OpenLane vehicle identity is incomplete. Waiting for VIN or stronger vehicle details before capture.";
+    if (readiness.state === "pending_vehicle_data") return "OpenLane vehicle data is still loading. Market Snap will retry before capture.";
+    return readiness.blockedReason || "OpenLane vehicle data is incomplete.";
   }
 
   function listingSignature(listing) {

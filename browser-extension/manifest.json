@@ -24,6 +24,7 @@
         "src/openlane-extractor.js",
         "src/market-snap-widget.js",
         "src/capture-runtime.js",
+        "src/openlane-stable-capture.js",
         "src/content-script.js"
       ],
       "css": ["styles/widget.css"],
