@@ -272,44 +272,14 @@
 
   async function extractStableListing({ force = false } = {}) {
     if (force) clearExtractionCache();
-    return window.DealerFlowOpenLaneStableCapture.extractStableOpenLaneListing(document, location.href, STATE.settings, {
+    const stableCapture = await window.DealerFlowOpenLaneStableCapture.extractStableOpenLaneListing(document, location.href, STATE.settings, {
       onSafeExpansion: (safeExpansion) => {
         STATE.safeExpansion = safeExpansion;
       },
     });
-  }
-
-  function extractListing({ force = false } = {}) {
-    if (force) clearExtractionCache();
-    const classification = classifyOpenLanePage();
-    const listing = window.DealerFlowOpenLaneExtractor.extractOpenLaneListing(document, location.href, {
-      includeMediaUrls: STATE.settings?.includeMediaUrls !== false,
-      includeRawVisibleText: STATE.settings?.includeRawVisibleText !== false,
-    });
-    const networkEvidence = hasActiveDeepCaptureConsent() ? window.DealerFlowOpenLaneNetworkObserver?.getOpenLaneNetworkEvidence?.() || [] : [];
-    const withNetworkEvidence = hasActiveDeepCaptureConsent()
-      ? window.DealerFlowOpenLaneNetworkObserver?.mergeNetworkEvidenceIntoListing?.(listing, networkEvidence) || listing
-      : listing;
-    const merged = {
-      ...withNetworkEvidence,
-      pageType: classification.pageType,
-      captureKind: classification.captureKind,
-      outcomeConfidence: classification.outcomeConfidence,
-      openlaneMetadata: { ...(withNetworkEvidence.openlaneMetadata || {}), classification },
-    };
-    if (STATE.safeExpansion) merged.openlaneMetadata.safeExpansion = STATE.safeExpansion;
-    const gated = applyConsentGateToListing(merged);
+    const gated = applyConsentGateToListing(stableCapture.listing || {});
     if (STATE.settings?.debugMode) logExtractionDebug(gated);
-    return gated;
-  }
-
-  async function expandReadOnlySections() {
-    if (!hasActiveDeepCaptureConsent()) {
-      STATE.safeExpansion = null;
-      return null;
-    }
-    STATE.safeExpansion = await window.DealerFlowOpenLaneSafeExpander?.expandOpenLaneReadOnlySections?.(document, { maxSteps: 8, waitMs: 120 });
-    return STATE.safeExpansion;
+    return { ...stableCapture, listing: gated };
   }
 
   async function refreshDeepCaptureConsentState(settings) {
@@ -479,7 +449,13 @@
   }
 
   async function copyExtractedJson() {
-    const listing = STATE.listing || extractListing();
+    let listing = STATE.listing;
+    if (!listing) {
+      const stableCapture = await extractStableListing({ force: true });
+      listing = stableCapture.listing;
+      STATE.listing = listing;
+      STATE.safeExpansion = stableCapture.safeExpansion || null;
+    }
     await navigator.clipboard.writeText(JSON.stringify(buildCopyPayload(listing), null, 2));
     STATE.widget?.render({ status: "ready", listing, valuation: STATE.valuation, message: "Extracted JSON copied." });
   }
@@ -636,10 +612,11 @@
       return;
     }
     if (message?.type === "MARKET_SNAP_EXTRACT") {
-      expandReadOnlySections().then(() => {
-        const listing = extractListing({ force: true });
+      extractStableListing({ force: true }).then((stableCapture) => {
+        const listing = stableCapture.listing;
         STATE.listing = listing;
-        sendResponse({ ok: true, listing });
+        STATE.safeExpansion = stableCapture.safeExpansion || null;
+        sendResponse({ ok: true, listing, readiness: stableCapture.readiness, debug: stableCapture.debug });
       }).catch((error) => sendResponse({ ok: false, message: formatError(error) }));
       return true;
     }

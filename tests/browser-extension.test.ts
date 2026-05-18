@@ -54,6 +54,7 @@ test("Market Snap extension injects on OpenLane Canada vehicle pages", () => {
 
 test("Market Snap extension uses in-page OpenLane widget instead of popup-only analysis", () => {
   const contentScript = readFileSync(join(repoRoot, "browser-extension/src/content-script.js"), "utf8");
+  const stableCapture = readFileSync(join(repoRoot, "browser-extension/src/openlane-stable-capture.js"), "utf8");
   const widget = readFileSync(join(repoRoot, "browser-extension/src/market-snap-widget.js"), "utf8");
 
   assert.match(contentScript, /__dealerFlowMarketSnapRuntime/);
@@ -66,8 +67,8 @@ test("Market Snap extension uses in-page OpenLane widget instead of popup-only a
   assert.match(contentScript, /pushState/);
   assert.match(contentScript, /replaceState/);
   assert.match(contentScript, /disconnected/);
-  assert.match(contentScript, /expandReadOnlySections/);
-  assert.match(contentScript, /DealerFlowOpenLaneSafeExpander/);
+  assert.match(stableCapture, /expandOpenLaneReadOnlySections/);
+  assert.match(stableCapture, /DealerFlowOpenLaneSafeExpander/);
   assert.match(contentScript, /DealerFlowOpenLaneNetworkObserver/);
   assert.match(contentScript, /createMarketSnapWidget/);
   assert.match(contentScript, /MARKET_SNAP_ANALYZE/);
@@ -81,6 +82,24 @@ test("Market Snap extension uses in-page OpenLane widget instead of popup-only a
   assert.match(widget, /Copy JSON/);
   assert.match(widget, /attachShadow/);
   assert.match(contentScript, /openOptionsPage/);
+});
+
+test("Market Snap manual extraction messages use stable capture instead of direct extraction", () => {
+  const contentScript = readFileSync(join(repoRoot, "browser-extension/src/content-script.js"), "utf8");
+  const extractBlock = contentScript.slice(
+    contentScript.indexOf('message?.type === "MARKET_SNAP_EXTRACT"'),
+    contentScript.indexOf('message?.type === "MARKET_SNAP_ANALYZE"'),
+  );
+  const analyzeBlock = contentScript.slice(
+    contentScript.indexOf('message?.type === "MARKET_SNAP_ANALYZE"'),
+    contentScript.indexOf("return undefined;", contentScript.indexOf('message?.type === "MARKET_SNAP_ANALYZE"')),
+  );
+
+  assert.match(extractBlock, /extractStableListing\(\{\s*force:\s*true\s*\}\)/);
+  assert.match(extractBlock, /readiness:\s*stableCapture\.readiness/);
+  assert.match(extractBlock, /debug:\s*stableCapture\.debug/);
+  assert.doesNotMatch(extractBlock, /extractListing\(\{\s*force:\s*true\s*\}\)/);
+  assert.match(analyzeBlock, /runRuntime\(\{\s*force:\s*true,\s*reason:\s*"popup-analyze"\s*\}\)/);
 });
 
 test("Market Snap widget exposes draggable, settings, and data-quality controls", () => {
