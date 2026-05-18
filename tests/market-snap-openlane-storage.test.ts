@@ -90,6 +90,19 @@ test("OpenLane verified outcomes require visible evidence before training eligib
   assert.equal(outcome.is_training_eligible, false);
 });
 
+test("OpenLane verified outcomes without VIN remain non-training preview records", async () => {
+  const client = new FakeCaptureClient();
+  await persistOpenLaneCapture(client as never, { ...acceptedOutcome(), vin: undefined, missingData: ["vin"] }, capturedBy);
+
+  const identity = client.tables.openlane_vehicle_identities.rows[0];
+  const outcome = client.tables.openlane_outcomes.rows[0];
+  assert.notEqual(identity.identity_confidence, "high");
+  assert.equal(outcome.capture_kind, "verified_outcome");
+  assert.equal(outcome.model_improvement_opted_in, true);
+  assert.equal(outcome.is_training_eligible, false);
+  assert.ok(Number(outcome.data_quality_score) < 90);
+});
+
 test("OpenLane missing VIN lowers persisted capture quality gates", async () => {
   const client = new FakeCaptureClient();
   await persistOpenLaneCapture(client as never, {

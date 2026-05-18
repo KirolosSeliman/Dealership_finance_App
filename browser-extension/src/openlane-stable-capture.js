@@ -124,6 +124,9 @@
     if (vinStatus === "invalid") {
       return { ...base, state: "incomplete_identity", blockedReason: "invalid_vin" };
     }
+    if (isOpenLaneListing(listing, classifier) && vinStatus === "missing") {
+      return { ...base, state: "incomplete_identity", blockedReason: "missing_vin_openlane_preview_only" };
+    }
     if (!reliableContext) {
       return { ...base, state: "pending_vehicle_data", blockedReason: "missing_reliable_price_mileage_image_or_title_context" };
     }
@@ -143,6 +146,10 @@
     if (listing.carfaxUrl || listing.carfaxUrlStatus === "url_found") return "url_found";
     if (listing.carfaxAvailable || listing.carfaxMentioned || listing.carfaxUrlStatus === "text_only") return "text_only";
     return "missing";
+  }
+
+  function isOpenLaneListing(listing = {}, classifier = {}) {
+    return /openlane/i.test(String(listing.sourceName || classifier.sourceName || ""));
   }
 
   function recoverVinFromUrl(href = "") {

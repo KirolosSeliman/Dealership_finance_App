@@ -178,7 +178,7 @@ test("Market Snap copy JSON includes normalized extraction, runtime evidence, an
   assert.match(contentScript, /outcomeEvidence/);
   assert.match(contentScript, /debug/);
   assert.match(contentScript, /basic DOM extraction may miss VIN\/Carfax/);
-  assert.match(contentScript, /VIN missing\. Capture blocked to avoid bad data/);
+  assert.match(contentScript, /VIN missing\. Preview only - capture blocked to avoid bad data/);
   assert.match(contentScript, /Ready to capture/);
   assert.match(contentScript, /logExtractionDebug/);
   assert.match(contentScript, /ignored evidence/);
@@ -191,6 +191,19 @@ test("Market Snap copy JSON includes normalized extraction, runtime evidence, an
   assert.match(contentScript, /captureResponse/);
   assert.match(contentScript, /buildCopyPayload/);
   assert.match(contentScript, /sanitizeDebugValue/);
+});
+
+test("Market Snap no-VIN OpenLane listings stay preview-only in the content script and widget", () => {
+  const contentScript = readFileSync(join(repoRoot, "browser-extension/src/content-script.js"), "utf8");
+  const widget = readFileSync(join(repoRoot, "browser-extension/src/market-snap-widget.js"), "utf8");
+  const readinessBlockIndex = contentScript.indexOf("!stableCapture.readiness.readyToCapture");
+  const queueCaptureIndex = contentScript.indexOf("queueCapture(listing");
+
+  assert.ok(readinessBlockIndex >= 0);
+  assert.ok(queueCaptureIndex > readinessBlockIndex);
+  assert.match(contentScript, /missing_vin_openlane_preview_only/);
+  assert.match(contentScript, /VIN missing\. Preview only - capture blocked to avoid bad data\./);
+  assert.match(widget, /saveButton\.disabled\s*=\s*state\.status === "saving"\s*\|\|\s*\(state\.listing && !readinessSummary\(state\.listing\)\.readyToCapture\)/);
 });
 
 test("Market Snap analyze and save routes support extension CORS preflight", () => {

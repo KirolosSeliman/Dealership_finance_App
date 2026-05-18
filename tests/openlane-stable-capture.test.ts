@@ -13,11 +13,12 @@ require("../browser-extension/src/openlane-extractor.js");
 const stableCapture = require("../browser-extension/src/openlane-stable-capture.js") as {
   extractStableOpenLaneListing: (doc: Record<string, unknown>, href: string, settings: Record<string, unknown>, options?: Record<string, unknown>) => Promise<{
     listing: Record<string, unknown>;
-    readiness: { readyToCapture: boolean; state: string; vinStatus: string; carfaxStatus: string; attempts: number; missingData: string[] };
+    readiness: { readyToCapture: boolean; state: string; blockedReason: string; vinStatus: string; carfaxStatus: string; attempts: number; missingData: string[] };
   }>;
   evaluateOpenLaneReadiness: (listing: Record<string, unknown>, classifier: Record<string, unknown>, options?: Record<string, unknown>) => {
     readyToCapture: boolean;
     state: string;
+    blockedReason: string;
     vinStatus: string;
     identityConfidence: string;
   };
@@ -70,6 +71,19 @@ test("OpenLane stable capture blocks weak identity without VIN but allows VIN-ba
   assert.equal(weak.state, "incomplete_identity");
   assert.equal(strong.readyToCapture, true);
   assert.equal(strong.vinStatus, "found");
+});
+
+test("OpenLane stable capture keeps no-VIN listings preview-only even when identity is stable", async () => {
+  const doc = fakeDocument("2017 Hyundai Tucson AWD Odometer 111,486 KM Current Bid $4,600 23 total photos CARFAX Canada");
+  doc.images = Array.from({ length: 23 }, () => ({}));
+  const result = await stableCapture.extractStableOpenLaneListing(doc, "https://app.openlane.ca/vdp/no-vin-preview", {}, { delaysMs: [0, 0], sleep: async () => undefined });
+
+  assert.equal(result.listing.vin, undefined);
+  assert.equal(result.readiness.readyToCapture, false);
+  assert.equal(result.readiness.state, "incomplete_identity");
+  assert.equal(result.readiness.blockedReason, "missing_vin_openlane_preview_only");
+  assert.equal(result.readiness.vinStatus, "missing");
+  assert.ok(result.readiness.missingData.includes("vin"));
 });
 
 test("OpenLane stable capture clears cache between route VIN changes", async () => {

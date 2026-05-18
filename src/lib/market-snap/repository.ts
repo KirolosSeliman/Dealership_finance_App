@@ -631,6 +631,7 @@ function openLaneRetentionMetadata(input: MarketListingInput) {
 
 function isTrainingEligibleOpenLaneOutcome(input: MarketListingInput) {
   return hasModelImprovementOptIn(input)
+    && Boolean(input.vin)
     && (input.captureKind === "verified_outcome" || input.captureKind === "manual_confirmation")
     && input.negotiationStatus?.toLowerCase() !== "pending"
     && hasVerifiedOutcomeLabel(input)

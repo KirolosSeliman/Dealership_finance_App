@@ -129,7 +129,7 @@
     shadow.querySelector(".settings-drawer").hidden = !state.settingsOpen;
     shadow.querySelector(".messages").innerHTML = messagesHtml(state.listing, state.valuation, state.message, state.saveResult);
     const saveButton = shadow.querySelector("[data-action='save']");
-    saveButton.disabled = state.status === "saving";
+    saveButton.disabled = state.status === "saving" || (state.listing && !readinessSummary(state.listing).readyToCapture);
     saveButton.textContent = state.status === "saving" ? "Saving..." : "Save";
   }
 
