@@ -510,13 +510,14 @@ test("OpenLane network merge reapplies canonical field evidence after Deep Captu
     endpointPattern: "app.openlane.ca/api/vdp/:id",
     sanitizedKeys: candidates.sanitizedKeys,
     candidates,
-  }]) as { fieldEvidence?: Record<string, Array<{ sourceType?: string; endpointPattern?: string; consentId?: string }>>; vin?: string; carfaxUrl?: string; mileageKm?: number };
+  }]) as { fieldEvidence?: Record<string, Array<{ sourceType?: string; endpointPattern?: string; consentId?: string }>>; vin?: string; carfaxUrl?: string; mileageKm?: number; openlaneMetadata?: { networkEvidence?: Array<{ candidateCounts?: { carfax?: number } }> } };
 
   assert.equal(merged.vin, "KM8J3CA46HU123456");
   assert.equal(merged.mileageKm, 111486);
   assert.equal(merged.carfaxUrl, "https://www.carfax.ca/report/TUCSON123");
   assert.ok(merged.fieldEvidence?.vin?.some((item) => item.sourceType === "network_json" && item.endpointPattern === "app.openlane.ca/api/vdp/:id"));
   assert.ok(merged.fieldEvidence?.carfaxUrl?.some((item) => item.sourceType === "network_json"));
+  assert.equal(merged.openlaneMetadata?.networkEvidence?.[0]?.candidateCounts?.carfax, 1);
 });
 
 test("OpenLane network VIN candidate beats visible fallback after Deep Capture merge", () => {
@@ -547,6 +548,39 @@ test("OpenLane network VIN candidate beats visible fallback after Deep Capture m
 
   assert.equal(merged.vin, "KM8J3CA46HU123456");
   assert.equal(merged.fieldEvidence?.vin?.[0]?.sourceType, "network_json");
+});
+
+test("OpenLane weak network VIN candidate does not overwrite stronger verified evidence", () => {
+  const candidates = networkObserver.extractCandidatesFromNetworkPayload({
+    text: "Vehicle reference KM8J3CA46HU123456",
+  }, "https://app.openlane.ca/api/vdp/context");
+  const merged = networkObserver.mergeNetworkEvidenceIntoListing({
+    sourceName: "OpenLane",
+    listingUrl: "https://app.openlane.ca/vdp/3KPFL4A72HE119966",
+    capturedAt: "2026-05-17T12:00:00.000Z",
+    captureKind: "manual_confirmation",
+    pageType: "active_listing",
+    vin: "3KPFL4A72HE119966",
+    fieldEvidence: {
+      vin: [{
+        field: "vin",
+        value: "3KPFL4A72HE119966",
+        normalizedValue: "3KPFL4A72HE119966",
+        sourceType: "manual_confirmation",
+        sourceText: "User-confirmed VIN",
+        confidenceScore: 98,
+        capturedAt: "2026-05-17T12:00:00.000Z",
+      }],
+    },
+  }, [{
+    endpointPattern: "app.openlane.ca/api/vdp/context",
+    capturedAt: "2026-05-17T12:00:00.000Z",
+    sanitizedKeys: candidates.sanitizedKeys,
+    candidates,
+  }]) as { vin?: string; fieldEvidence?: Record<string, Array<{ sourceType?: string }>> };
+
+  assert.equal(merged.vin, "3KPFL4A72HE119966");
+  assert.equal(merged.fieldEvidence?.vin?.[0]?.sourceType, "manual_confirmation");
 });
 
 test("OpenLane network CARFAX candidate normalizes status and evidence after Deep Capture merge", () => {

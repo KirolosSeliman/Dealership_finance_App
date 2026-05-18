@@ -10,6 +10,10 @@ require("../browser-extension/src/openlane-section-map.js");
 const networkObserver = require("../browser-extension/src/openlane-network-observer.js") as {
   extractCandidatesFromNetworkPayload: (payload: unknown, url?: string) => { vinCandidates: Array<{ vin: string }>; mediaCandidates: Array<{ url: string }>; conditionCandidates: Array<{ text: string }>; sanitizedKeys: string[] };
   sanitizeNetworkPayload: (payload: unknown) => unknown;
+  rememberNetworkPayload: (body: unknown, url?: string, contentType?: string) => unknown;
+  startOpenLaneNetworkObserver: (settings?: Record<string, unknown>) => { enabled: boolean; reason: string; observationCount: number };
+  stopOpenLaneNetworkObserver: () => void;
+  getOpenLaneNetworkObserverStatus: () => { enabled: boolean; reason: string; observationCount: number };
   mergeNetworkEvidenceIntoListing: (listing: Record<string, unknown>, evidence: unknown[]) => Record<string, unknown>;
 };
 const safeExpander = require("../browser-extension/src/openlane-safe-expander.js") as {
@@ -138,6 +142,7 @@ test("Market Snap copy JSON includes normalized extraction, runtime evidence, an
   assert.match(contentScript, /networkEvidence/);
   assert.match(contentScript, /outcomeEvidence/);
   assert.match(contentScript, /debug/);
+  assert.match(contentScript, /basic DOM extraction may miss VIN\/Carfax/);
   assert.match(contentScript, /logExtractionDebug/);
   assert.match(contentScript, /ignored evidence/);
   assert.match(contentScript, /section map/);
@@ -327,6 +332,58 @@ test("OpenLane network observer extracts only sanitized page-generated vehicle c
   assert.doesNotMatch(sanitized, /buyer@example\.com|eyJaaaaaaaa/i);
   assert.equal(merged.vin, "2T3R1RFV5MW123456");
   assert.match(String(merged.conditionReportText), /check engine light on/);
+});
+
+test("OpenLane network observer ignores sensitive endpoints and reports consent-gated status", () => {
+  networkObserver.stopOpenLaneNetworkObserver();
+
+  assert.equal(networkObserver.rememberNetworkPayload(JSON.stringify({ vehicle: { vin: "2T3R1RFV5MW123456" } }), "https://app.openlane.ca/api/profile/me", "application/json"), undefined);
+  assert.equal(networkObserver.rememberNetworkPayload(JSON.stringify({ vehicle: { vin: "2T3R1RFV5MW123456" } }), "https://app.openlane.ca/api/account/payment", "application/json"), undefined);
+  assert.equal(networkObserver.rememberNetworkPayload(JSON.stringify({ vehicle: { vin: "2T3R1RFV5MW123456" } }), "https://app.openlane.ca/api/session/token", "application/json"), undefined);
+
+  const inactive = networkObserver.startOpenLaneNetworkObserver({
+    organizationId: "63c47786-fb41-40c1-a573-71346969b9e0",
+    deepCaptureEnabled: false,
+    deepCaptureConsentStatus: "off",
+    deepCaptureConsentId: "",
+    observePageNetworkData: true,
+  });
+  const disabled = networkObserver.startOpenLaneNetworkObserver({
+    organizationId: "63c47786-fb41-40c1-a573-71346969b9e0",
+    deepCaptureEnabled: true,
+    deepCaptureConsentStatus: "active",
+    deepCaptureConsentId: "33333333-3333-4333-8333-333333333333",
+    observePageNetworkData: false,
+  });
+  const active = networkObserver.startOpenLaneNetworkObserver({
+    organizationId: "63c47786-fb41-40c1-a573-71346969b9e0",
+    deepCaptureEnabled: true,
+    deepCaptureConsentStatus: "active",
+    deepCaptureConsentId: "33333333-3333-4333-8333-333333333333",
+    observePageNetworkData: true,
+  });
+
+  assert.equal(inactive.enabled, false);
+  assert.equal(inactive.reason, "deep_capture_consent_required");
+  assert.equal(disabled.enabled, false);
+  assert.equal(disabled.reason, "disabled");
+  assert.equal(active.enabled, true);
+  assert.equal(active.reason, "observing_page_generated_responses");
+  networkObserver.stopOpenLaneNetworkObserver();
+});
+
+test("OpenLane network sanitizer redacts authorization-like strings and sensitive keys", () => {
+  const sanitized = JSON.stringify(networkObserver.sanitizeNetworkPayload({
+    vehicle: { vin: "2T3R1RFV5MW123456" },
+    nested: {
+      authorization: "Bearer should-not-appear",
+      cookie: "session=secret",
+      notes: "Authorization: Bearer visible-secret token=abc123 buyer@example.com 514-555-1212",
+    },
+  }));
+
+  assert.doesNotMatch(sanitized, /Bearer should-not-appear|visible-secret|token=abc123|buyer@example\.com|514-555-1212|session=secret/i);
+  assert.match(sanitized, /\[redacted/);
 });
 
 test("OpenLane extractor caps raw visible text at the prompt limit", () => {

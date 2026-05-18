@@ -407,7 +407,7 @@
     const state = deepCaptureRuntimeState();
     if (state.active) return state.networkObserver.enabled ? "Deep Capture active. Network observer is on." : `Deep Capture active. Network observer ${state.networkObserver.reason || "off"}.`;
     if (state.consentStatus === "paused") return "Deep Capture paused. Check Dealer Flow connection and consent status.";
-    return "Deep Capture off. Consent is needed for expanded capture.";
+    return "Deep Capture off: basic DOM extraction may miss VIN/Carfax on dynamic OpenLane pages.";
   }
 
   function deepCaptureScopes() {

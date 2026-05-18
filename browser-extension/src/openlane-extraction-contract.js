@@ -159,6 +159,23 @@
     const captureKind = listing.captureKind;
     const capturedAt = listing.capturedAt || new Date().toISOString();
 
+    for (const [field, items] of Object.entries(listing.fieldEvidence || {})) {
+      if (!Array.isArray(items)) continue;
+      for (const item of items.slice(0, 20)) {
+        addFieldEvidence(evidence, field, item.value, {
+          sourceType: item.sourceType,
+          sourceName: item.sourceName,
+          sourceText: item.sourceText,
+          endpointPattern: item.endpointPattern,
+          pageType: item.pageType || pageType,
+          captureKind: item.captureKind || captureKind,
+          confidenceScore: item.confidenceScore,
+          capturedAt: item.capturedAt || capturedAt,
+          consentId: item.consentId || consentId,
+        });
+      }
+    }
+
     for (const field of [
       "vin",
       "year",

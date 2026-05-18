@@ -77,6 +77,7 @@
           sanitizedKeys: item.sanitizedKeys,
           candidateCounts: {
             vin: item.candidates?.vinCandidates?.length || 0,
+            carfax: countCarfaxCandidates(item.candidates?.fieldCandidates || []),
             media: item.candidates?.mediaCandidates?.length || 0,
             condition: item.candidates?.conditionCandidates?.length || 0,
           },
@@ -90,7 +91,7 @@
         },
       },
     };
-    if (candidates.vinCandidates[0]) {
+    if (candidates.vinCandidates[0] && shouldUseNetworkVin(merged, candidates.vinCandidates[0])) {
       merged.vin = candidates.vinCandidates[0].value || candidates.vinCandidates[0].vin;
       merged.extractedFields.vinEvidence = { matchedLabel: "network_observation", sourceText: candidates.vinCandidates[0].sourceText };
     }
@@ -137,6 +138,32 @@
         })),
       ].slice(0, 12),
     };
+  }
+
+  function countCarfaxCandidates(fieldCandidates = []) {
+    return fieldCandidates.filter((candidate) => candidate.field === "carfaxUrl" || candidate.field === "carfaxUrlStatus").length;
+  }
+
+  function shouldUseNetworkVin(listing = {}, candidate = {}) {
+    const networkVin = candidate.value || candidate.vin;
+    if (!networkVin) return false;
+    if (!listing.vin) return true;
+    if (String(listing.vin).toUpperCase() === String(networkVin).toUpperCase()) return true;
+    return Number(candidate.confidence || 0) >= existingVinConfidence(listing);
+  }
+
+  function existingVinConfidence(listing = {}) {
+    const evidenceScores = (listing.fieldEvidence?.vin || [])
+      .map((item) => Number(item.confidenceScore || 0))
+      .filter((score) => Number.isFinite(score));
+    if (evidenceScores.length) return Math.max(...evidenceScores);
+    if (listing.captureKind === "manual_confirmation") return 98;
+    const label = String(listing.extractedFields?.vinEvidence?.matchedLabel || listing.extractedFields?.vinEvidence?.source || "");
+    if (/network_observation|network_json/i.test(label)) return 92;
+    if (/data-vin|dom_attribute|safe_dom_attributes|html_attributes|attribute:/i.test(label)) return 90;
+    if (/section-map/i.test(label)) return 75;
+    if (/url/i.test(label)) return 80;
+    return listing.vin ? 55 : 0;
   }
 
   function extractCandidatesFromNetworkPayload(payload, url = "") {
@@ -219,6 +246,8 @@
   function sanitizeString(value) {
     return String(value || "")
       .replace(/\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b/g, "[redacted]")
+      .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, "[redacted]")
+      .replace(/\b(?:auth|authorization|cookie|token|secret|credential|session|password|csrf|jwt)\s*[:=]\s*[^,\s"'<>]+/gi, "[redacted]")
       .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, "[redacted_email]")
       .replace(/\b(?:\+?1[-.\s]?)?\(?[2-9]\d{2}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b/g, "[redacted_phone]")
       .slice(0, MAX_STRING);
