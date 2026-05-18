@@ -40,7 +40,7 @@
     const titleResult = bestTitle(doc, mainVisibleText);
     const title = titleResult.title;
     const decodedTitle = extractYearMakeModelTrim(title || mainVisibleText);
-    const vinResult = extractBestVin(doc, rawVisibleText, mainVisibleText);
+    const vinResult = extractBestVin(doc, rawVisibleText, mainVisibleText, href);
     const mileageResult = extractBestMileage(doc, mainVisibleText, rawVisibleText, labelValues);
     const media = options.includeMediaUrls === false ? { photos: [], videos: [] } : extractMedia(doc, href);
     const mediaRejected = [...(media.rejected || []), ...(doc.__openlaneMediaRejected || [])];
@@ -503,7 +503,7 @@
     return vinFrom(value);
   }
 
-  function extractBestVin(doc, rawText, mainText) {
+  function extractBestVin(doc, rawText, mainText, href = safeCurrentHref()) {
     const candidates = [];
     const addCandidates = (source, value, weight = 0) => {
       const raw = String(value || "");
@@ -516,20 +516,26 @@
         const candidate = match[0];
         const sourceText = snippetAround(raw, candidate);
         const rejectedReason = rejectedVinReason(candidate, sourceText);
-        candidates.push({ vin: rejectedReason ? undefined : candidate, candidate, source, sourceText, weight: rejectedReason ? -100 + weight : weight, rejectedReason });
+        const score = rejectedReason ? -100 + weight : weight;
+        candidates.push({ vin: rejectedReason ? undefined : candidate, candidate, source, sourceText, weight: score, score, rejectedReason });
       }
     };
+    addCandidates("url", href, 95);
     addCandidates("main_text", mainText, 40);
     addCandidates("visible_text", rawText, 10);
     addCandidates("label_value", firstLabel(extractLabelValueMap(doc, mainText), OPENLANE_LABELS.vin), 55);
     for (const node of Array.from(doc.querySelectorAll?.("[data-vin], [aria-label], [data-testid], [title], button, [role='button']") || [])) {
       const attrs = ["data-vin", "aria-label", "data-testid", "title"].map((name) => node.getAttribute?.(name)).filter(Boolean).join(" ");
-      addCandidates("dom_attributes", attrs, 70);
+      addCandidates("dom_attributes", attrs, /data-vin/i.test(attrs) ? 90 : 70);
       addCandidates("dom_text", `${node.innerText || ""} ${node.textContent || ""}`, 60);
       for (const attribute of Array.from(node.attributes || [])) {
         if (attribute.name.startsWith("data-")) addCandidates(`attribute:${attribute.name}`, attribute.value, 65);
       }
     }
+    const sectionMap = doc.__openlaneTextRegions?.sectionMap || doc.__openlaneSectionMap;
+    addCandidates("safe_dom_attributes", extractSafeDomAttributeText(doc), 85);
+    addCandidates("section-map:vehicleHero", sectionMap?.zones?.vehicleHero?.text, 50);
+    addCandidates("section-map:vehicleSpecs", sectionMap?.zones?.vehicleSpecs?.text, 45);
     addCandidates("html_attributes", extractAttributeText(doc.__openlaneHtml || ""), 75);
     candidates.sort((a, b) => b.weight - a.weight);
     const chosen = candidates.find((candidate) => !candidate.rejectedReason && candidate.vin);
@@ -1030,9 +1036,40 @@
   }
 
   function extractAttributeText(html) {
-    return Array.from(String(html || "").matchAll(/\s(?:aria-label|data-[a-z0-9_-]+|title|alt)=["']([^"']+)["']/gi))
-      .map((match) => match[1])
+    return Array.from(String(html || "").matchAll(/\s(?:aria-label|data-[a-z0-9_-]+|title|alt)=(["'])([\s\S]{0,1000}?)\1/gi))
+      .map((match) => match[2])
       .join("\n");
+  }
+
+  function extractSafeDomAttributeText(doc = document) {
+    const parts = [];
+    for (const node of Array.from(doc.querySelectorAll?.("[data-vin], [data-vehicle], [data-testid], [aria-label], [title], button, [role='button']") || []).slice(0, 250)) {
+      for (const attribute of Array.from(node.attributes || [])) {
+        if (!isVehicleRelevantAttribute(attribute.name, attribute.value)) continue;
+        parts.push(`${attribute.name}=${String(attribute.value || "").slice(0, 500)}`);
+      }
+      const text = normalizeSpace(`${node.innerText || ""} ${node.textContent || ""}`);
+      if (text && !isSensitiveText(text)) parts.push(text.slice(0, 500));
+    }
+    const html = String(doc.__openlaneHtml || "");
+    for (const match of html.matchAll(/\s([a-z0-9:_-]+)=(["'])([\s\S]{0,1000}?)\2/gi)) {
+      const [, name, , value] = match;
+      if (isVehicleRelevantAttribute(name, value)) parts.push(`${name}=${value.slice(0, 500)}`);
+      if (parts.length >= 250) break;
+    }
+    return parts.join("\n").slice(0, 4000);
+  }
+
+  function isVehicleRelevantAttribute(name = "", value = "") {
+    const key = String(name || "");
+    const text = String(value || "");
+    if (isSensitiveText(`${key} ${text}`)) return false;
+    return /(^data-vin$|^data-vehicle$|vin|vehicle|vdp|listing|carfax|history|aria-label|title|data-testid)/i.test(key)
+      || /\b[A-HJ-NPR-Z0-9]{17}\b/i.test(text);
+  }
+
+  function isSensitiveText(value = "") {
+    return /\b(auth|authorization|cookie|token|secret|credential|session|password|csrf|jwt|bearer)\b/i.test(String(value || ""));
   }
 
   function moneyNearLabel(text, label, candidates) {

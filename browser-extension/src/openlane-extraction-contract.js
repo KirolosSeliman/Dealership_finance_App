@@ -308,7 +308,8 @@
   }
 
   function sourceTypeForFlatField(field, listing) {
-    if (field === "vin" && listing.extractedFields?.vinEvidence?.source === "data-vin") return "dom_attribute";
+    if (field === "vin" && /data-vin|dom_attribute|safe_dom_attributes|html_attributes|attribute:/i.test(String(listing.extractedFields?.vinEvidence?.matchedLabel || listing.extractedFields?.vinEvidence?.source || ""))) return "dom_attribute";
+    if (field === "vin" && /section-map/i.test(String(listing.extractedFields?.vinEvidence?.matchedLabel || ""))) return "section_map";
     if (field === "mileageKm" && listing.extractedFields?.mileageEvidence) return "dom_label";
     if (["buyPriceAuction", "totalInvoiceAmount", "finalAcquisitionCost"].includes(field) && listing.pageType === "fee_details") return "fee_page";
     if (["soldPriceCandidate", "acceptedAmount", "finalBidAmount"].includes(field) && listing.pageType === "post_sale") return "post_sale_page";

@@ -116,6 +116,48 @@ test("OpenLane extractor rejects VIN barcode label noise and keeps rejection rea
   assert.equal(debug.debug?.vinCandidates?.some((candidate) => candidate.vin === "BARCODE"), false);
 });
 
+test("OpenLane extractor recovers VIN from URL path and query when page metadata is delayed", () => {
+  const html = `
+    <main class="vdp-page">
+      <h1>2017 Kia Forte LX</h1>
+      <p>Odometer 158,569 KM</p>
+      <section class="bid-panel">Current Bid $4,000</section>
+      <span>13 total photos</span>
+    </main>
+  `;
+  const fromPath = extractor.extractOpenLaneFixture(html, "https://app.openlane.ca/vdp/3KPFL4A72HE119966");
+  const fromQuery = extractor.extractOpenLaneFixture(html, "https://app.openlane.ca/vdp/details?vin=3KPFL4A72HE119966");
+
+  assert.equal(fromPath.vin, "3KPFL4A72HE119966");
+  assert.equal(fromQuery.vin, "3KPFL4A72HE119966");
+  assert.match(String((fromPath.fieldEvidence as Record<string, Array<{ sourceText?: string }>>).vin?.[0]?.sourceText || ""), /vdp\/3KPFL4A72HE119966/);
+});
+
+test("OpenLane extractor recovers VIN from generic safe parent data attributes and aria labels", () => {
+  const fromDataAttribute = extractor.extractOpenLaneFixture(`
+    <main class="vdp-page">
+      <div data-vehicle='{"vin":"3KPFL4A72HE119966"}'>
+        <h1>2017 Kia Forte LX</h1>
+        <p>Odometer 158,569 KM</p>
+      </div>
+      <section class="bid-panel">Current Bid $4,000</section>
+      <span>13 total photos</span>
+    </main>
+  `, "https://app.openlane.ca/vdp/details");
+  const fromAriaLabel = extractor.extractOpenLaneFixture(`
+    <main class="vdp-page">
+      <h1>2017 Kia Forte LX</h1>
+      <button aria-label="Copy VIN 3KPFL4A72HE119966">Copy</button>
+      <p>Odometer 158,569 KM</p>
+      <section class="bid-panel">Current Bid $4,000</section>
+      <span>13 total photos</span>
+    </main>
+  `, "https://app.openlane.ca/vdp/details");
+
+  assert.equal(fromDataAttribute.vin, "3KPFL4A72HE119966");
+  assert.equal(fromAriaLabel.vin, "3KPFL4A72HE119966");
+});
+
 test("OpenLane extractor rejects invalid VIN candidates containing I O or Q", () => {
   const listing = extractor.extractOpenLaneFixture(`
     <main class="vdp-page">
@@ -419,6 +461,36 @@ test("OpenLane network merge reapplies canonical field evidence after Deep Captu
   assert.equal(merged.carfaxUrl, "https://www.carfax.ca/report/TUCSON123");
   assert.ok(merged.fieldEvidence?.vin?.some((item) => item.sourceType === "network_json" && item.endpointPattern === "app.openlane.ca/api/vdp/:id"));
   assert.ok(merged.fieldEvidence?.carfaxUrl?.some((item) => item.sourceType === "network_json"));
+});
+
+test("OpenLane network VIN candidate beats visible fallback after Deep Capture merge", () => {
+  const candidates = networkObserver.extractCandidatesFromNetworkPayload({
+    vehicle: {
+      vin: "KM8J3CA46HU123456",
+      odometerKm: 111486,
+    },
+  }, "https://app.openlane.ca/api/vdp/KM8J3CA46HU123456");
+  const merged = networkObserver.mergeNetworkEvidenceIntoListing({
+    sourceName: "OpenLane",
+    listingUrl: "https://app.openlane.ca/vdp/3KPFL4A72HE119966",
+    capturedAt: "2026-05-17T12:00:00.000Z",
+    captureKind: "observation",
+    pageType: "active_listing",
+    deepCaptureConsentId: "33333333-3333-4333-8333-333333333333",
+    title: "2017 Kia Forte",
+    year: 2017,
+    make: "Kia",
+    model: "Forte",
+    vin: "3KPFL4A72HE119966",
+  }, [{
+    endpointPattern: "app.openlane.ca/api/vdp/:id",
+    capturedAt: "2026-05-17T12:00:00.000Z",
+    sanitizedKeys: candidates.sanitizedKeys,
+    candidates,
+  }]) as { fieldEvidence?: Record<string, Array<{ sourceType?: string }>>; vin?: string };
+
+  assert.equal(merged.vin, "KM8J3CA46HU123456");
+  assert.equal(merged.fieldEvidence?.vin?.[0]?.sourceType, "network_json");
 });
 
 test("OpenLane extractor reads core auction fields from fixture HTML", () => {

@@ -90,7 +90,7 @@
         },
       },
     };
-    if (!merged.vin && candidates.vinCandidates[0]) {
+    if (candidates.vinCandidates[0]) {
       merged.vin = candidates.vinCandidates[0].value || candidates.vinCandidates[0].vin;
       merged.extractedFields.vinEvidence = { matchedLabel: "network_observation", sourceText: candidates.vinCandidates[0].sourceText };
     }
