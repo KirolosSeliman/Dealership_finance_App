@@ -34,7 +34,14 @@ const extractor = require("../browser-extension/src/openlane-extractor.js") as {
   isOpenLaneVehiclePage: (doc: { body?: { innerText?: string; textContent?: string }; images?: unknown[] }, href?: string) => boolean;
 };
 const networkObserver = require("../browser-extension/src/openlane-network-observer.js") as {
-  extractCandidatesFromNetworkPayload: (payload: unknown, url?: string) => { vinCandidates: Array<{ vin: string }>; mediaCandidates: Array<{ url: string }>; conditionCandidates: Array<{ text: string }>; sanitizedKeys: string[] };
+  extractCandidatesFromNetworkPayload: (payload: unknown, url?: string) => {
+    fieldCandidates: Array<{ field: string; value: unknown }>;
+    vinCandidates: Array<{ vin: string }>;
+    mediaCandidates: Array<{ url: string }>;
+    conditionCandidates: Array<{ text: string }>;
+    transportCandidates: Array<{ field: string; value: unknown }>;
+    sanitizedKeys: string[];
+  };
   sanitizeNetworkPayload: (payload: unknown) => unknown;
   mergeNetworkEvidenceIntoListing: (listing: Record<string, unknown>, evidence: unknown[]) => Record<string, unknown>;
 };
@@ -308,6 +315,76 @@ test("OpenLane network fixture extracts sanitized vehicle evidence without priva
   assert.doesNotMatch(sanitized, /buyer@example\.com|eyJaaaaaaaa/i);
   assert.equal(merged.vin, "5NMS3CAD8LH123456");
   assert.match(String(merged.conditionReportText), /Check engine light/);
+});
+
+test("OpenLane network observer extracts DevTools-style vehicle JSON candidates without secrets", () => {
+  const payload = {
+    listing: {
+      vin: "KM8J3CA46HU123456",
+      year: 2017,
+      make: "Hyundai",
+      model: "Tucson",
+      trim: "Limited AWD",
+      odometer: 111486,
+      sellerName: "OpenLane Montreal",
+      location: "Montreal, QC",
+      currentBidAmount: 4600,
+      transportEstimate: {
+        costCad: 428,
+        distanceKm: 185,
+      },
+      carfaxReportUrl: "/reports/carfax/TUCSON123",
+      photos: ["https://pub-us.kar-media.com/vehicle/KM8J3CA46HU123456/front.jpg"],
+    },
+    authToken: "eyJaaaaaaaaaaaaaaaaaaaaaaaa.eyJbbbbbbbbbbbbbbbbbbbbbbbb.cccccccccccccccccccccccc",
+    requestHeaders: { authorization: "Bearer should-not-appear", cookie: "session=secret" },
+  };
+
+  const candidates = networkObserver.extractCandidatesFromNetworkPayload(payload, "https://app.openlane.ca/api/vdp/KM8J3CA46HU123456");
+  const serialized = JSON.stringify(candidates);
+
+  assert.equal(candidates.vinCandidates[0]?.vin, "KM8J3CA46HU123456");
+  assert.ok(candidates.fieldCandidates.some((item) => item.field === "mileageKm" && item.value === 111486));
+  assert.ok(candidates.fieldCandidates.some((item) => item.field === "currentBid" && item.value === 4600));
+  assert.ok(candidates.fieldCandidates.some((item) => item.field === "sellerName" && item.value === "OpenLane Montreal"));
+  assert.ok(candidates.fieldCandidates.some((item) => item.field === "location" && item.value === "Montreal, QC"));
+  assert.ok(candidates.fieldCandidates.some((item) => item.field === "carfaxUrl" && String(item.value).endsWith("/reports/carfax/TUCSON123")));
+  assert.ok(candidates.transportCandidates.some((item) => item.field === "transportDistanceKm" && item.value === 185));
+  assert.doesNotMatch(serialized, /Bearer should-not-appear|session=secret|authToken/i);
+});
+
+test("OpenLane network merge reapplies canonical field evidence after Deep Capture", () => {
+  const candidates = networkObserver.extractCandidatesFromNetworkPayload({
+    vehicle: {
+      vin: "KM8J3CA46HU123456",
+      odometerKm: 111486,
+      currentBid: 4600,
+      carfaxUrl: "https://www.carfax.ca/report/TUCSON123",
+    },
+  }, "https://app.openlane.ca/api/vdp/KM8J3CA46HU123456");
+  const merged = networkObserver.mergeNetworkEvidenceIntoListing({
+    sourceName: "OpenLane",
+    listingUrl: "https://app.openlane.ca/vdp/tucson",
+    capturedAt: "2026-05-17T12:00:00.000Z",
+    captureKind: "observation",
+    pageType: "active_listing",
+    deepCaptureConsentId: "33333333-3333-4333-8333-333333333333",
+    title: "2017 Hyundai Tucson",
+    year: 2017,
+    make: "Hyundai",
+    model: "Tucson",
+  }, [{
+    capturedAt: "2026-05-17T12:00:00.000Z",
+    endpointPattern: "app.openlane.ca/api/vdp/:id",
+    sanitizedKeys: candidates.sanitizedKeys,
+    candidates,
+  }]) as { fieldEvidence?: Record<string, Array<{ sourceType?: string; endpointPattern?: string; consentId?: string }>>; vin?: string; carfaxUrl?: string; mileageKm?: number };
+
+  assert.equal(merged.vin, "KM8J3CA46HU123456");
+  assert.equal(merged.mileageKm, 111486);
+  assert.equal(merged.carfaxUrl, "https://www.carfax.ca/report/TUCSON123");
+  assert.ok(merged.fieldEvidence?.vin?.some((item) => item.sourceType === "network_json" && item.endpointPattern === "app.openlane.ca/api/vdp/:id"));
+  assert.ok(merged.fieldEvidence?.carfaxUrl?.some((item) => item.sourceType === "network_json"));
 });
 
 test("OpenLane extractor reads core auction fields from fixture HTML", () => {

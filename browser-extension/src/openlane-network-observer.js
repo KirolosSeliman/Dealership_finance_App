@@ -5,6 +5,7 @@
   const DENY_ENDPOINT = /\b(auth|oauth|login|logout|session|profile|account|payment|billing|user|users|me|token|cookie|password)\b/i;
   const ALLOW_ENDPOINT = /\b(vdp|vehicle|vehicles|listing|inventory|purchase|purchases|condition|disclosure|media|photo|image|bid|offer|fee|fees|invoice|post-sale|sale)\b/i;
   const VEHICLE_KEY = /\b(vehicle|vin|listing|inventory|vdp|photo|image|media|condition|disclosure|damage|mechanical|history|note|purchase|fee|price)\b/i;
+  const TEXT_FIELD = new Set(["make", "model", "trim", "sellerName", "location", "auctionStatus", "saleDate", "runNumber", "lane", "lotNumber", "stockNumber", "titleStatus", "carfaxUrl", "carfaxUrlStatus"]);
   const observations = [];
 
   function startOpenLaneNetworkObserver(settings = {}) {
@@ -91,7 +92,10 @@
     if (!merged.conditionReportText && candidates.conditionCandidates.length) {
       merged.conditionReportText = candidates.conditionCandidates.map((item) => item.text).join(" | ").slice(0, 4000);
     }
-    return merged;
+    if (candidates.transportCandidates.length) {
+      merged.openlaneMetadata.transportEvidence = candidates.transportCandidates.slice(0, 12);
+    }
+    return root.DealerFlowOpenLaneExtractionContract?.applyOpenLaneExtractionContract?.(merged) || merged;
   }
 
   function extractCandidatesFromNetworkPayload(payload, url = "") {
@@ -103,6 +107,7 @@
     const mediaCandidates = [];
     const conditionCandidates = [];
     const priceCandidates = [];
+    const transportCandidates = [];
     walk(sanitized, (value, keyPath) => {
       const key = keyPath.join(".");
       if (typeof value === "string") {
@@ -115,6 +120,12 @@
           const candidate = candidateRecord("photos", value, key, endpoint, /photo|image|media/i.test(key) ? 92 : 55, value, capturedAt);
           mediaCandidates.push({ ...candidate, url: value });
         }
+        const carfaxUrl = carfaxUrlCandidate(value, url);
+        if (carfaxUrl) {
+          fieldCandidates.push(candidateRecord("carfaxUrl", carfaxUrl, key, endpoint, /carfax|history|report/i.test(key) ? 92 : 70, value, capturedAt));
+        } else if (/carfax/i.test(`${key} ${value}`)) {
+          fieldCandidates.push(candidateRecord("carfaxUrlStatus", "text_only", key, endpoint, 62, value, capturedAt));
+        }
         if (/condition|disclosure|damage|mechanical|history|note/i.test(key) && value.length > 2) {
           const candidate = candidateRecord("conditionReportText", value.slice(0, MAX_STRING), key, endpoint, 86, value, capturedAt);
           conditionCandidates.push({ ...candidate, text: candidate.value });
@@ -125,10 +136,15 @@
           const candidate = candidateRecord(field, parsedMoney, key, endpoint, confidenceForKey(key), value, capturedAt);
           priceCandidates.push(candidate);
           fieldCandidates.push(candidate);
+        } else if (field && TEXT_FIELD.has(field) && safeTextFieldValue(value)) {
+          fieldCandidates.push(candidateRecord(field, field === "carfaxUrl" ? carfaxUrlCandidate(value, url) || value : cleanTextValue(value), key, endpoint, confidenceForKey(key), value, capturedAt));
         }
       } else if (typeof value === "number") {
         const field = inferFieldName(key, value);
-        if (field) {
+        const transportField = inferTransportFieldName(key);
+        if (transportField) {
+          transportCandidates.push(candidateRecord(transportField, normalizeNumberForField(transportField, value), key, endpoint, confidenceForKey(key), String(value), capturedAt));
+        } else if (field) {
           const candidate = candidateRecord(field, normalizeNumberForField(field, value), key, endpoint, confidenceForKey(key), String(value), capturedAt);
           if (isMoneyField(field)) priceCandidates.push(candidate);
           fieldCandidates.push(candidate);
@@ -143,6 +159,7 @@
       mediaCandidates: dedupeBy(mediaCandidates, "url").slice(0, 80),
       conditionCandidates: conditionCandidates.slice(0, 30),
       priceCandidates: dedupeCandidates(priceCandidates).slice(0, 30),
+      transportCandidates: dedupeCandidates(transportCandidates).slice(0, 20),
     };
   }
 
@@ -205,11 +222,12 @@
       mediaCandidates: acc.mediaCandidates.concat(item.candidates?.mediaCandidates || []),
       conditionCandidates: acc.conditionCandidates.concat(item.candidates?.conditionCandidates || []),
       priceCandidates: acc.priceCandidates.concat(item.candidates?.priceCandidates || []),
-    }), { fieldCandidates: [], vinCandidates: [], mediaCandidates: [], conditionCandidates: [], priceCandidates: [] });
+      transportCandidates: acc.transportCandidates.concat(item.candidates?.transportCandidates || []),
+    }), { fieldCandidates: [], vinCandidates: [], mediaCandidates: [], conditionCandidates: [], priceCandidates: [], transportCandidates: [] });
   }
 
   function isRelevantObservation(candidates) {
-    return Boolean(candidates.fieldCandidates.length || candidates.vinCandidates.length || candidates.mediaCandidates.length || candidates.conditionCandidates.length || candidates.priceCandidates.length);
+    return Boolean(candidates.fieldCandidates.length || candidates.vinCandidates.length || candidates.mediaCandidates.length || candidates.conditionCandidates.length || candidates.priceCandidates.length || candidates.transportCandidates.length);
   }
 
   function isAllowedEndpoint(url) {
@@ -228,7 +246,11 @@
   function endpointPattern(url) {
     try {
       const parsed = new URL(String(url || ""), root.location?.href || "https://app.openlane.ca/");
-      return `${parsed.hostname}${parsed.pathname.replace(/[0-9a-f-]{8,}/gi, ":id")}`;
+      const pathname = parsed.pathname
+        .split("/")
+        .map((segment) => /\d/.test(segment) && /^[A-Za-z0-9-]{3,}$/.test(segment) ? ":id" : segment)
+        .join("/");
+      return `${parsed.hostname}${pathname}`;
     } catch {
       return "unknown";
     }
@@ -261,7 +283,10 @@
     if (/currentbid|topbid|bidamount|miseactuelle/.test(normalized)) return "currentBid";
     if (/currentoffer|myoffer|bestoffer|offreactuelle|meilleureoffre/.test(normalized)) return /bestoffer|meilleureoffre/.test(normalized) ? "bestOffer" : "currentOffer";
     if (/buynow|buyitnow|instantpurchase/.test(normalized)) return "buyNowPrice";
+    if (/seller|consignor|dealername|sellername/.test(normalized)) return "sellerName";
+    if (/auctionlocation|location|province|city/.test(normalized)) return "location";
     if (/reserve/.test(normalized)) return "reservePrice";
+    if (/carfax|vehiclehistoryreport|historyreport/.test(normalized)) return "carfaxUrl";
     if (/sellingprice|soldprice|hammerprice|finalbid/.test(normalized)) return "soldPriceCandidate";
     if (/buypriceauction|purchaseprice|sellingprice/.test(normalized)) return "buyPriceAuction";
     if (/transactionfee/.test(normalized)) return "transactionFee";
@@ -269,6 +294,14 @@
     if (/tax|taxes/.test(normalized)) return "taxes";
     if (/totalinvoice|invoicetotal|totalamount|finalacquisition/.test(normalized)) return "totalInvoiceAmount";
     if (typeof value === "string" && /\b(current bid|buy now|selling price|invoice total)\b/i.test(value)) return value.toLowerCase().includes("buy now") ? "buyNowPrice" : value.toLowerCase().includes("invoice") ? "totalInvoiceAmount" : value.toLowerCase().includes("selling") ? "buyPriceAuction" : "currentBid";
+    return "";
+  }
+
+  function inferTransportFieldName(key) {
+    const normalized = String(key || "").toLowerCase().replace(/[_\s-]/g, "");
+    if (!/transport|shipping|delivery|pickup|livraison|ramassage/.test(normalized)) return "";
+    if (/distance|kilometer|kilometre|km/.test(normalized)) return "transportDistanceKm";
+    if (/cost|estimate|fee|price|cad|amount/.test(normalized)) return "transportCostCad";
     return "";
   }
 
@@ -284,14 +317,37 @@
   }
 
   function normalizeNumberForField(field, value) {
-    if (field === "year" || field === "mileageKm") return Math.round(Number(value));
+    if (field === "year" || field === "mileageKm" || field === "transportDistanceKm") return Math.round(Number(value));
     return Number(value);
   }
 
   function confidenceForKey(key) {
     if (/invoice|fee|total/i.test(key)) return 92;
-    if (/vin|bid|offer|price|odometer|mileage|year|make|model|trim/i.test(key)) return 92;
+    if (/vin|bid|offer|price|odometer|mileage|year|make|model|trim|seller|location|carfax|history|report/i.test(key)) return 92;
     return 55;
+  }
+
+  function carfaxUrlCandidate(value, baseUrl) {
+    const raw = String(value || "");
+    const absolute = raw.match(/https?:\/\/[^\s"'<>)]*(?:carfax|report|history)[^\s"'<>)]*/i)?.[0];
+    const relative = raw.match(/\/[A-Za-z0-9._~:/?#[\]@!$&()*+,;=%-]*(?:carfax|report|history)[A-Za-z0-9._~:/?#[\]@!$&()*+,;=%-]*/i)?.[0];
+    const candidate = absolute || relative;
+    if (!candidate || /\.(?:svg|png|jpe?g|webp|avif|css|js)(?:$|[?#])/i.test(candidate)) return "";
+    try {
+      return new URL(candidate, String(baseUrl || root.location?.href || "https://app.openlane.ca/")).href;
+    } catch {
+      return "";
+    }
+  }
+
+  function safeTextFieldValue(value) {
+    const text = String(value || "").trim();
+    if (!text || text.length > 240) return false;
+    return !/\[redacted|<script|javascript:/i.test(text);
+  }
+
+  function cleanTextValue(value) {
+    return String(value || "").trim().replace(/\s+/g, " ").slice(0, 240);
   }
 
   function isProtectedVerifiedOutcomeField(field, listing) {
