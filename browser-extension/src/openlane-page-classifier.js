@@ -57,7 +57,7 @@
       captureKind = has(evidence, "accepted_outcome") ? "verified_outcome" : "candidate_outcome";
       outcomeConfidence = has(evidence, "accepted_outcome") ? "verified" : "high";
       decisiveEvidence = evidence.filter((item) => ["vdp_url", "vdp_selling_price", "accepted_outcome", "vehicle_identity", "vehicle_header"].includes(item.marker));
-    } else if (isVdpUrl && (has(evidence, "current_bid") || has(evidence, "vehicle_identity") || has(evidence, "vehicle_header"))) {
+    } else if (isSupportedActiveListingPath(url.pathname) && (has(evidence, "current_bid") || has(evidence, "vehicle_identity") || has(evidence, "vehicle_header"))) {
       pageType = "active_listing";
       captureKind = "observation";
       outcomeConfidence = "low";
@@ -67,7 +67,7 @@
       captureKind = "candidate_outcome";
       outcomeConfidence = "medium";
       decisiveEvidence = evidence.filter((item) => item.marker === "purchase_context");
-    } else if (has(evidence, "current_bid") && (has(evidence, "vehicle_identity") || has(evidence, "vehicle_header"))) {
+    } else if (isSupportedActiveListingPath(url.pathname) && has(evidence, "current_bid") && (has(evidence, "vehicle_identity") || has(evidence, "vehicle_header"))) {
       pageType = "active_listing";
       captureKind = "observation";
       outcomeConfidence = "low";
@@ -96,6 +96,10 @@
     if (/\/purchases?(?:\/?$|[?#])/i.test(path)) return true;
     if (/\b(purchases|order history)\b/i.test(mainText) && /\b(vehicle|vin|year|make|model|selling price|status)\b/i.test(mainText)) return true;
     return false;
+  }
+
+  function isSupportedActiveListingPath(pathname) {
+    return /\/(?:vdp|vehicle)(?:\/|$)/i.test(String(pathname || ""));
   }
 
   function scoreClassification(pageType, evidence, hasDecisiveEvidence) {

@@ -2822,136 +2822,9 @@ function MarketSnapDashboard({
   const lowConfidence = valuations.filter((valuation) => valuation.confidenceScore < 45).length;
   const highRisk = valuations.filter((valuation) => valuation.riskScore >= 70).length;
   const chartData = buildMonthlyBuySellSeries(scoped, dateRange);
-  const organizationId = scoped.activeOrganizationId;
-  const [sourceName, setSourceName] = useState("Authorized listing");
-  const [sourceType, setSourceType] = useState("retail");
-  const [sourceUrl, setSourceUrl] = useState("");
-  const [permissionBasis, setPermissionBasis] = useState("User provided visible listing HTML for authorized Market Snap analysis.");
-  const [html, setHtml] = useState("");
-  const [extracting, setExtracting] = useState(false);
-  const [extractionMessage, setExtractionMessage] = useState("");
-  const [extractedListing, setExtractedListing] = useState<Record<string, unknown> | null>(null);
-  const [extractionMeta, setExtractionMeta] = useState<Record<string, unknown> | null>(null);
-  const [extractedValuation, setExtractedValuation] = useState<Record<string, unknown> | null>(null);
-
-  async function extractListing() {
-    setExtracting(true);
-    setExtractionMessage("");
-    setExtractedListing(null);
-    setExtractedValuation(null);
-    try {
-      if (/^https?:\/\//i.test(html.trim())) {
-        throw new Error("Paste the visible listing HTML here, not only the URL. For OpenLane login pages, use the Chrome/Brave extension so it can capture the HTML you are authorized to view.");
-      }
-      const response = await fetch("/api/market-snap/extract-authorized-listing", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ organizationId, html, sourceName, sourceType, sourceUrl, permissionBasis, robotsAllowed: true }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) throw new Error(String(payload.message ?? payload.warnings?.[0] ?? "Extraction failed."));
-      setExtractedListing(payload.listing ?? null);
-      setExtractionMeta(payload);
-      setExtractionMessage("Listing extracted. Review the preview before analysis or saving.");
-    } catch (error) {
-      setExtractionMessage(error instanceof Error ? error.message : "Extraction failed.");
-    } finally {
-      setExtracting(false);
-    }
-  }
-
-  async function analyzeExtractedListing() {
-    if (!extractedListing) return;
-    setExtracting(true);
-    setExtractionMessage("");
-    try {
-      const response = await fetch("/api/market-snap/analyze-listing", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...extractedListing, organizationId }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) throw new Error(String(payload.message ?? "Analysis failed."));
-      setExtractedValuation(payload.valuation ?? null);
-      setExtractionMessage("Market Snap analysis complete.");
-    } catch (error) {
-      setExtractionMessage(error instanceof Error ? error.message : "Analysis failed.");
-    } finally {
-      setExtracting(false);
-    }
-  }
-
-  async function saveExtractedListing() {
-    if (!extractedListing) return;
-    setExtracting(true);
-    setExtractionMessage("");
-    try {
-      const response = await fetch("/api/market-snap/save-listing", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ organizationId, listing: extractedListing, valuation: extractedValuation ?? undefined }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload.ok) throw new Error(String(payload.message ?? "Could not save to Deal Radar."));
-      setExtractionMessage("Saved to Deal Radar.");
-    } catch (error) {
-      setExtractionMessage(error instanceof Error ? error.message : "Could not save to Deal Radar.");
-    } finally {
-      setExtracting(false);
-    }
-  }
 
   return (
     <div className="space-y-6">
-      <Panel title="Extract listing with Scrapling">
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.85fr)]">
-          <div className="space-y-3">
-            <div className="grid gap-3 md:grid-cols-2">
-              <Field label="Source name"><input className="control w-full" value={sourceName} onChange={(event) => setSourceName(event.target.value)} /></Field>
-              <Field label="Source type">
-                <select className="control w-full" value={sourceType} onChange={(event) => setSourceType(event.target.value)}>
-                  <option value="retail">Retail</option>
-                  <option value="auction">Auction</option>
-                  <option value="salvage">Salvage</option>
-                  <option value="wholesale">Wholesale</option>
-                  <option value="extension">Extension</option>
-                </select>
-              </Field>
-            </div>
-            <Field label="Source URL"><input className="control w-full" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} placeholder="https://..." /></Field>
-            <Field label="Permission basis"><input className="control w-full" value={permissionBasis} onChange={(event) => setPermissionBasis(event.target.value)} /></Field>
-            <Field label="Visible listing HTML"><textarea className="control min-h-44 w-full resize-y" value={html} onChange={(event) => setHtml(event.target.value)} placeholder="Paste the visible listing HTML here. For OpenLane pages behind login, use the browser extension instead of pasting only the URL." /></Field>
-            <div className="flex flex-wrap gap-2">
-              <button className="primary-button" type="button" disabled={extracting || !html.trim()} onClick={extractListing}>{extracting ? "Working..." : "Extract listing"}</button>
-              <button className="secondary-button" type="button" disabled={!extractedListing || extracting} onClick={analyzeExtractedListing}>Analyze listing</button>
-              <button className="secondary-button" type="button" disabled={!extractedListing || extracting} onClick={saveExtractedListing}>Save to Deal Radar</button>
-            </div>
-            {extractionMessage && <p className="text-sm text-slate-300">{extractionMessage}</p>}
-          </div>
-          <div className="surface-muted p-4">
-            {!extractedListing ? (
-              <EmptyState title="No extracted listing yet" copy="Paste authorized visible listing HTML, then extract a preview before analysis or saving." />
-            ) : (
-              <div className="space-y-3">
-                <p className="text-base font-semibold text-white">{String(extractedListing.title ?? "Untitled listing")}</p>
-                <InfoGrid rows={[
-                  ["Vehicle", [extractedListing.year, extractedListing.make, extractedListing.model, extractedListing.trim].filter(Boolean).join(" ") || "-"],
-                  ["Mileage", extractedListing.mileageKm ? `${extractedListing.mileageKm} km` : "-"],
-                  ["Price", money(Number(extractedListing.listedPrice ?? extractedListing.auctionHammerPrice ?? 0))],
-                  ["Location", [extractedListing.location, extractedListing.province].filter(Boolean).join(", ") || "-"],
-                  ["Title status", String(extractedListing.titleStatus ?? "-")],
-                  ["Images", String(extractedListing.imageCount ?? 0)],
-                  ["Quality", String(extractionMeta?.extractionQualityScore ?? "-")],
-                  ["Policy", String(extractionMeta?.policyDecision ?? "-")],
-                ]} />
-                <Info label="Warnings" value={Array.isArray(extractionMeta?.warnings) && extractionMeta.warnings.length ? extractionMeta.warnings.join("; ") : "-"} />
-                <Info label="Missing fields" value={Array.isArray(extractionMeta?.missingFields) && extractionMeta.missingFields.length ? extractionMeta.missingFields.join(", ") : "-"} />
-                {extractedValuation && <RecommendationBadgeView badge={String(extractedValuation.recommendationBadge ?? "Negotiate") as never} />}
-              </div>
-            )}
-          </div>
-        </div>
-      </Panel>
       <div className="surface-muted flex flex-col gap-3 p-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <p className="text-sm text-slate-400">{t.marketSnap.subtitle}</p>
@@ -3157,11 +3030,11 @@ function DealRadarPage({
 }
 
 function MarketDataAdminPage({ t, organizationId, permissions }: { t: ReturnType<typeof getDictionary>; organizationId: string; permissions: Permissions }) {
-  const [metrics, setMetrics] = useState<Record<string, number>>({});
+  const [metrics, setMetrics] = useState<Record<string, unknown>>({});
   const [sources, setSources] = useState<Array<Record<string, unknown>>>([]);
   const [jobs, setJobs] = useState<Array<Record<string, unknown>>>([]);
-  const [jsonImport, setJsonImport] = useState("");
   const [message, setMessage] = useState("");
+  const [syncingSource, setSyncingSource] = useState("");
   useEffect(() => {
     if (!permissions.manageBackups) return;
     let cancelled = false;
@@ -3170,7 +3043,7 @@ function MarketDataAdminPage({ t, organizationId, permissions }: { t: ReturnType
       fetch(`/api/market-snap/admin/sources?organizationId=${encodeURIComponent(organizationId)}`).then((response) => response.ok ? response.json() : Promise.reject(new Error("Market sources are not available yet."))),
       fetch(`/api/market-snap/admin/jobs?organizationId=${encodeURIComponent(organizationId)}`).then((response) => response.ok ? response.json() : Promise.reject(new Error("Market jobs are not available yet."))),
     ])
-      .then(([quality, sourcePayload, jobPayload]: Array<{ metrics?: Record<string, number>; items?: Array<Record<string, unknown>> }>) => {
+      .then(([quality, sourcePayload, jobPayload]: Array<{ metrics?: Record<string, unknown>; items?: Array<Record<string, unknown>> }>) => {
         if (!cancelled) {
           setMetrics(quality.metrics ?? {});
           setSources(sourcePayload.items ?? []);
@@ -3189,24 +3062,6 @@ function MarketDataAdminPage({ t, organizationId, permissions }: { t: ReturnType
     return <EmptyState title={t.marketSnap.adminOnly} copy={t.marketSnap.adminOnlyCopy} />;
   }
 
-  async function importJson() {
-    setMessage("");
-    let rows: unknown;
-    try {
-      rows = JSON.parse(jsonImport);
-    } catch {
-      setMessage("JSON import must be an array of listing objects.");
-      return;
-    }
-    const response = await fetch("/api/market-snap/admin/import-json", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ organizationId, sourceName: "Manual JSON Import", rows }),
-    });
-    const payload = await response.json().catch(() => ({}));
-    setMessage(response.ok && payload.ok ? `Imported ${payload.imported ?? 0} listings.` : String(payload.message ?? "Import failed."));
-  }
-
   async function trainCandidate() {
     setMessage("");
     const response = await fetch("/api/market-snap/admin/train-candidate-model", {
@@ -3217,6 +3072,51 @@ function MarketDataAdminPage({ t, organizationId, permissions }: { t: ReturnType
     const payload = await response.json().catch(() => ({}));
     setMessage(response.ok && payload.ok ? `Candidate training queued: ${payload.trainingRunId ?? "pending"}` : String(payload.message ?? "Could not queue training."));
   }
+
+  async function runSourceSync(source: "openlane" | "marketplace") {
+    setMessage("");
+    setSyncingSource(source);
+    try {
+      const response = await fetch("/api/market-snap/admin/sync-source", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ organizationId, source }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.ok) throw new Error(String(payload.message ?? "Source sync failed."));
+      setMessage(`${payload.sourceName ?? source} sync finished: ${payload.metrics?.inserted ?? 0} inserted, ${payload.metrics?.updated ?? 0} updated.`);
+      const [sourcePayload, jobPayload] = await Promise.all([
+        fetch(`/api/market-snap/admin/sources?organizationId=${encodeURIComponent(organizationId)}`).then((item) => item.json()),
+        fetch(`/api/market-snap/admin/jobs?organizationId=${encodeURIComponent(organizationId)}`).then((item) => item.json()),
+      ]);
+      setSources(sourcePayload.items ?? []);
+      setJobs(jobPayload.items ?? []);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Source sync failed.");
+    } finally {
+      setSyncingSource("");
+    }
+  }
+
+  const sourceCards = ["OpenLane", "Facebook Marketplace"].map((sourceName) => {
+    const latestJob = jobs.find((job) => String(job.source_name ?? "") === sourceName);
+    const source = sources.find((item) => String(item.name ?? item.source_name ?? "") === sourceName);
+    const jobMetrics = (latestJob?.metrics ?? {}) as Record<string, unknown>;
+    return {
+      sourceName,
+      status: String(latestJob?.status ?? source?.status ?? "pending"),
+      sourceStatus: String(source?.status ?? "active"),
+      lastRun: String(latestJob?.completed_at ?? latestJob?.started_at ?? source?.last_sync_at ?? "-"),
+      inserted: Number(jobMetrics.inserted ?? 0),
+      updated: Number(jobMetrics.updated ?? 0),
+      duplicates: Number(jobMetrics.skippedDuplicates ?? jobMetrics.duplicatesDetected ?? 0),
+      invalid: Number(jobMetrics.invalidRows ?? jobMetrics.invalidListings ?? 0),
+      lastError: String(latestJob?.error_message ?? "-"),
+      totalRecords: Number((metrics.sourceCounts as Record<string, number> | undefined)?.[sourceName] ?? 0),
+      averageQuality: Number(metrics.averageDataQuality ?? 0),
+      freshness: Number(metrics.averageDataFreshness ?? 0),
+    };
+  });
 
   return (
     <div className="space-y-4">
@@ -3233,6 +3133,40 @@ function MarketDataAdminPage({ t, organizationId, permissions }: { t: ReturnType
         <MetricCard label={t.marketSnap.averageDataQuality} value={String(metrics.averageDataQuality ?? 0)} icon={<Activity size={18} />} />
       </div>
       <div className="grid gap-4 xl:grid-cols-2">
+        <Panel title="Automatic source sync">
+          <div className="space-y-3">
+            {sourceCards.map((source) => (
+              <div key={source.sourceName} className="surface-muted p-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <p className="font-semibold text-white">{source.sourceName}</p>
+                    <p className="text-sm text-slate-400">Status: {source.status} · Source: {source.sourceStatus}</p>
+                    <p className="text-sm text-slate-500">Last run: {source.lastRun}</p>
+                  </div>
+                  <button
+                    className="secondary-button"
+                    type="button"
+                    disabled={Boolean(syncingSource)}
+                    onClick={() => runSourceSync(source.sourceName === "OpenLane" ? "openlane" : "marketplace")}
+                  >
+                    <Activity size={16} />
+                    {syncingSource ? "Running..." : `Run ${source.sourceName} sync now`}
+                  </button>
+                </div>
+                <InfoGrid rows={[
+                  ["Inserted", String(source.inserted)],
+                  ["Updated", String(source.updated)],
+                  ["Duplicates", String(source.duplicates)],
+                  ["Invalid", String(source.invalid)],
+                  ["Total received", String(source.totalRecords)],
+                  ["Freshness days", String(source.freshness)],
+                  ["Average quality", String(source.averageQuality)],
+                  ["Last error", source.lastError],
+                ]} />
+              </div>
+            ))}
+          </div>
+        </Panel>
         <Panel title={t.marketSnap.sources}>
           <p className="text-sm text-slate-400">{t.marketSnap.sourcesCopy}</p>
           <Ledger emptyTitle={t.marketSnap.noSources} emptyCopy={t.marketSnap.noSourcesCopy} rows={sources.map((source) => [
@@ -3254,16 +3188,6 @@ function MarketDataAdminPage({ t, organizationId, permissions }: { t: ReturnType
           ])} />
         </Panel>
         <Panel title={t.marketSnap.retention}><p className="text-sm text-slate-400">{t.marketSnap.retentionSummary}</p></Panel>
-        <Panel title={t.marketSnap.imports}>
-          <p className="text-sm text-slate-400">{t.marketSnap.importsCopy}</p>
-          <textarea
-            className="control mt-3 min-h-32 w-full"
-            value={jsonImport}
-            onChange={(event) => setJsonImport(event.target.value)}
-            placeholder='[{"sourceName":"Manual Import","year":2020,"make":"Toyota","model":"Corolla","listedPrice":18000}]'
-          />
-          <button className="primary-button mt-3" type="button" onClick={importJson}>{t.marketSnap.importJson}</button>
-        </Panel>
       </div>
     </div>
   );

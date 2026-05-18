@@ -121,6 +121,19 @@
     return map;
   }
 
+  function clearOpenLaneExtractionCache(doc = document) {
+    if (!doc || typeof doc !== "object") return;
+    try {
+      delete doc.__openlaneSectionMap;
+      delete doc.__openlaneTextRegions;
+      delete doc.__openlaneMediaRejected;
+    } catch {
+      doc.__openlaneSectionMap = undefined;
+      doc.__openlaneTextRegions = undefined;
+      doc.__openlaneMediaRejected = undefined;
+    }
+  }
+
   function buildOpenLaneSectionMapFromHtml(html = "", href = "https://www.openlane.ca/") {
     const source = String(html || "");
     const allText = normalizeSpace(`${stripTags(source)}\n${extractAttributeText(source)}`).slice(0, RAW_TEXT_LIMIT);
@@ -304,7 +317,7 @@
     return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
 
-  const api = { buildOpenLaneSectionMap, buildOpenLaneSectionMapFromHtml, regionsFromMap };
+  const api = { buildOpenLaneSectionMap, buildOpenLaneSectionMapFromHtml, regionsFromMap, clearOpenLaneExtractionCache };
   root.DealerFlowOpenLaneSectionMap = api;
   if (typeof module !== "undefined") module.exports = api;
 })(typeof window !== "undefined" ? window : globalThis);

@@ -5,6 +5,8 @@ from fastapi import FastAPI
 from pydantic import BaseModel, Field
 from train_candidate import build_candidate_report
 from scrapling_connector import ExtractionPolicy, extract_visible_vehicle_fields, fallback_strategies, scrapling_available, scrapling_version
+from source_connectors.base import SourceSyncRequest
+from source_connectors.registry import get_connector, supported_sources
 
 app = FastAPI(title="Dealer Flow Market Snap ML Service", version="0.1.0")
 
@@ -31,6 +33,18 @@ class AuthorizedExtractionRequest(BaseModel):
     source_type: str | None = None
     organization_id: str | None = None
     requested_capabilities: list[str] = Field(default_factory=list)
+
+
+class SourceSyncBody(BaseModel):
+    sourceName: str
+    sourceType: str
+    marketType: str
+    maxPages: int = Field(default=10, ge=1, le=50)
+    maxListings: int = Field(default=200, ge=1, le=1000)
+    baseSearchUrls: list[str] = Field(default_factory=list)
+    province: str = "QC"
+    runReason: str = "cron"
+    startedAt: str | None = None
 
 
 @app.post("/predict")
@@ -95,6 +109,23 @@ def extract_health():
         "version": scrapling_version(),
         "serviceName": "Dealer Flow Market Snap ML Service",
         "supportedExtractors": ["scrapling_adaptor", "regex_visible_text_fallback"],
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.post("/sources/sync")
+def sync_source(request: SourceSyncBody):
+    connector = get_connector(request.sourceName)
+    result = connector.sync(SourceSyncRequest(**request.model_dump()))
+    return result.as_dict()
+
+
+@app.get("/sources/health")
+def sources_health():
+    return {
+        "ok": True,
+        "scraplingInstalled": scrapling_available(),
+        "supportedSources": supported_sources(),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 

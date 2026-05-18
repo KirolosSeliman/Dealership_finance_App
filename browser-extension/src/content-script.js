@@ -24,6 +24,7 @@
     timer: 0,
     observer: null,
     readyRetries: 0,
+    pendingRun: null,
   };
 
   boot();
@@ -41,7 +42,11 @@
   }
 
   async function runRuntime({ force, reason }) {
-    if (STATE.running) return;
+    if (STATE.running) {
+      STATE.pendingRun = { force: Boolean(force), reason };
+      return;
+    }
+    if (force) clearExtractionCache();
     if (!force && STATE.hiddenPageUrl === location.href) return;
     const supported = await waitForVehiclePage(force ? 1 : MAX_READY_RETRIES);
     if (!supported) {
@@ -69,9 +74,11 @@
   async function waitForVehiclePage(maxRetries) {
     for (let attempt = 0; attempt < maxRetries; attempt += 1) {
       STATE.readyRetries = attempt;
+      clearExtractionCache();
       if (isSupportedOpenLaneVehiclePage()) return true;
       await sleep(READY_RETRY_DELAY_MS);
     }
+    clearExtractionCache();
     return isSupportedOpenLaneVehiclePage();
   }
 
@@ -110,7 +117,7 @@
 
   function observeDynamicPage() {
     if (STATE.observer) return;
-    STATE.observer = new MutationObserver(() => scheduleRuntime(AUTO_ANALYZE_DEBOUNCE_MS, "mutation"));
+    STATE.observer = new MutationObserver(() => onDomMutation());
     STATE.observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
     patchHistory("pushState");
     patchHistory("replaceState");
@@ -132,11 +139,17 @@
   function onRouteChange() {
     if (STATE.currentUrl === location.href) return;
     STATE.currentUrl = location.href;
+    clearExtractionCache();
     STATE.lastSignature = "";
     STATE.valuation = null;
     STATE.backendResponse = null;
     STATE.captureResponse = null;
     scheduleRuntime(ROUTE_CHANGE_DEBOUNCE_MS, "route-change");
+  }
+
+  function onDomMutation() {
+    clearExtractionCache();
+    scheduleRuntime(AUTO_ANALYZE_DEBOUNCE_MS, "mutation");
   }
 
   function scheduleRuntime(delay, reason) {
@@ -155,7 +168,7 @@
 
     if (hasActiveDeepCaptureConsent()) await expandReadOnlySections();
     else STATE.safeExpansion = null;
-    const listing = extractListing();
+    const listing = extractListing({ force });
     if (!isVehicleListing(listing)) {
       STATE.widget?.render({ status: "warning", listing, message: "OpenLane vehicle data is still loading or incomplete." });
       return;
@@ -188,6 +201,9 @@
       STATE.widget?.render({ status: "error", listing, valuation: STATE.valuation, message: formatError(error) });
     } finally {
       STATE.running = false;
+      const pendingRun = STATE.pendingRun;
+      STATE.pendingRun = null;
+      if (pendingRun) setTimeout(() => runRuntime(pendingRun), 0);
     }
   }
 
@@ -208,7 +224,8 @@
     STATE.widget?.render({ status: "idle", listing, message: "Auto-analyze is off. Use Refresh to analyze this page." });
   }
 
-  function extractListing() {
+  function extractListing({ force = false } = {}) {
+    if (force) clearExtractionCache();
     const classification = classifyOpenLanePage();
     const listing = window.DealerFlowOpenLaneExtractor.extractOpenLaneListing(document, location.href, {
       includeMediaUrls: STATE.settings?.includeMediaUrls !== false,
@@ -340,6 +357,10 @@
 
   function classifyOpenLanePage() {
     return window.DealerFlowOpenLanePageClassifier.classifyOpenLanePage(document, location.href);
+  }
+
+  function clearExtractionCache() {
+    window.DealerFlowOpenLaneSectionMap?.clearOpenLaneExtractionCache?.(document);
   }
 
   function isVehicleListing(listing) {
@@ -487,7 +508,7 @@
     }
     if (message?.type === "MARKET_SNAP_EXTRACT") {
       expandReadOnlySections().then(() => {
-        const listing = extractListing();
+        const listing = extractListing({ force: true });
         STATE.listing = listing;
         sendResponse({ ok: true, listing });
       }).catch((error) => sendResponse({ ok: false, message: formatError(error) }));

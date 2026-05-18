@@ -13,6 +13,7 @@ const sectionMap = require("../browser-extension/src/openlane-section-map.js") a
     ignoredEvidence: Array<{ marker: string; zone?: string; sourceText?: string }>;
     zones: Record<string, { text?: string; ignored?: boolean; evidence?: unknown[] }>;
   };
+  clearOpenLaneExtractionCache: (doc: Record<string, unknown>) => void;
 };
 const classifier = require("../browser-extension/src/openlane-page-classifier.js") as {
   classifyOpenLanePageFromHtml: (html: string, href?: string) => {
@@ -22,8 +23,13 @@ const classifier = require("../browser-extension/src/openlane-page-classifier.js
     evidence: Array<{ marker: string }>;
     warnings: string[];
   };
+  classifyOpenLanePage: (doc: Record<string, unknown>, href?: string) => {
+    pageType: string;
+    evidence: Array<{ marker: string }>;
+  };
 };
 const extractor = require("../browser-extension/src/openlane-extractor.js") as {
+  extractOpenLaneListing: (doc: Record<string, unknown>, href?: string) => Record<string, unknown>;
   extractOpenLaneFixture: (html: string, href?: string) => Record<string, unknown>;
   isOpenLaneVehiclePage: (doc: { body?: { innerText?: string; textContent?: string }; images?: unknown[] }, href?: string) => boolean;
 };
@@ -39,6 +45,48 @@ test("OpenLane extractor identifies supported vehicle pages", () => {
 
   assert.equal(extractor.isOpenLaneVehiclePage({ body: { innerText: text }, images: [{}, {}] }, "https://www.openlane.ca/vehicle/123"), true);
   assert.equal(extractor.isOpenLaneVehiclePage({ body: { innerText: "Search results" }, images: [] }, "https://www.openlane.ca/search"), false);
+});
+
+test("OpenLane public homepage is not widget eligible even with generic vehicle marketing text", () => {
+  const homepageText = "Accueil Browse inventory 2021 Toyota RAV4 Current Bid $18,500 photos Search vehicles";
+
+  assert.equal(
+    extractor.isOpenLaneVehiclePage({ body: { innerText: homepageText, textContent: homepageText }, images: [{}, {}, {}] }, "https://openlane.ca/en/"),
+    false,
+  );
+});
+
+test("OpenLane extraction cache can be cleared when a dynamic VDP shell loads vehicle content", () => {
+  const doc = fakeDocument("Loading OpenLane application...");
+  const href = "https://app.openlane.ca/vdp/3KPFL4A72HE119966";
+
+  assert.equal(classifier.classifyOpenLanePage(doc, href).pageType, "unknown");
+  doc.body.innerText = "2017 Kia Forte 4dr Sdn. VIN 3KPFL4A72HE119966 Odometer 158,569 KM Current Bid 4 000 $ 13 total photos";
+  doc.body.textContent = doc.body.innerText;
+  doc.images = [{}, {}, {}];
+
+  assert.equal(classifier.classifyOpenLanePage(doc, href).pageType, "unknown");
+  sectionMap.clearOpenLaneExtractionCache(doc);
+
+  assert.equal(classifier.classifyOpenLanePage(doc, href).pageType, "active_listing");
+  assert.equal(extractor.isOpenLaneVehiclePage(doc, href), true);
+});
+
+test("OpenLane extraction cache clearing refreshes data between VDP route changes", () => {
+  const firstHref = "https://app.openlane.ca/vdp/2T3R1RFV5MW123456";
+  const secondHref = "https://app.openlane.ca/vdp/1GCUDEE88RZ142915";
+  const doc = fakeDocument("2021 Toyota RAV4 VIN 2T3R1RFV5MW123456 Odometer 52,300 KM Current Bid $18,500 4 total photos");
+
+  assert.equal(extractor.extractOpenLaneListing(doc, firstHref).vin, "2T3R1RFV5MW123456");
+  assert.equal(classifier.classifyOpenLanePage(doc, firstHref).pageType, "active_listing");
+
+  doc.body.innerText = "2024 Chevrolet Silverado VIN 1GCUDEE88RZ142915 Odometer 40,100 KM Current Bid $50,700 21 total photos";
+  doc.body.textContent = doc.body.innerText;
+  sectionMap.clearOpenLaneExtractionCache(doc);
+
+  assert.equal(extractor.isOpenLaneVehiclePage(doc, secondHref), true);
+  assert.equal(extractor.extractOpenLaneListing(doc, secondHref).vin, "1GCUDEE88RZ142915");
+  assert.equal(classifier.classifyOpenLanePage(doc, secondHref).evidence.some((item) => item.marker === "vehicle_identity"), true);
 });
 
 test("OpenLane section map isolates noisy English VDP regions", () => {
@@ -630,4 +678,14 @@ function visibleText(html: string) {
     .replace(/<[^>]+>/g, "\n")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function fakeDocument(text: string) {
+  return {
+    title: "OpenLane",
+    body: { innerText: text, textContent: text },
+    images: [] as unknown[],
+    querySelector: () => null,
+    querySelectorAll: () => [],
+  };
 }

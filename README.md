@@ -107,9 +107,9 @@ pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 ```
 
-Then run Dealer Flow with `MARKET_SNAP_ML_SERVICE_URL=http://localhost:8000`, open Market Snap, paste authorized visible listing HTML, click **Extract listing**, then **Analyze listing** or **Save to Deal Radar**. The extension uses the same extraction API when `dealerFlowBaseUrl`, `organizationId`, and session cookies are available. CatBoost remains candidate-only; use Python 3.11/3.12 for CatBoost training because the pinned CatBoost package does not currently install cleanly on Python 3.13.
+Then run Dealer Flow with `MARKET_SNAP_ML_SERVICE_URL=http://localhost:8000`. Scheduled source sync calls `/sources/sync` in the ML service for OpenLane and Facebook Marketplace, using `MARKET_SNAP_OPENLANE_SEARCH_URLS` and `MARKET_SNAP_MARKETPLACE_SEARCH_URLS` when configured. The extension still uses the authorized extraction API when `dealerFlowBaseUrl`, `organizationId`, and session cookies are available. CatBoost remains candidate-only; use Python 3.11/3.12 for CatBoost training because the pinned CatBoost package does not currently install cleanly on Python 3.13.
 
-Market Snap daily refresh uses Vercel Cron at `/api/market-snap/cron/daily-refresh`. It refreshes only active inventory statuses (`purchased`, `in_repair`, `listed_for_sale`), skips sold vehicles, and avoids duplicate valuation snapshots when no meaningful change occurred.
+Market Snap source sync uses Vercel Cron at `/api/market-snap/cron/sync-openlane` (`0 9-18 * * *`) and `/api/market-snap/cron/sync-marketplace` (`0 12,18 * * *`). Market Snap daily refresh uses Vercel Cron at `/api/market-snap/cron/daily-refresh`. It refreshes only active inventory statuses (`purchased`, `in_repair`, `listed_for_sale`), skips sold vehicles, and avoids duplicate valuation snapshots when no meaningful change occurred.
 
 ## Backups
 

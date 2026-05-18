@@ -203,8 +203,10 @@
   }
 
   function isOpenLaneVehiclePage(doc = document, href = location.href) {
-    const host = new URL(href).hostname.toLowerCase();
+    const url = new URL(href);
+    const host = url.hostname.toLowerCase();
     if (!host.includes("openlane.")) return false;
+    if (!isSupportedOpenLaneCapturePath(url.pathname)) return false;
     const classification = classifyOpenLanePage(doc, href);
     if (classification.pageType && classification.pageType !== "unknown") return true;
     const text = extractVisibleText(doc);
@@ -217,6 +219,10 @@
       doc.images.length >= 2,
     ];
     return markers.filter(Boolean).length >= 2;
+  }
+
+  function isSupportedOpenLaneCapturePath(pathname) {
+    return /\/(?:vdp|vehicle|purchases?|post-sale)(?:\/|$)/i.test(String(pathname || ""));
   }
 
   function summarizeSectionMapForDebug(sectionMap) {

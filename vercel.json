@@ -7,6 +7,14 @@
     {
       "path": "/api/market-snap/cron/daily-refresh",
       "schedule": "30 7 * * *"
+    },
+    {
+      "path": "/api/market-snap/cron/sync-openlane",
+      "schedule": "0 9-18 * * *"
+    },
+    {
+      "path": "/api/market-snap/cron/sync-marketplace",
+      "schedule": "0 12,18 * * *"
     }
   ]
 }

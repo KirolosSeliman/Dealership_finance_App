@@ -16,7 +16,7 @@ export async function extractAuthorizedListing(payload: AuthorizedExtractionRequ
       extractionQualityScore: 0,
       policyDecision: "unavailable",
       policyReasons: ["Dealer Flow could not reach the Market Snap ML extraction service because no service URL is configured."],
-      fallbackStrategies: ["browser_extension_local_extraction", "csv_import", "json_import", "manual_listing_entry"],
+      fallbackStrategies: ["browser_extension_local_extraction", "csv_import", "json_import", "scheduled_source_sync"],
     };
   }
 
@@ -99,7 +99,7 @@ function serviceError(message: string) {
     extractionQualityScore: 0,
     policyDecision: "unavailable",
     policyReasons: [message],
-    fallbackStrategies: ["browser_extension_local_extraction", "csv_import", "json_import", "manual_listing_entry"],
+    fallbackStrategies: ["browser_extension_local_extraction", "csv_import", "json_import", "scheduled_source_sync"],
   };
 }
 
