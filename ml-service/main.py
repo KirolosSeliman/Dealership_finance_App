@@ -3,7 +3,7 @@ from typing import Any
 
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
-from train_candidate import build_candidate_report
+from train_candidate import build_candidate_report, build_training_dataset
 from scrapling_connector import ExtractionPolicy, extract_visible_vehicle_fields, fallback_strategies, scrapling_available, scrapling_version
 from source_connectors.base import SourceSyncRequest
 from source_connectors.registry import get_connector, supported_sources
@@ -72,6 +72,18 @@ def train_candidate(request: TrainCandidateRequest):
         "market_type": request.market_type,
         **report,
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "promotion": "manual_admin_promotion_required",
+    }
+
+
+@app.post("/train-candidate/dataset")
+def export_candidate_training_dataset(request: TrainCandidateRequest):
+    dataset = build_training_dataset(request.rows)
+    return {
+        "status": "candidate_only",
+        "model": "CatBoostRegressor",
+        "market_type": request.market_type,
+        **dataset,
         "promotion": "manual_admin_promotion_required",
     }
 
