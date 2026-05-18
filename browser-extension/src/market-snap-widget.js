@@ -371,10 +371,10 @@
     return "Missing";
   }
 
-  async function loadWidgetSettings(shadow) {
+  async function loadWidgetSettings(shadow, settingsOverride = null) {
     const form = shadow.querySelector(".settings-drawer");
     if (!form || !window.DealerFlowMarketSnapStorage) return;
-    const settings = await window.DealerFlowMarketSnapStorage.getSettings();
+    const settings = settingsOverride || await window.DealerFlowMarketSnapStorage.getSettings();
     for (const [key, value] of Object.entries(settings)) {
       const field = form.elements[key];
       if (!field) continue;
@@ -386,12 +386,26 @@
   async function saveWidgetSettings(event, callbacks) {
     event.preventDefault();
     const form = event.currentTarget;
-    const values = Object.fromEntries(new FormData(form).entries());
-    for (const field of Array.from(form.querySelectorAll("input[type='checkbox']"))) {
-      values[field.name] = field.checked;
+    const shadow = form.getRootNode();
+    const submitButton = form.querySelector("button[type='submit']");
+    if (submitButton) submitButton.disabled = true;
+    try {
+      const values = Object.fromEntries(new FormData(form).entries());
+      for (const field of Array.from(form.querySelectorAll("input[type='checkbox']"))) {
+        values[field.name] = field.checked;
+      }
+      const saved = await window.DealerFlowMarketSnapStorage.saveSettings(values);
+      await loadWidgetSettings(shadow, saved);
+      callbacks.onSettingsSaved?.(saved, "Settings saved.");
+    } catch (error) {
+      callbacks.onSettingsError?.(`Settings save failed: ${formatWidgetError(error)}`, error);
+    } finally {
+      if (submitButton) submitButton.disabled = false;
     }
-    const saved = await window.DealerFlowMarketSnapStorage.saveSettings(values);
-    callbacks.onSettingsSaved?.(saved);
+  }
+
+  function formatWidgetError(error) {
+    return error?.message || "Unknown error";
   }
 
   function installDrag(shadow) {

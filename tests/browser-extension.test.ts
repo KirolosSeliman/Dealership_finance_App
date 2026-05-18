@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
+import vm from "node:vm";
 
 const repoRoot = process.cwd();
 const require = createRequire(import.meta.url);
@@ -58,11 +59,8 @@ test("Market Snap extension uses in-page OpenLane widget instead of popup-only a
   const widget = readFileSync(join(repoRoot, "browser-extension/src/market-snap-widget.js"), "utf8");
 
   assert.match(contentScript, /__dealerFlowMarketSnapRuntime/);
-  assert.match(contentScript, /waitForVehiclePage/);
   assert.match(contentScript, /extractStableOpenLaneListing/);
   assert.match(contentScript, /readyToCapture/);
-  assert.match(contentScript, /classifyOpenLanePage/);
-  assert.match(contentScript, /MAX_READY_RETRIES/);
   assert.match(contentScript, /MutationObserver/);
   assert.match(contentScript, /pushState/);
   assert.match(contentScript, /replaceState/);
@@ -82,6 +80,20 @@ test("Market Snap extension uses in-page OpenLane widget instead of popup-only a
   assert.match(widget, /Copy JSON/);
   assert.match(widget, /attachShadow/);
   assert.match(contentScript, /openOptionsPage/);
+});
+
+test("Market Snap runtime starts stable capture on OpenLane hosts without the old pre-detection gate", () => {
+  const contentScript = readFileSync(join(repoRoot, "browser-extension/src/content-script.js"), "utf8");
+  const runRuntimeBlock = contentScript.slice(
+    contentScript.indexOf("async function runRuntime"),
+    contentScript.indexOf("async function waitForBody"),
+  );
+
+  assert.match(runRuntimeBlock, /isOpenLaneHost\(\)/);
+  assert.match(runRuntimeBlock, /ensureWidget\(\)/);
+  assert.match(runRuntimeBlock, /runAnalysis\(\{\s*force\s*\}\)/);
+  assert.doesNotMatch(runRuntimeBlock, /waitForVehiclePage/);
+  assert.doesNotMatch(contentScript, /MAX_READY_RETRIES/);
 });
 
 test("Market Snap manual extraction messages use stable capture instead of direct extraction", () => {
@@ -249,6 +261,91 @@ test("Market Snap extension settings and API client are shared and secret-free",
   assert.doesNotMatch(extensionText, /eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/);
   assert.doesNotMatch(extensionText, /sk_(live|test|proj)_[A-Za-z0-9_-]{16,}/);
   assert.doesNotMatch(extensionText, /password\s*[:=]|openlane credentials\s*[:=]|carfax credentials\s*[:=]/i);
+});
+
+test("Market Snap storage normalizes blank Dealer Flow URL back to the safe default", async () => {
+  const storageSource = readFileSync(join(repoRoot, "browser-extension/src/storage.js"), "utf8");
+  const syncStore: Record<string, unknown> = {
+    dealerFlowBaseUrl: "",
+    organizationId: "5a652d48-a32d-4d84-acab-2799c85dee35",
+    autoAnalyze: true,
+  };
+  const localStore: Record<string, unknown> = {};
+  const context = {
+    window: {} as {
+      DealerFlowMarketSnapStorage?: {
+        getSettings: () => Promise<Record<string, unknown>>;
+        saveSettings: (values: Record<string, unknown>) => Promise<Record<string, unknown>>;
+      };
+    },
+    crypto: { randomUUID: () => "install-test" },
+    chrome: {
+      storage: {
+        sync: {
+          get: async (keys: string[]) => Object.fromEntries(keys.map((key) => [key, syncStore[key]]).filter((entry) => entry[1] !== undefined)),
+          set: async (values: Record<string, unknown>) => {
+            Object.assign(syncStore, values);
+          },
+        },
+        local: {
+          get: async (key: string) => ({ [key]: localStore[key] }),
+          set: async (values: Record<string, unknown>) => {
+            Object.assign(localStore, values);
+          },
+        },
+      },
+    },
+  };
+
+  vm.runInNewContext(storageSource, context);
+  const storageApi = context.window.DealerFlowMarketSnapStorage;
+  assert.ok(storageApi);
+
+  const settings = await storageApi.getSettings();
+  assert.equal(settings.dealerFlowBaseUrl, "http://localhost:3000");
+
+  const saved = await storageApi.saveSettings({
+    ...settings,
+    dealerFlowBaseUrl: "   ",
+  });
+  assert.equal(saved.dealerFlowBaseUrl, "http://localhost:3000");
+  assert.equal(syncStore.dealerFlowBaseUrl, "http://localhost:3000");
+  assert.equal(String(syncStore.organizationId), "5a652d48-a32d-4d84-acab-2799c85dee35");
+});
+
+test("Market Snap widget settings save surfaces success and failure and reloads saved values", () => {
+  const widget = readFileSync(join(repoRoot, "browser-extension/src/market-snap-widget.js"), "utf8");
+  const saveBlock = widget.slice(
+    widget.indexOf("async function saveWidgetSettings"),
+    widget.indexOf("function installDrag"),
+  );
+
+  assert.match(saveBlock, /try\s*{/);
+  assert.match(saveBlock, /catch\s*\(error\)/);
+  assert.match(saveBlock, /onSettingsSaved/);
+  assert.match(saveBlock, /onSettingsError/);
+  assert.match(saveBlock, /Settings saved\./);
+  assert.match(saveBlock, /Settings save failed:/);
+  assert.match(saveBlock, /loadWidgetSettings\(shadow,\s*saved\)/);
+});
+
+test("Market Snap content script surfaces extraction failures instead of leaving stale debug state", () => {
+  const contentScript = readFileSync(join(repoRoot, "browser-extension/src/content-script.js"), "utf8");
+  const runAnalysisBlock = contentScript.slice(
+    contentScript.indexOf("async function runAnalysis"),
+    contentScript.indexOf("function queueCapture"),
+  );
+  const copyBlock = contentScript.slice(
+    contentScript.indexOf("async function copyExtractedJson"),
+    contentScript.indexOf("function buildCopyPayload"),
+  );
+
+  assert.match(runAnalysisBlock, /catch\s*\(error\)/);
+  assert.match(runAnalysisBlock, /status:\s*"error"/);
+  assert.match(runAnalysisBlock, /formatError\(error\)/);
+  assert.match(copyBlock, /try\s*{/);
+  assert.match(copyBlock, /catch\s*\(error\)/);
+  assert.match(copyBlock, /Extracted JSON copied\./);
 });
 
 test("Market Snap repository persists OpenLane media and Carfax metadata", () => {

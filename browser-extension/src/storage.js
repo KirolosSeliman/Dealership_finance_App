@@ -41,7 +41,7 @@
       deepCaptureConsentStatus: "off",
     };
     const normalized = normalizeSettings({
-      dealerFlowBaseUrl: String(values.dealerFlowBaseUrl || DEFAULT_SETTINGS.dealerFlowBaseUrl).trim().replace(/\/$/, ""),
+      dealerFlowBaseUrl: values.dealerFlowBaseUrl,
       organizationId,
       autoAnalyze: Boolean(values.autoAnalyze),
       autoCapture: values.autoCapture !== false,
@@ -76,15 +76,24 @@
   }
 
   function normalizeSettings(settings) {
+    const dealerFlowBaseUrl = normalizeDealerFlowBaseUrl(settings.dealerFlowBaseUrl);
+    const organizationId = String(settings.organizationId || "").trim();
     const deepCaptureConsentStatus = normalizeConsentStatus(settings.deepCaptureConsentStatus);
-    const deepCaptureEnabled = Boolean(settings.organizationId && settings.deepCaptureEnabled && deepCaptureConsentStatus === "active" && settings.deepCaptureConsentId);
+    const deepCaptureEnabled = Boolean(organizationId && settings.deepCaptureEnabled && deepCaptureConsentStatus === "active" && settings.deepCaptureConsentId);
     return {
       ...settings,
+      dealerFlowBaseUrl,
+      organizationId,
       deepCaptureConsentStatus,
       deepCaptureEnabled,
       observePageNetworkData: Boolean(settings.observePageNetworkData && deepCaptureEnabled && deepCaptureConsentStatus === "active"),
       modelImprovementOptIn: Boolean(settings.modelImprovementOptIn),
     };
+  }
+
+  function normalizeDealerFlowBaseUrl(value) {
+    const trimmed = String(value || "").trim().replace(/\/$/, "");
+    return trimmed || DEFAULT_SETTINGS.dealerFlowBaseUrl;
   }
 
   function normalizeConsentStatus(value) {

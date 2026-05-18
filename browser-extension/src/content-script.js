@@ -2,8 +2,6 @@
   if (window.__dealerFlowMarketSnapRuntime) return;
   window.__dealerFlowMarketSnapRuntime = true;
 
-  const MAX_READY_RETRIES = 8;
-  const READY_RETRY_DELAY_MS = 500;
   const AUTO_ANALYZE_DEBOUNCE_MS = 1200;
   const ROUTE_CHANGE_DEBOUNCE_MS = 500;
 
@@ -54,15 +52,14 @@
     }
     if (force) clearExtractionCache();
     if (!force && STATE.hiddenPageUrl === location.href) return;
-    const supported = await waitForVehiclePage(force ? 1 : MAX_READY_RETRIES);
-    if (!supported) {
-      if (reason === "route-change") removeWidget();
+    if (!isOpenLaneHost()) {
+      removeWidget();
       return;
     }
 
     ensureWidget();
     STATE.widget.setCollapsed(Boolean(STATE.settings?.widgetCollapsed));
-    STATE.widget.render({ status: "detecting", listing: STATE.listing, message: "Detected OpenLane vehicle page." });
+    STATE.widget.render({ status: "detecting", listing: STATE.listing, message: "Checking OpenLane page readiness." });
     await runAnalysis({ force });
   }
 
@@ -77,20 +74,8 @@
     });
   }
 
-  async function waitForVehiclePage(maxRetries) {
-    for (let attempt = 0; attempt < maxRetries; attempt += 1) {
-      STATE.readyRetries = attempt;
-      clearExtractionCache();
-      if (isSupportedOpenLaneVehiclePage()) return true;
-      await sleep(READY_RETRY_DELAY_MS);
-    }
-    clearExtractionCache();
-    return isSupportedOpenLaneVehiclePage();
-  }
-
-  function isSupportedOpenLaneVehiclePage() {
-    const classification = classifyOpenLanePage();
-    return classification.pageType !== "unknown" && window.DealerFlowOpenLaneExtractor.isOpenLaneVehiclePage(document, location.href);
+  function isOpenLaneHost() {
+    return /(^|\.)openlane\./i.test(location.hostname || "");
   }
 
   function ensureWidget() {
@@ -105,6 +90,10 @@
         STATE.settings = settings;
         syncDeepCaptureObserver();
         STATE.widget?.render({ status: "idle", listing: STATE.listing, valuation: STATE.valuation, message: "Settings saved." });
+        scheduleRuntime(0, "settings-saved");
+      },
+      onSettingsError: (message) => {
+        STATE.widget?.render({ status: "warning", listing: STATE.listing, valuation: STATE.valuation, message });
       },
       onHidePage: () => hideCurrentPage(),
     });
@@ -201,33 +190,41 @@
     if (STATE.running) return;
     STATE.phase = "extracting";
 
-    if (!STATE.settings?.autoAnalyze && !force) {
-      await updateListingOnly();
+    try {
+      if (!STATE.settings?.autoAnalyze && !force) {
+        await updateListingOnly();
+        return;
+      }
+
+      const stableCapture = await extractStableListing({ force });
+      const listing = stableCapture.listing;
+      STATE.listing = listing;
+      STATE.safeExpansion = stableCapture.safeExpansion || null;
+      if (!stableCapture.readiness.readyToCapture || !isVehicleListing(listing)) {
+        STATE.widget?.render({ status: "warning", listing, message: readinessMessage(stableCapture.readiness) });
+        return;
+      }
+
+      const settingsError = settingsProblem(STATE.settings);
+      if (settingsError) {
+        STATE.widget?.render({ status: "disconnected", listing, valuation: STATE.valuation, message: settingsError });
+        return;
+      }
+      queueCapture(listing, { force });
+
+      const signature = listingSignature(listing);
+      if (!force && signature === STATE.lastSignature) return;
+      STATE.lastSignature = signature;
+      STATE.running = true;
+      STATE.phase = "analyzing";
+      STATE.widget?.render({ status: "analyzing", listing, message: "Analyzing visible OpenLane data..." });
+    } catch (error) {
+      STATE.phase = "error";
+      STATE.widget?.render({ status: "error", listing: STATE.listing, valuation: STATE.valuation, message: formatError(error) });
       return;
     }
 
-    const stableCapture = await extractStableListing({ force });
-    const listing = stableCapture.listing;
-    STATE.listing = listing;
-    STATE.safeExpansion = stableCapture.safeExpansion || null;
-    if (!stableCapture.readiness.readyToCapture || !isVehicleListing(listing)) {
-      STATE.widget?.render({ status: "warning", listing, message: readinessMessage(stableCapture.readiness) });
-      return;
-    }
-
-    const settingsError = settingsProblem(STATE.settings);
-    if (settingsError) {
-      STATE.widget?.render({ status: "disconnected", listing, valuation: STATE.valuation, message: settingsError });
-      return;
-    }
-    queueCapture(listing, { force });
-
-    const signature = listingSignature(listing);
-    if (!force && signature === STATE.lastSignature) return;
-    STATE.lastSignature = signature;
-    STATE.running = true;
-    STATE.phase = "analyzing";
-    STATE.widget?.render({ status: "analyzing", listing, message: "Analyzing visible OpenLane data..." });
+    const listing = STATE.listing;
 
     try {
       const payload = await window.DealerFlowMarketSnapApi.analyzeListing(STATE.settings, listing);
@@ -257,17 +254,21 @@
   }
 
   async function updateListingOnly() {
-    const stableCapture = await extractStableListing({ force: false });
-    const listing = stableCapture.listing;
-    if (!isVehicleListing(listing) && !listing?.title) return;
-    STATE.phase = "idle";
-    STATE.listing = listing;
-    STATE.safeExpansion = stableCapture.safeExpansion || null;
-    STATE.widget?.render({
-      status: stableCapture.readiness.readyToCapture ? "idle" : "warning",
-      listing,
-      message: stableCapture.readiness.readyToCapture ? "Auto-analyze is off. Use Refresh to analyze this page." : readinessMessage(stableCapture.readiness),
-    });
+    try {
+      const stableCapture = await extractStableListing({ force: false });
+      const listing = stableCapture.listing;
+      STATE.phase = "idle";
+      STATE.listing = listing;
+      STATE.safeExpansion = stableCapture.safeExpansion || null;
+      STATE.widget?.render({
+        status: stableCapture.readiness.readyToCapture ? "idle" : "warning",
+        listing,
+        message: stableCapture.readiness.readyToCapture ? "Auto-analyze is off. Use Refresh to analyze this page." : readinessMessage(stableCapture.readiness),
+      });
+    } catch (error) {
+      STATE.phase = "error";
+      STATE.widget?.render({ status: "error", listing: STATE.listing, valuation: STATE.valuation, message: formatError(error) });
+    }
   }
 
   async function extractStableListing({ force = false } = {}) {
@@ -406,10 +407,6 @@
     return evidence.slice(0, 50);
   }
 
-  function classifyOpenLanePage() {
-    return window.DealerFlowOpenLanePageClassifier.classifyOpenLanePage(document, location.href);
-  }
-
   function clearExtractionCache() {
     window.DealerFlowOpenLaneSectionMap?.clearOpenLaneExtractionCache?.(document);
   }
@@ -449,15 +446,19 @@
   }
 
   async function copyExtractedJson() {
-    let listing = STATE.listing;
-    if (!listing) {
-      const stableCapture = await extractStableListing({ force: true });
-      listing = stableCapture.listing;
-      STATE.listing = listing;
-      STATE.safeExpansion = stableCapture.safeExpansion || null;
+    try {
+      let listing = STATE.listing;
+      if (!listing) {
+        const stableCapture = await extractStableListing({ force: true });
+        listing = stableCapture.listing;
+        STATE.listing = listing;
+        STATE.safeExpansion = stableCapture.safeExpansion || null;
+      }
+      await navigator.clipboard.writeText(JSON.stringify(buildCopyPayload(listing), null, 2));
+      STATE.widget?.render({ status: "ready", listing, valuation: STATE.valuation, message: "Extracted JSON copied." });
+    } catch (error) {
+      STATE.widget?.render({ status: "error", listing: STATE.listing, valuation: STATE.valuation, message: formatError(error) });
     }
-    await navigator.clipboard.writeText(JSON.stringify(buildCopyPayload(listing), null, 2));
-    STATE.widget?.render({ status: "ready", listing, valuation: STATE.valuation, message: "Extracted JSON copied." });
   }
 
   function buildCopyPayload(listing) {
@@ -601,10 +602,6 @@
     const message = error?.message || "Market Snap failed.";
     if (message.includes("Failed to fetch")) return "Dealer Flow is unreachable or blocked by extension origin settings.";
     return message;
-  }
-
-  function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
