@@ -721,13 +721,36 @@ export async function dataQuality(request: Request) {
     if (userError || !userData.user) return NextResponse.json({ ok: false, message: "Authentication required." }, { status: 401 });
     const organizationId = new URL(request.url).searchParams.get("organizationId") ?? "";
     await requireOrganizationRole(client, userData.user.id, organizationId, ["owner", "admin"]);
-    const { data, error } = await client
-      .from("market_listings")
-      .select("source_name, listing_url, mileage_km, listed_price, trim, data_quality_score, captured_at, image_features")
-      .or(`organization_id.eq.${organizationId},organization_id.is.null`)
-      .limit(1000);
-    if (error) throw error;
-    const rows = data ?? [];
+    const [marketListings, identities, observations, outcomes] = await Promise.all([
+      client
+        .from("market_listings")
+        .select("source_name, listing_url, vin, mileage_km, listed_price, trim, data_quality_score, captured_at, image_features, carfax_url, carfax_available, extraction_confidence_score, openlane_metadata, normalized_payload, sanitized_raw_payload")
+        .or(`organization_id.eq.${organizationId},organization_id.is.null`)
+        .limit(1000),
+      client
+        .from("openlane_vehicle_identities")
+        .select("vin, fallback_key, identity_confidence")
+        .eq("organization_id", organizationId)
+        .limit(5000),
+      client
+        .from("openlane_observations")
+        .select("id, data_quality_score, evidence_confidence_score")
+        .eq("organization_id", organizationId)
+        .limit(5000),
+      client
+        .from("openlane_outcomes")
+        .select("capture_kind, outcome_type, is_training_eligible, data_quality_score, evidence_confidence_score")
+        .eq("organization_id", organizationId)
+        .limit(5000),
+    ]);
+    for (const result of [marketListings, identities, observations, outcomes]) {
+      if (result.error) throw result.error;
+    }
+    const rows = marketListings.data ?? [];
+    const identityRows = identities.data ?? [];
+    const observationRows = observations.data ?? [];
+    const outcomeRows = outcomes.data ?? [];
+    const openLaneRows = rows.filter(isOpenLaneQualityRow);
     const uniqueKeys = new Set(rows.map((row) => String(row.listing_url ?? "")).filter(Boolean));
     const imageUsable = rows.filter((row) => {
       const features = row.image_features as Record<string, unknown> | null;
@@ -736,6 +759,22 @@ export async function dataQuality(request: Request) {
     const freshnessDays = rows
       .map((row) => row.captured_at ? Math.max(0, Math.round((Date.now() - new Date(String(row.captured_at)).getTime()) / 86_400_000)) : 999)
       .filter(Number.isFinite);
+    const validVinCount = openLaneRows.filter((row) => isValidOpenLaneVin(row.vin)).length;
+    const missingVinCount = openLaneRows.filter((row) => !stringMetric(row.vin)).length;
+    const invalidVinCount = openLaneRows.filter((row) => stringMetric(row.vin) && !isValidOpenLaneVin(row.vin)).length;
+    const carfaxStatuses = openLaneRows.map(openLaneCarfaxStatus);
+    const identityKeys = identityRows.map((row) => stringMetric(row.vin) || stringMetric(row.fallback_key)).filter(Boolean);
+    const duplicateIdentityCount = duplicateKeyCount(identityKeys);
+    const dataQualityValues = [
+      ...rows.map((row) => numberMetric(row.data_quality_score)),
+      ...observationRows.map((row) => numberMetric(row.data_quality_score)),
+      ...outcomeRows.map((row) => numberMetric(row.data_quality_score)),
+    ].filter((value): value is number => value !== undefined);
+    const extractionConfidenceValues = [
+      ...openLaneRows.map((row) => numberMetric(row.extraction_confidence_score)),
+      ...observationRows.map((row) => numberMetric(row.evidence_confidence_score)),
+      ...outcomeRows.map((row) => numberMetric(row.evidence_confidence_score)),
+    ].filter((value): value is number => value !== undefined);
     return NextResponse.json({
       ok: true,
       metrics: {
@@ -752,8 +791,22 @@ export async function dataQuality(request: Request) {
         missingPriceCount: rows.filter((row) => row.listed_price === null).length,
         missingTrimCount: rows.filter((row) => !row.trim).length,
         usablePhotoFeatureCount: imageUsable,
+        openLaneListingCount: openLaneRows.length,
+        vinCoverageRate: ratioPercent(validVinCount, openLaneRows.length),
+        missingVinCount,
+        invalidVinCount,
+        carfaxUrlFoundCount: carfaxStatuses.filter((status) => status === "url_found").length,
+        carfaxTextOnlyCount: carfaxStatuses.filter((status) => status === "text_only").length,
+        carfaxMissingCount: carfaxStatuses.filter((status) => status === "missing").length,
+        duplicateIdentityRate: ratioPercent(duplicateIdentityCount, identityRows.length),
+        trainingEligibleOutcomeCount: outcomeRows.filter((row) => row.is_training_eligible === true).length,
+        candidateOutcomeCount: outcomeRows.filter((row) => row.capture_kind === "candidate_outcome" || String(row.outcome_type ?? "").includes("candidate")).length,
+        verifiedOutcomeCount: outcomeRows.filter((row) => row.capture_kind === "verified_outcome" || row.capture_kind === "manual_confirmation").length,
+        observationCount: observationRows.length,
+        averageExtractionConfidence: averageMetric(extractionConfidenceValues),
+        averageDataQualityScore: averageMetric(dataQualityValues),
         averageDataQuality: rows.length ? Math.round(rows.reduce((sum, row) => sum + Number(row.data_quality_score ?? 0), 0) / rows.length) : 0,
-        averageConfidence: rows.length ? Math.round(rows.reduce((sum, row) => sum + Number(row.data_quality_score ?? 0), 0) / rows.length) : 0,
+        averageConfidence: averageMetric(extractionConfidenceValues) || (rows.length ? Math.round(rows.reduce((sum, row) => sum + Number(row.data_quality_score ?? 0), 0) / rows.length) : 0),
         averageDataFreshness: freshnessDays.length ? Math.round(freshnessDays.reduce((sum, value) => sum + value, 0) / freshnessDays.length) : 0,
       },
     });
@@ -761,6 +814,69 @@ export async function dataQuality(request: Request) {
     const response = routeErrorResponse(error);
     return NextResponse.json(response.body, { status: response.status });
   }
+}
+
+const OPENLANE_VIN_PATTERN = /^[A-HJ-NPR-Z0-9]{17}$/i;
+
+function isOpenLaneQualityRow(row: Record<string, unknown>) {
+  const sourceName = String(row.source_name ?? "").toLowerCase();
+  if (sourceName.includes("openlane")) return true;
+  if (objectMetric(row.openlane_metadata) && Object.keys(objectMetric(row.openlane_metadata)).length > 0) return true;
+  const normalized = objectMetric(row.normalized_payload);
+  return String(normalized.sourceName ?? normalized.source_name ?? "").toLowerCase().includes("openlane")
+    || Boolean(normalized.pageType || normalized.captureKind || normalized.openlaneMetadata);
+}
+
+function isValidOpenLaneVin(value: unknown) {
+  return OPENLANE_VIN_PATTERN.test(stringMetric(value).toUpperCase());
+}
+
+function openLaneCarfaxStatus(row: Record<string, unknown>) {
+  if (stringMetric(row.carfax_url)) return "url_found";
+  const metadata = objectMetric(row.openlane_metadata);
+  const normalized = objectMetric(row.normalized_payload);
+  const normalizedMetadata = objectMetric(normalized.openlaneMetadata);
+  const rawPayload = objectMetric(row.sanitized_raw_payload);
+  const rawMetadata = objectMetric(rawPayload.openlaneMetadata);
+  const statuses = [
+    metadata.carfaxUrlStatus,
+    normalized.carfaxUrlStatus,
+    normalizedMetadata.carfaxUrlStatus,
+    rawPayload.carfaxUrlStatus,
+    rawMetadata.carfaxUrlStatus,
+  ].map((value) => stringMetric(value).toLowerCase());
+  if (statuses.includes("url_found")) return "url_found";
+  if (statuses.includes("text_only") || row.carfax_available === true) return "text_only";
+  return "missing";
+}
+
+function duplicateKeyCount(keys: string[]) {
+  const counts = new Map<string, number>();
+  for (const key of keys) counts.set(key, (counts.get(key) ?? 0) + 1);
+  return Array.from(counts.values()).reduce((sum, count) => sum + Math.max(0, count - 1), 0);
+}
+
+function ratioPercent(count: number, total: number) {
+  return total ? Math.round((count / total) * 100) : 0;
+}
+
+function averageMetric(values: number[]) {
+  return values.length ? Math.round(values.reduce((sum, value) => sum + value, 0) / values.length) : 0;
+}
+
+function numberMetric(value: unknown) {
+  if (value === null || value === undefined || value === "") return undefined;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : undefined;
+}
+
+function stringMetric(value: unknown) {
+  return String(value ?? "").trim();
+}
+
+function objectMetric(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
 }
 
 export async function importListings(request: Request, importType: "csv" | "json") {

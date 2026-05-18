@@ -80,6 +80,41 @@ test("OpenLane verified outcomes require model-improvement opt-in before trainin
   assert.equal(outcome.is_training_eligible, false);
 });
 
+test("OpenLane verified outcomes require visible evidence before training eligibility", async () => {
+  const client = new FakeCaptureClient();
+  await persistOpenLaneCapture(client as never, { ...acceptedOutcome(), outcomeEvidence: [] }, capturedBy);
+
+  const outcome = client.tables.openlane_outcomes.rows[0];
+  assert.equal(outcome.capture_kind, "verified_outcome");
+  assert.equal(outcome.model_improvement_opted_in, true);
+  assert.equal(outcome.is_training_eligible, false);
+});
+
+test("OpenLane missing VIN lowers persisted capture quality gates", async () => {
+  const client = new FakeCaptureClient();
+  await persistOpenLaneCapture(client as never, {
+    ...activeObservation(),
+    vin: undefined,
+    missingData: ["vin_missing"],
+    fieldEvidence: {
+      mileageKm: [{
+        field: "mileageKm",
+        value: 52300,
+        normalizedValue: 52300,
+        sourceType: "dom_label",
+        sourceText: "Odometer 52,300 KM",
+        confidenceScore: 88,
+        capturedAt: "2026-05-14T12:00:00.000Z",
+      }],
+    },
+  }, capturedBy);
+
+  const identity = client.tables.openlane_vehicle_identities.rows[0];
+  const observation = client.tables.openlane_observations.rows[0];
+  assert.notEqual(identity.identity_confidence, "high");
+  assert.ok(Number(observation.data_quality_score) < 90);
+});
+
 test("OpenLane capture storage migration is append-only, RLS-protected, and organization isolated", () => {
   const migration = readFileSync(join(repoRoot, "supabase/migrations/20260523_openlane_capture_storage.sql"), "utf8");
 
@@ -128,6 +163,34 @@ test("Deep Capture retention migration links consent, caps evidence, and protect
   assert.match(migration, /where rolname = 'authenticated'[\s\S]+execute 'revoke execute on function public\.cleanup_market_snap_deep_capture_retention\(\) from authenticated'/i);
   assert.doesNotMatch(migration.replace(/execute\s+'[^']+'/gi, ""), /\bgrant\s+execute\s+on\s+function\s+(public\.)?cleanup_market_snap_deep_capture_retention\(\)\s+to\s+authenticated/i);
   assert.doesNotMatch(migration, /\bdelete\s+from\s+(vehicles|sales|vehicle_expenses|cash_transactions|deal_radar_saved_listings)/i);
+});
+
+test("Market Snap admin data-quality endpoint exposes OpenLane capture quality gates", () => {
+  const apiSource = readFileSync(join(repoRoot, "src/lib/server/market-snap-api.ts"), "utf8");
+
+  for (const metric of [
+    "vinCoverageRate",
+    "missingVinCount",
+    "invalidVinCount",
+    "carfaxUrlFoundCount",
+    "carfaxTextOnlyCount",
+    "carfaxMissingCount",
+    "duplicateIdentityRate",
+    "trainingEligibleOutcomeCount",
+    "candidateOutcomeCount",
+    "verifiedOutcomeCount",
+    "observationCount",
+    "averageExtractionConfidence",
+    "averageDataQualityScore",
+  ]) {
+    assert.match(apiSource, new RegExp(`\\b${metric}\\b`));
+  }
+
+  assert.match(apiSource, /openlane_vehicle_identities/);
+  assert.match(apiSource, /openlane_observations/);
+  assert.match(apiSource, /openlane_outcomes/);
+  assert.match(apiSource, /carfax_url/);
+  assert.match(apiSource, /extraction_confidence_score/);
 });
 
 function activeObservation(): MarketListingInput {

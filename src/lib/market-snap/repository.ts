@@ -499,7 +499,7 @@ function openLaneIdentityPayload(input: MarketListingInput, capturedBy?: string)
     model: input.model || null,
     trim: input.trim || null,
     mileage_km: input.mileageKm ?? null,
-    identity_confidence: input.vin ? "high" : input.listingUrl ? "medium" : "low",
+    identity_confidence: input.vin ? "high" : hasStrongOpenLaneIdentity(input) ? "medium" : "low",
     last_seen_at: input.capturedAt ?? new Date().toISOString(),
     created_by: capturedBy ?? null,
     retention_policy: retention.retention_policy,
@@ -633,7 +633,8 @@ function isTrainingEligibleOpenLaneOutcome(input: MarketListingInput) {
   return hasModelImprovementOptIn(input)
     && (input.captureKind === "verified_outcome" || input.captureKind === "manual_confirmation")
     && input.negotiationStatus?.toLowerCase() !== "pending"
-    && hasVerifiedOutcomeLabel(input);
+    && hasVerifiedOutcomeLabel(input)
+    && hasVerifiedOutcomeEvidence(input);
 }
 
 function hasModelImprovementOptIn(input: MarketListingInput) {
@@ -649,6 +650,18 @@ function hasVerifiedOutcomeLabel(input: MarketListingInput) {
     input.totalInvoiceAmount,
     input.finalAcquisitionCost,
   ].some((value) => value !== undefined && Number(value) > 0);
+}
+
+function hasVerifiedOutcomeEvidence(input: MarketListingInput) {
+  return [...(input.outcomeEvidence ?? []), ...(input.sourceEvidence ?? [])].some((evidence) => {
+    if (!evidence || typeof evidence !== "object") return false;
+    const item = evidence as unknown as Record<string, unknown>;
+    return Boolean(stringOrUndefined(item.evidenceType) || stringOrUndefined(item.sourceText) || stringOrUndefined(item.sourceName));
+  });
+}
+
+function hasStrongOpenLaneIdentity(input: MarketListingInput) {
+  return Boolean(input.year && input.make && input.model && (input.title || input.mileageKm || input.listingUrl));
 }
 
 function deepCaptureDataQualityScore(input: MarketListingInput) {
@@ -668,7 +681,8 @@ function deepCaptureDataQualityScore(input: MarketListingInput) {
   const evidenceScore = Math.round(deepCaptureEvidenceConfidenceScore(input) * 0.25);
   const missingPenalty = Math.min(30, (input.missingData?.length ?? 0) * 5);
   const rawOnlyPenalty = typedFields < 4 && input.rawVisibleText ? 12 : 0;
-  return Math.max(20, Math.min(100, 50 + typedScore + sourceScore + pageScore + evidenceScore - missingPenalty - rawOnlyPenalty));
+  const missingVinPenalty = isOpenLaneCapture(input) && !input.vin ? 30 : 0;
+  return Math.max(20, Math.min(100, 50 + typedScore + sourceScore + pageScore + evidenceScore - missingPenalty - rawOnlyPenalty - missingVinPenalty));
 }
 
 function deepCaptureEvidenceConfidenceScore(input: MarketListingInput) {
