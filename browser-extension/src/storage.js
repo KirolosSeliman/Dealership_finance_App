@@ -29,9 +29,20 @@
   }
 
   async function saveSettings(values) {
+    const existing = await readStoredSettings();
+    const organizationId = String(values.organizationId ?? existing.organizationId ?? "").trim();
+    const sameOrganization = !existing.organizationId || existing.organizationId === organizationId;
+    const consentBase = sameOrganization ? existing : {
+      deepCaptureEnabled: false,
+      observePageNetworkData: false,
+      deepCaptureConsentId: "",
+      deepCaptureConsentVersion: "",
+      deepCaptureConsentAcceptedAt: "",
+      deepCaptureConsentStatus: "off",
+    };
     const normalized = normalizeSettings({
       dealerFlowBaseUrl: String(values.dealerFlowBaseUrl || DEFAULT_SETTINGS.dealerFlowBaseUrl).trim().replace(/\/$/, ""),
-      organizationId: String(values.organizationId || "").trim(),
+      organizationId,
       autoAnalyze: Boolean(values.autoAnalyze),
       autoCapture: values.autoCapture !== false,
       autoSave: Boolean(values.autoSave),
@@ -40,18 +51,24 @@
       debugMode: Boolean(values.debugMode),
       includeMediaUrls: values.includeMediaUrls !== false,
       includeRawVisibleText: values.includeRawVisibleText !== false,
-      observePageNetworkData: Boolean(values.observePageNetworkData),
-      deepCaptureEnabled: Boolean(values.deepCaptureEnabled),
-      deepCaptureConsentId: String(values.deepCaptureConsentId || ""),
-      deepCaptureConsentVersion: String(values.deepCaptureConsentVersion || ""),
-      deepCaptureConsentAcceptedAt: String(values.deepCaptureConsentAcceptedAt || ""),
-      deepCaptureConsentStatus: String(values.deepCaptureConsentStatus || "off"),
-      extensionInstallationId: String(values.extensionInstallationId || await getExtensionInstallationId()),
+      observePageNetworkData: values.observePageNetworkData ?? consentBase.observePageNetworkData,
+      deepCaptureEnabled: values.deepCaptureEnabled ?? consentBase.deepCaptureEnabled,
+      deepCaptureConsentId: String(values.deepCaptureConsentId ?? consentBase.deepCaptureConsentId ?? ""),
+      deepCaptureConsentVersion: String(values.deepCaptureConsentVersion ?? consentBase.deepCaptureConsentVersion ?? ""),
+      deepCaptureConsentAcceptedAt: String(values.deepCaptureConsentAcceptedAt ?? consentBase.deepCaptureConsentAcceptedAt ?? ""),
+      deepCaptureConsentStatus: String(values.deepCaptureConsentStatus ?? consentBase.deepCaptureConsentStatus ?? "off"),
+      extensionInstallationId: String(values.extensionInstallationId || existing.extensionInstallationId || await getExtensionInstallationId()),
     });
     const syncSettings = { ...normalized };
     delete syncSettings.extensionInstallationId;
     await chrome.storage.sync.set(syncSettings);
     return normalized;
+  }
+
+  async function readStoredSettings() {
+    const stored = await chrome.storage.sync.get(Object.keys(DEFAULT_SETTINGS));
+    const extensionInstallationId = await getExtensionInstallationId();
+    return normalizeSettings({ ...DEFAULT_SETTINGS, ...stored, extensionInstallationId });
   }
 
   async function saveMarketSnapSettings(settings) {
@@ -60,7 +77,7 @@
 
   function normalizeSettings(settings) {
     const deepCaptureConsentStatus = normalizeConsentStatus(settings.deepCaptureConsentStatus);
-    const deepCaptureEnabled = Boolean(settings.deepCaptureEnabled && deepCaptureConsentStatus === "active" && settings.deepCaptureConsentId);
+    const deepCaptureEnabled = Boolean(settings.organizationId && settings.deepCaptureEnabled && deepCaptureConsentStatus === "active" && settings.deepCaptureConsentId);
     return {
       ...settings,
       deepCaptureConsentStatus,

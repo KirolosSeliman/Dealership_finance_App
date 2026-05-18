@@ -454,11 +454,11 @@
       addMileageCandidates(candidates, "dom_text", `${node.innerText || ""} ${node.textContent || ""}`, 55);
     }
     candidates.sort((a, b) => b.score - a.score);
-    const chosen = candidates[0];
+    const chosen = candidates.find((candidate) => !candidate.rejectedReason);
     return {
       mileageKm: chosen?.mileageKm,
       evidence: chosen ? { matchedLabel: chosen.source, sourceText: chosen.sourceText, score: chosen.score } : undefined,
-      candidates: candidates.slice(0, 10),
+      candidates: candidates.slice(0, 12),
     };
   }
 
@@ -471,13 +471,32 @@
       if (!Number.isFinite(mileageKm)) continue;
       const sourceText = snippetAround(text, match[0]);
       const hasLabel = /\b(odometer|odom[eè]tre|mileage|kilometers|kilometres)\b/i.test(sourceText);
+      const rejectionReason = mileageRejectionReason(sourceText, source);
       candidates.push({
         mileageKm,
         source,
         sourceText,
-        score: weight + (hasLabel ? 18 : 0) + (mileageKm > 0 ? 4 : 0),
+        rejectedReason: rejectionReason,
+        score: weight + (hasLabel ? 18 : 0) + vehicleMileageContextBonus(sourceText, source) + (mileageKm > 0 ? 4 : 0) - (rejectionReason ? 120 : 0),
       });
     }
+  }
+
+  function mileageRejectionReason(sourceText, source = "") {
+    const text = `${source || ""} ${sourceText || ""}`;
+    if (/\b(transport|delivery|pickup|distance|estimate|shipping|livraison|ramassage)\b/i.test(text)) return "transport_distance_not_vehicle_odometer";
+    if (/\bCAD\b|\$\s*\d[\d,. ]*\s*\/\s*\d[\d,. ]*\s*km\b/i.test(text)) return "rate_or_price_per_distance_not_vehicle_odometer";
+    if (/\bper\s*km\b|\/\s*km\b/i.test(text)) return "per_km_rate_not_vehicle_odometer";
+    return "";
+  }
+
+  function vehicleMileageContextBonus(sourceText, source = "") {
+    const text = `${source || ""} ${sourceText || ""}`;
+    let score = 0;
+    if (/\b(odometer|odom[eÃ¨]tre|mileage|kilometers|kilometres)\b/i.test(text)) score += 24;
+    if (/\b(vehicle information|vehicle details|specs?|specifications)\b/i.test(text)) score += 18;
+    if (/vehicleSpecs|vehicleHero|label_value|data-odometer|data-mileage/i.test(source)) score += 16;
+    return score;
   }
 
   function extractVin(value) {
@@ -487,8 +506,17 @@
   function extractBestVin(doc, rawText, mainText) {
     const candidates = [];
     const addCandidates = (source, value, weight = 0) => {
-      for (const match of String(value || "").toUpperCase().matchAll(/\b[A-HJ-NPR-Z0-9]{17}\b/g)) {
-        candidates.push({ vin: match[0], source, sourceText: snippetAround(value, match[0]), weight });
+      const raw = String(value || "");
+      if (!raw) return;
+      const barcode = raw.match(/\bVIN\b[^\n|:;]{0,40}\bbarcode\b|\bbarcode\b[^\n|:;]{0,40}\bVIN\b/i);
+      if (barcode) {
+        candidates.push({ source, sourceText: snippetAround(raw, barcode[0]), weight: -100, rejectedReason: "vin_barcode_label_not_identifier" });
+      }
+      for (const match of raw.toUpperCase().matchAll(/\b[A-Z0-9]{17}\b/g)) {
+        const candidate = match[0];
+        const sourceText = snippetAround(raw, candidate);
+        const rejectedReason = rejectedVinReason(candidate, sourceText);
+        candidates.push({ vin: rejectedReason ? undefined : candidate, candidate, source, sourceText, weight: rejectedReason ? -100 + weight : weight, rejectedReason });
       }
     };
     addCandidates("main_text", mainText, 40);
@@ -504,12 +532,19 @@
     }
     addCandidates("html_attributes", extractAttributeText(doc.__openlaneHtml || ""), 75);
     candidates.sort((a, b) => b.weight - a.weight);
-    const chosen = candidates[0];
+    const chosen = candidates.find((candidate) => !candidate.rejectedReason && candidate.vin);
     return {
       vin: chosen?.vin,
       evidence: chosen ? { matchedLabel: chosen.source, sourceText: chosen.sourceText } : undefined,
-      candidates: candidates.slice(0, 10),
+      candidates: candidates.slice(0, 12),
     };
+  }
+
+  function rejectedVinReason(candidate, sourceText = "") {
+    if (!candidate) return "empty_vin_candidate";
+    if (!/^[A-HJ-NPR-Z0-9]{17}$/i.test(candidate)) return "invalid_vin_characters_or_length";
+    if (/\b(no additional information|not available|unknown)\b/i.test(sourceText)) return "non_identifier_label_text";
+    return "";
   }
 
   function extractMoneyByLabels(labels, labelNames = []) {
@@ -626,8 +661,7 @@
     const add = (source, value) => {
       const raw = String(value || "");
       if (!/carfax/i.test(raw)) return;
-      const urlMatch = raw.match(/https?:\/\/[^\s"'<>]*carfax[^\s"'<>]*/i);
-      candidates.push({ source, text: raw.slice(0, 240), url: urlMatch?.[0] });
+      candidates.push({ source, text: raw.slice(0, 240), url: carfaxUrlCandidate(raw) });
     };
     for (const link of Array.from(doc.querySelectorAll?.("a[href]") || [])) {
       add("link", `${link.getAttribute("href")} ${link.innerText || ""} ${link.getAttribute("aria-label") || ""} ${link.getAttribute("title") || ""}`);
@@ -656,6 +690,15 @@
       carfaxUrlStatus: carfaxUrl ? "url_found" : carfaxMentioned ? "text_only" : "missing",
       carfaxEvidence: candidates.slice(0, 8),
     };
+  }
+
+  function carfaxUrlCandidate(value) {
+    const raw = String(value || "");
+    const absolute = raw.match(/https?:\/\/[^\s"'<>)]*(?:carfax|report|history)[^\s"'<>)]*/i)?.[0];
+    if (absolute) return absolute;
+    const relative = raw.match(/\/[A-Za-z0-9._~:/?#[\]@!$&()*+,;=%-]*(?:carfax|report|history)[A-Za-z0-9._~:/?#[\]@!$&()*+,;=%-]*/i)?.[0];
+    if (relative && !/\.(?:svg|png|jpe?g|webp|avif|css|js)(?:$|[?#])/i.test(relative)) return relative;
+    return undefined;
   }
 
   function extractCarfaxEvidenceFromHtml(html) {

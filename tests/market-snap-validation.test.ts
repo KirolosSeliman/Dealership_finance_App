@@ -365,7 +365,51 @@ test("Deal Radar save payload requires an organization and a listing object", ()
       listedPrice: 15000,
     },
   }).success, true);
+  const nullableValuation = saveListingSchema.safeParse({
+    organizationId,
+    listing: {
+      sourceName: "OpenLane",
+      sourceType: "auction",
+      title: "2017 Hyundai Tucson",
+      year: 2017,
+      make: "Hyundai",
+      model: "Tucson",
+    },
+    valuation: null,
+  });
+  assert.equal(nullableValuation.success, true);
+  assert.equal(nullableValuation.data?.valuation, undefined);
   assert.equal(saveListingSchema.safeParse({ organizationId }).success, false);
+});
+
+test("Market Snap validation rejects mileage that is evidenced as transport distance", () => {
+  const result = marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "active_listing",
+    captureKind: "observation",
+    title: "2017 Hyundai Tucson AWD",
+    year: 2017,
+    make: "Hyundai",
+    model: "Tucson",
+    mileageKm: 185,
+    currentBid: 4600,
+    fieldEvidence: {
+      mileageKm: [{
+        field: "mileageKm",
+        value: 185,
+        normalizedValue: 185,
+        sourceType: "section_map",
+        sourceName: "OpenLane DOM",
+        sourceText: "Transport estimate CAD $428 / 185km pickup to delivery",
+        confidenceScore: 70,
+        capturedAt: "2026-05-17T12:00:00.000Z",
+      }],
+    },
+  });
+
+  assert.equal(result.success, false);
 });
 
 test("Market Snap import validation allows row source override", () => {

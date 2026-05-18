@@ -101,6 +101,7 @@ export interface ExtractionFieldEvidence {
   confidenceScore: number;
   capturedAt: string;
   consentId?: string;
+  rejectionReason?: string;
 }
 
 export interface RustFeatures {
@@ -344,7 +345,7 @@ export interface MarketListingPhoto {
   alt?: string;
   width?: number;
   height?: number;
-  source?: "img" | "srcset" | "picture" | "background-image" | "link";
+  source?: "img" | "srcset" | "picture" | "background-image" | "link" | "observed_network";
 }
 
 export interface MarketListingVideo {

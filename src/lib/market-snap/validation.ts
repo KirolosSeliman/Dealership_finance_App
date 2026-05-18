@@ -90,7 +90,7 @@ const marketListingPhotoSchema = z.object({
   alt: z.string().trim().max(240).optional(),
   width: z.coerce.number().int().min(0).max(20000).optional(),
   height: z.coerce.number().int().min(0).max(20000).optional(),
-  source: z.enum(["img", "srcset", "picture", "background-image", "link"]).optional(),
+  source: z.enum(["img", "srcset", "picture", "background-image", "link", "observed_network"]).optional(),
 }).strict();
 const marketListingVideoSchema = z.object({
   url: httpUrl,
@@ -150,6 +150,7 @@ const extractionFieldEvidenceSchema = z.object({
   endpointPattern: z.string().trim().max(240).optional(),
   pageType: z.string().trim().max(80).optional(),
   captureKind: z.string().trim().max(80).optional(),
+  rejectionReason: z.string().trim().max(240).optional(),
   confidenceScore: z.coerce.number().finite().min(0).max(100),
   capturedAt: z.string().datetime(),
   consentId: z.string().uuid().optional(),
@@ -478,6 +479,14 @@ function enforceCaptureContract(value: Partial<z.infer<typeof marketListingPaylo
     });
   }
 
+  if (value.mileageKm !== undefined && hasOnlyTransportMileageEvidence(value.fieldEvidence?.mileageKm)) {
+    context.addIssue({
+      code: "custom",
+      path: ["mileageKm"],
+      message: "Mileage evidence appears to be transport distance, not vehicle odometer.",
+    });
+  }
+
   for (const field of ["currentBid", "currentOffer", "bestOffer"] as const) {
     if (value.priceSemantics?.[field] && value.priceSemantics[field] !== "observation") {
       context.addIssue({
@@ -500,6 +509,19 @@ function enforceCaptureContract(value: Partial<z.infer<typeof marketListingPaylo
   }
 }
 
+function hasOnlyTransportMileageEvidence(evidence: Array<{ sourceText?: string; rejectionReason?: string }> | undefined) {
+  if (!evidence?.length) return false;
+  const acceptedVehicleEvidence = evidence.some((item) => {
+    const text = String(item.sourceText || "");
+    if (item.rejectionReason) return false;
+    return /\b(odometer|odom[eè]tre|mileage|vehicle information|vehicle details|specs?|specifications)\b/i.test(text)
+      && !/\b(transport|delivery|pickup|distance|estimate|shipping|livraison|ramassage)\b/i.test(text);
+  });
+  if (acceptedVehicleEvidence) return false;
+  return evidence.some((item) => /\b(transport|delivery|pickup|distance|estimate|shipping|livraison|ramassage)\b/i.test(String(item.sourceText || item.rejectionReason || ""))
+    || /\bCAD\b|\$\s*\d[\d,. ]*\s*\/\s*\d[\d,. ]*\s*km\b|\/\s*km\b/i.test(String(item.sourceText || "")));
+}
+
 export const marketListingPayloadSchema = marketListingPayloadBaseSchema.superRefine(enforceCaptureContract);
 const listingWithoutOrganizationSchema = marketListingPayloadBaseSchema
   .omit({ organizationId: true })
@@ -520,7 +542,7 @@ export const valuationRequestSchema = z.object({
 export const saveListingSchema = z.object({
   organizationId: z.string().uuid(),
   listing: listingWithoutOrganizationSchema,
-  valuation: z.record(z.string(), z.unknown()).optional(),
+  valuation: z.record(z.string(), z.unknown()).nullable().optional().transform((value) => value ?? undefined),
 });
 
 export const dealRadarQuerySchema = z.object({

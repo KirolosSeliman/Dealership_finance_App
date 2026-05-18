@@ -25,6 +25,9 @@
     observer: null,
     readyRetries: 0,
     pendingRun: null,
+    settingsRefreshTimer: 0,
+    settingsRefreshing: false,
+    networkObserverStatus: null,
   };
 
   boot();
@@ -38,6 +41,7 @@
       now: () => Date.now(),
     });
     observeDynamicPage();
+    observeSettingsChanges();
     await runRuntime({ force: false, reason: "boot" });
   }
 
@@ -123,6 +127,38 @@
     patchHistory("replaceState");
     window.addEventListener("popstate", onRouteChange);
     window.addEventListener("dealerflow:locationchange", onRouteChange);
+  }
+
+  function observeSettingsChanges() {
+    if (!chrome.storage?.onChanged?.addListener) return;
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== "sync") return;
+      if (!Object.keys(changes || {}).some((key) => key in window.DealerFlowMarketSnapStorage.DEFAULT_SETTINGS)) return;
+      clearTimeout(STATE.settingsRefreshTimer);
+      STATE.settingsRefreshTimer = setTimeout(() => refreshRuntimeSettings("settings-change"), 250);
+    });
+  }
+
+  async function refreshRuntimeSettings(reason = "settings-change") {
+    if (STATE.settingsRefreshing) return;
+    STATE.settingsRefreshing = true;
+    try {
+      STATE.settings = await refreshDeepCaptureConsentState(await window.DealerFlowMarketSnapStorage.getSettings());
+      syncDeepCaptureObserver();
+      STATE.lastSignature = "";
+      clearExtractionCache();
+      STATE.widget?.render({
+        status: "detecting",
+        listing: STATE.listing,
+        valuation: STATE.valuation,
+        message: deepCaptureRuntimeMessage(),
+      });
+      scheduleRuntime(0, reason);
+    } catch (error) {
+      STATE.widget?.render({ status: "warning", listing: STATE.listing, valuation: STATE.valuation, message: formatError(error) });
+    } finally {
+      STATE.settingsRefreshing = false;
+    }
   }
 
   function patchHistory(method) {
@@ -291,10 +327,11 @@
 
   function syncDeepCaptureObserver() {
     if (hasActiveDeepCaptureConsent()) {
-      window.DealerFlowOpenLaneNetworkObserver?.startOpenLaneNetworkObserver?.(STATE.settings);
+      STATE.networkObserverStatus = window.DealerFlowOpenLaneNetworkObserver?.startOpenLaneNetworkObserver?.(STATE.settings) || { enabled: false, reason: "network_observer_unavailable" };
       return;
     }
     window.DealerFlowOpenLaneNetworkObserver?.stopOpenLaneNetworkObserver?.();
+    STATE.networkObserverStatus = { enabled: false, reason: "deep_capture_inactive" };
   }
 
   function hasActiveDeepCaptureConsent() {
@@ -313,6 +350,10 @@
         captureScopes: deepCaptureScopes(),
         deepCaptureConsentId: STATE.settings.deepCaptureConsentId,
         sourceEvidence: buildSourceEvidence(listing),
+        openlaneMetadata: {
+          ...(listing.openlaneMetadata || {}),
+          deepCaptureRuntime: deepCaptureRuntimeState(),
+        },
       };
     }
     const basic = { ...listing };
@@ -326,8 +367,25 @@
       ...basic,
       captureLevel: "basic_dom",
       captureScopes: ["dom_visible"],
-      openlaneMetadata: metadata,
+      openlaneMetadata: { ...metadata, deepCaptureRuntime: deepCaptureRuntimeState() },
     };
+  }
+
+  function deepCaptureRuntimeState() {
+    return {
+      active: hasActiveDeepCaptureConsent(),
+      consentStatus: STATE.settings?.deepCaptureConsentStatus || "off",
+      consentIdPresent: Boolean(STATE.settings?.deepCaptureConsentId),
+      observePageNetworkData: Boolean(STATE.settings?.observePageNetworkData),
+      networkObserver: STATE.networkObserverStatus || { enabled: false, reason: "unknown" },
+    };
+  }
+
+  function deepCaptureRuntimeMessage() {
+    const state = deepCaptureRuntimeState();
+    if (state.active) return state.networkObserver.enabled ? "Deep Capture active. Network observer is on." : `Deep Capture active. Network observer ${state.networkObserver.reason || "off"}.`;
+    if (state.consentStatus === "paused") return "Deep Capture paused. Check Dealer Flow connection and consent status.";
+    return "Deep Capture off. Consent is needed for expanded capture.";
   }
 
   function deepCaptureScopes() {

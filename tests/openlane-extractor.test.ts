@@ -89,6 +89,64 @@ test("OpenLane extraction cache clearing refreshes data between VDP route change
   assert.equal(classifier.classifyOpenLanePage(doc, secondHref).evidence.some((item) => item.marker === "vehicle_identity"), true);
 });
 
+test("OpenLane extractor rejects VIN barcode label noise and keeps rejection reasons", () => {
+  const listing = extractor.extractOpenLaneFixture(`
+    <main class="vdp-page">
+      <section class="vehicle-hero">
+        <h1>2017 Hyundai Tucson AWD</h1>
+        <button aria-label="VIN barcode">VIN barcode</button>
+        <button data-testid="copy-vin" data-vin="KM8J3CA46HU123456">Copy VIN KM8J3CA46HU123456</button>
+      </section>
+      <section class="vehicle-specs">Odometer 111,486 KM</section>
+      <section class="bid-panel">Current Bid $4,600</section>
+      <span>23 total photos</span>
+    </main>
+  `, "https://app.openlane.ca/vdp/hyundai-tucson");
+  const debug = listing.extractedFields as { debug?: { vinCandidates?: Array<{ vin?: string; rejectedReason?: string; sourceText?: string }> } };
+
+  assert.equal(listing.vin, "KM8J3CA46HU123456");
+  assert.ok(debug.debug?.vinCandidates?.some((candidate) => /barcode/i.test(String(candidate.sourceText)) && candidate.rejectedReason));
+  assert.equal(debug.debug?.vinCandidates?.some((candidate) => candidate.vin === "BARCODE"), false);
+});
+
+test("OpenLane mileage resolver chooses odometer over transport distance", () => {
+  const listing = extractor.extractOpenLaneFixture(`
+    <main class="vdp-page">
+      <section class="transport">Transport estimate CAD $428 / 185km pickup to delivery</section>
+      <section class="vehicle-hero">
+        <h1>2017 Hyundai Tucson AWD</h1>
+        <p>VIN KM8J3CA46HU123456</p>
+      </section>
+      <section class="vehicle-specs">Vehicle information 111,486 KM</section>
+      <section class="bid-panel">Current Bid $4,600</section>
+      <span>23 total photos</span>
+    </main>
+  `, "https://app.openlane.ca/vdp/hyundai-tucson");
+  const debug = listing.extractedFields as { debug?: { mileageCandidates?: Array<{ mileageKm?: number; rejectedReason?: string; sourceText?: string }> } };
+
+  assert.equal(listing.title, "2017 Hyundai Tucson AWD");
+  assert.equal(listing.currentBid, 4600);
+  assert.equal(listing.mileageKm, 111486);
+  assert.equal(listing.imageCount, 23);
+  assert.ok(debug.debug?.mileageCandidates?.some((candidate) => candidate.mileageKm === 185 && /transport/i.test(String(candidate.rejectedReason))));
+});
+
+test("OpenLane CARFAX resolver extracts relative and data URL metadata without fetching reports", () => {
+  const listing = extractor.extractOpenLaneFixture(`
+    <main class="vdp-page">
+      <h1>2017 Hyundai Tucson AWD</h1>
+      <p>VIN KM8J3CA46HU123456</p>
+      <p>Odometer 111,486 KM</p>
+      <button aria-label="View CARFAX Canada report" data-href="/reports/carfax/TUCSON123">CARFAX Canada</button>
+      <section class="bid-panel">Current Bid $4,600</section>
+      <span>23 total photos</span>
+    </main>
+  `, "https://app.openlane.ca/vdp/hyundai-tucson");
+
+  assert.equal(listing.carfaxUrl, "https://app.openlane.ca/reports/carfax/TUCSON123");
+  assert.equal(listing.carfaxUrlStatus, "url_found");
+});
+
 test("OpenLane section map isolates noisy English VDP regions", () => {
   const html = fixture("openlane-vdp-purchased-selling-price.html");
   const map = sectionMap.buildOpenLaneSectionMapFromHtml(html, "https://app.openlane.ca/vdp/3KPFL4A72HE119966");

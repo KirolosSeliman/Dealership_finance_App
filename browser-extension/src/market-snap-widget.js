@@ -210,6 +210,7 @@
     const rejectedCandidates = (listing?.debug?.rejectedCandidates || []).length || (debug.titleCandidates || []).filter((candidate) => candidate.rejectedReason).length + (debug.mediaRejected || []).length;
     const networkCandidates = debug.networkCandidates || {};
     const safeExpansion = listing?.openlaneMetadata?.safeExpansion;
+    const deepCaptureRuntime = listing?.openlaneMetadata?.deepCaptureRuntime || {};
     return [
       `<p>Confidence: ${escapeHtml(valuation?.confidenceScore ?? listing?.extractionConfidenceScore ?? "-")}</p>`,
       `<p>Warnings: ${escapeHtml(warnings.length)}</p>`,
@@ -222,6 +223,7 @@
       `<p>Dealer notes: ${escapeHtml(condition.dealerNotes ? "visible" : "-")}</p>`,
       `<p>Rejected candidates: ${escapeHtml(rejectedCandidates)}</p>`,
       `<p>Network candidates: ${escapeHtml(networkCandidateCount(networkCandidates))}</p>`,
+      `<p>Deep Capture runtime: ${escapeHtml(deepCaptureRuntimeLabel(deepCaptureRuntime))}</p>`,
       `<p>Safe expansion: ${escapeHtml(safeExpansion ? `${safeExpansion.clicked?.length || 0} opened / ${safeExpansion.skipped?.length || 0} skipped` : "-")}</p>`,
       `<p>Evidence</p>`,
       `<ul>${evidence.slice(0, 4).map((item) => `<li>${escapeHtml(item.sourceText || item.marker || item.evidenceType || "visible_page_text")}</li>`).join("")}</ul>`,
@@ -246,6 +248,13 @@
 
   function networkCandidateCount(candidates) {
     return Number(candidates.vinCandidates?.length || 0) + Number(candidates.mediaCandidates?.length || 0) + Number(candidates.conditionCandidates?.length || 0);
+  }
+
+  function deepCaptureRuntimeLabel(runtime = {}) {
+    const observer = runtime.networkObserver || {};
+    return runtime.active
+      ? `active, consent ${runtime.consentIdPresent ? "present" : "missing"}, network ${observer.enabled ? "on" : observer.reason || "off"}`
+      : `${runtime.consentStatus || "off"}, consent ${runtime.consentIdPresent ? "present" : "missing"}, network ${observer.reason || "off"}`;
   }
 
   function priceStateLabel(listing) {

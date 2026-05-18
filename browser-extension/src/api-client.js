@@ -66,11 +66,12 @@
   async function saveListing(first, second, third) {
     const { settings, listing, valuation } = await requestArgs(first, second, third);
     validateMarketSnapSettings(settings);
-    return requestJson(settings, "/api/market-snap/save-listing", {
+    const body = {
       organizationId: settings.organizationId,
       listing,
-      valuation,
-    });
+    };
+    if (valuation && typeof valuation === "object") body.valuation = valuation;
+    return requestJson(settings, "/api/market-snap/save-listing", body);
   }
 
   async function captureListing(first, second) {
