@@ -19,7 +19,7 @@ const extractor = require("../browser-extension/src/openlane-extractor.js") as {
 const stableCapture = require("../browser-extension/src/openlane-stable-capture.js") as {
   extractStableOpenLaneListing: (doc: Record<string, unknown>, href: string, settings: Record<string, unknown>, options?: Record<string, unknown>) => Promise<{
     listing: Record<string, unknown>;
-    readiness: { readyToCapture: boolean; state: string; vinStatus: string; carfaxStatus: string; missingData: string[] };
+    readiness: { readyToCapture: boolean; state: string; blockedReason?: string; vinStatus: string; carfaxStatus: string; missingData: string[] };
   }>;
 };
 const networkObserver = require("../browser-extension/src/openlane-network-observer.js") as {
@@ -41,10 +41,15 @@ test("Phase 8 fixtures protect VIN extraction sources and invalid VIN rejection"
   const networkCandidates = networkObserver.extractCandidatesFromNetworkPayload(networkPayload, "https://app.openlane.ca/api/vdp/KM8J3CA46HU123456");
 
   assert.equal(visibleVin.vin, "2T3R1RFV5MW123456");
+  assert.ok(((visibleVin.fieldEvidence as { vin?: unknown[] }).vin || []).length > 0);
+  assert.ok(((visibleVin.extractedFields as { debug?: { vinCandidates?: unknown[] } }).debug?.vinCandidates || []).length > 0);
   assert.equal(urlOnlyVin.vin, "3KPFL4A72HE119966");
+  assert.match(String(((urlOnlyVin.fieldEvidence as { vin?: Array<{ sourceText?: string }> }).vin || [])[0]?.sourceText || ""), /3KPFL4A72HE119966/);
   assert.equal(attributeVin.vin, "3KPFL4A72HE119966");
+  assert.ok(((attributeVin.fieldEvidence as { vin?: Array<{ sourceType?: string }> }).vin || []).some((item) => item.sourceType === "dom_attribute"));
   assert.equal(networkCandidates.vinCandidates[0]?.vin, "KM8J3CA46HU123456");
   assert.equal(invalidVin.vin, undefined);
+  assert.ok((invalidVin.missingData as string[]).includes("vin"));
 });
 
 test("Phase 8 fixtures protect CARFAX URL, text-only, missing, and network evidence paths", () => {
@@ -73,6 +78,8 @@ test("Phase 8 fixtures protect CARFAX URL, text-only, missing, and network evide
   assert.equal(missing.carfaxUrl, undefined);
   assert.equal(merged.carfaxUrl, "https://app.openlane.ca/vehicle-history/carfax/TUCSON999");
   assert.equal(merged.carfaxUrlStatus, "url_found");
+  assert.ok(((merged.fieldEvidence as { carfaxUrl?: Array<{ sourceType?: string }> }).carfaxUrl || []).some((item) => item.sourceType === "network_json"));
+  assert.ok(((merged.fieldEvidence as { vin?: Array<{ sourceType?: string }> }).vin || []).some((item) => item.sourceType === "network_json"));
   assert.doesNotMatch(sanitized, /Bearer should-not-appear|session=secret|buyer@example\.com|eyJaaaaaaaa/i);
 });
 
@@ -97,10 +104,14 @@ test("Phase 8 fixtures protect SPA readiness and route-change cache clearing", a
 
   assert.equal(shell.readiness.readyToCapture, false);
   assert.equal(shell.readiness.state, "unsupported_page");
+  assert.equal((shell.listing.openlaneMetadata as { stableCaptureReadiness?: { readyToCapture?: boolean; state?: string } }).stableCaptureReadiness?.readyToCapture, false);
   assert.equal(loaded.readiness.readyToCapture, true);
   assert.equal(loaded.listing.vin, "KM8J3CA46HU123456");
+  assert.equal((loaded.listing.openlaneMetadata as { stableCaptureReadiness?: { readyToCapture?: boolean; vinStatus?: string } }).stableCaptureReadiness?.readyToCapture, true);
+  assert.equal((loaded.listing.openlaneMetadata as { stableCaptureReadiness?: { vinStatus?: string } }).stableCaptureReadiness?.vinStatus, "found");
   assert.equal(first.listing.vin, "KM8J3CA46HU123456");
   assert.equal(second.listing.vin, "4T1G11AK8LU123456");
+  assert.equal((second.listing.openlaneMetadata as { stableCaptureReadiness?: { readyToCapture?: boolean } }).stableCaptureReadiness?.readyToCapture, true);
 });
 
 test("Phase 8 fixtures protect active observation and post-sale outcome semantics", () => {
