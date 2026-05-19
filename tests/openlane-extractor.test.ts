@@ -43,6 +43,7 @@ const networkObserver = require("../browser-extension/src/openlane-network-obser
     conditionCandidates: Array<{ text: string }>;
     transportCandidates: Array<{ field: string; value: unknown }>;
     sanitizedKeys: string[];
+    carfaxDiagnostics?: { carfaxNetworkCandidateCount?: number };
   };
   sanitizeNetworkPayload: (payload: unknown) => unknown;
   mergeNetworkEvidenceIntoListing: (listing: Record<string, unknown>, evidence: unknown[]) => Record<string, unknown>;
@@ -310,6 +311,8 @@ test("OpenLane CARFAX resolver extracts relative and data URL metadata without f
 
   assert.equal(listing.carfaxUrl, "https://app.openlane.ca/reports/carfax/TUCSON123");
   assert.equal(listing.carfaxUrlStatus, "url_found");
+  assert.ok(((listing.openlaneMetadata as { carfaxDiagnostics?: { carfaxDataHrefCandidateCount?: number; carfaxTextOnlyCandidateCount?: number } }).carfaxDiagnostics?.carfaxDataHrefCandidateCount ?? 0) > 0);
+  assert.equal((listing.openlaneMetadata as { carfaxDiagnostics?: { carfaxTextOnlyCandidateCount?: number } }).carfaxDiagnostics?.carfaxTextOnlyCandidateCount, 0);
 });
 
 test("OpenLane CARFAX resolver extracts data-url metadata", () => {
@@ -326,6 +329,7 @@ test("OpenLane CARFAX resolver extracts data-url metadata", () => {
 
   assert.equal(listing.carfaxUrl, "https://app.openlane.ca/vehicle-history/carfax/TUCSON456");
   assert.equal(listing.carfaxUrlStatus, "url_found");
+  assert.ok(((listing.openlaneMetadata as { carfaxDiagnostics?: { carfaxDataUrlCandidateCount?: number } }).carfaxDiagnostics?.carfaxDataUrlCandidateCount ?? 0) > 0);
 });
 
 test("OpenLane CARFAX resolver pairs nearby report metadata with visible Carfax zone text", () => {
@@ -348,6 +352,7 @@ test("OpenLane CARFAX resolver pairs nearby report metadata with visible Carfax 
   assert.equal(listing.carfaxUrl, "https://app.openlane.ca/vehicle-history/reports/TUCSON789");
   assert.equal(listing.carfaxUrlStatus, "url_found");
   assert.ok((listing.openlaneMetadata as { carfaxEvidence?: Array<{ source?: string }> }).carfaxEvidence?.some((item) => item.source === "html_carfax_zone"));
+  assert.ok(((listing.openlaneMetadata as { carfaxDiagnostics?: { carfaxHtmlZoneCandidateCount?: number } }).carfaxDiagnostics?.carfaxHtmlZoneCandidateCount ?? 0) > 0);
 });
 
 test("OpenLane CARFAX resolver scans safe generic attributes and rejects asset URLs", () => {
@@ -373,8 +378,11 @@ test("OpenLane CARFAX resolver scans safe generic attributes and rejects asset U
   assert.equal(genericAttribute.carfaxUrl, "https://app.openlane.ca/history/carfax/TUCSON789");
   assert.equal(genericAttribute.carfaxUrlStatus, "url_found");
   assert.ok((genericAttribute.openlaneMetadata as { carfaxEvidence?: Array<{ source?: string }> }).carfaxEvidence?.some((item) => item.source === "safe_dom_attributes"));
+  assert.ok(((genericAttribute.openlaneMetadata as { carfaxDiagnostics?: { carfaxSafeAttributeCandidateCount?: number } }).carfaxDiagnostics?.carfaxSafeAttributeCandidateCount ?? 0) > 0);
   assert.equal(logoOnly.carfaxUrl, undefined);
   assert.equal(logoOnly.carfaxUrlStatus, "text_only");
+  assert.ok(((logoOnly.openlaneMetadata as { carfaxDiagnostics?: { carfaxTextOnlyCandidateCount?: number; carfaxLinkCandidateCount?: number } }).carfaxDiagnostics?.carfaxTextOnlyCandidateCount ?? 0) > 0);
+  assert.equal((logoOnly.openlaneMetadata as { carfaxDiagnostics?: { carfaxLinkCandidateCount?: number } }).carfaxDiagnostics?.carfaxLinkCandidateCount, 0);
 });
 
 test("OpenLane CARFAX status is explicit for button text and missing pages", () => {
@@ -400,10 +408,12 @@ test("OpenLane CARFAX status is explicit for button text and missing pages", () 
   assert.equal(textOnly.carfaxAvailable, true);
   assert.equal(textOnly.carfaxUrl, undefined);
   assert.equal(textOnly.carfaxUrlStatus, "text_only");
+  assert.ok(((textOnly.openlaneMetadata as { carfaxDiagnostics?: { carfaxTextOnlyCandidateCount?: number } }).carfaxDiagnostics?.carfaxTextOnlyCandidateCount ?? 0) > 0);
   assert.equal(missing.carfaxMentioned, false);
   assert.equal(missing.carfaxAvailable, false);
   assert.equal(missing.carfaxUrl, undefined);
   assert.equal(missing.carfaxUrlStatus, "missing");
+  assert.equal((missing.openlaneMetadata as { carfaxDiagnostics?: { carfaxTextOnlyCandidateCount?: number } }).carfaxDiagnostics?.carfaxTextOnlyCandidateCount, 0);
 });
 
 test("OpenLane section map isolates noisy English VDP regions", () => {
@@ -602,6 +612,7 @@ test("OpenLane network observer extracts DevTools-style vehicle JSON candidates 
   assert.ok(candidates.fieldCandidates.some((item) => item.field === "location" && item.value === "Montreal, QC"));
   assert.ok(candidates.fieldCandidates.some((item) => item.field === "carfaxUrl" && String(item.value).endsWith("/reports/carfax/TUCSON123")));
   assert.ok(candidates.transportCandidates.some((item) => item.field === "transportDistanceKm" && item.value === 185));
+  assert.equal(candidates.carfaxDiagnostics?.carfaxNetworkCandidateCount, 1);
   assert.doesNotMatch(serialized, /Bearer should-not-appear|session=secret|authToken/i);
 });
 
@@ -630,7 +641,7 @@ test("OpenLane network merge reapplies canonical field evidence after Deep Captu
     endpointPattern: "app.openlane.ca/api/vdp/:id",
     sanitizedKeys: candidates.sanitizedKeys,
     candidates,
-  }]) as { fieldEvidence?: Record<string, Array<{ sourceType?: string; endpointPattern?: string; consentId?: string }>>; vin?: string; carfaxUrl?: string; mileageKm?: number; openlaneMetadata?: { networkEvidence?: Array<{ candidateCounts?: { carfax?: number } }> } };
+  }]) as { fieldEvidence?: Record<string, Array<{ sourceType?: string; endpointPattern?: string; consentId?: string }>>; vin?: string; carfaxUrl?: string; mileageKm?: number; openlaneMetadata?: { networkEvidence?: Array<{ candidateCounts?: { carfax?: number } }>; carfaxDiagnostics?: { carfaxNetworkCandidateCount?: number } } };
 
   assert.equal(merged.vin, "KM8J3CA46HU123456");
   assert.equal(merged.mileageKm, 111486);
@@ -638,6 +649,7 @@ test("OpenLane network merge reapplies canonical field evidence after Deep Captu
   assert.ok(merged.fieldEvidence?.vin?.some((item) => item.sourceType === "network_json" && item.endpointPattern === "app.openlane.ca/api/vdp/:id"));
   assert.ok(merged.fieldEvidence?.carfaxUrl?.some((item) => item.sourceType === "network_json"));
   assert.equal(merged.openlaneMetadata?.networkEvidence?.[0]?.candidateCounts?.carfax, 1);
+  assert.equal(merged.openlaneMetadata?.carfaxDiagnostics?.carfaxNetworkCandidateCount, 1);
 });
 
 test("OpenLane network VIN candidate beats visible fallback after Deep Capture merge", () => {

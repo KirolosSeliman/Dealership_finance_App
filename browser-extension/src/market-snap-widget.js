@@ -253,8 +253,10 @@
       `<p>Carfax URL: ${safeListing.carfaxUrl ? `<a href="${escapeHtml(safeListing.carfaxUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(safeListing.carfaxUrl)}</a>` : "-"}</p>`,
       `<p>Carfax evidence source: ${safeHtml(carfaxEvidenceLabel(safeListing))}</p>`,
       safeListing.carfaxUrlStatus === "text_only" ? `<p>Carfax warning: ${safeHtml("Visible text only; URL was not available in page evidence.")}</p>` : "",
+      `<p>Carfax diagnostics: ${safeHtml(carfaxDiagnosticsLabel(safeListing))}</p>`,
       `<p>Network observer: ${safeHtml(networkObserverLabel(deepCaptureRuntime))}</p>`,
       `<p>Network evidence count: ${safeHtml(String(networkEvidenceCount(safeListing, deepCaptureRuntime)))}</p>`,
+      networkObserverDiagnosticMessage(safeListing, deepCaptureRuntime) ? `<p>Network diagnostic: ${safeHtml(networkObserverDiagnosticMessage(safeListing, deepCaptureRuntime))}</p>` : "",
       `<p>Safe expansion: ${safeHtml(safeExpansion ? `${safeExpansion.clicked?.length || 0} opened / ${safeExpansion.skipped?.length || 0} skipped` : "-")}</p>`,
       `<p>Missing data: ${safeHtml(missing.join(", ") || "-")}</p>`,
       `<p>Extraction confidence: ${safeHtml(valuation?.confidenceScore ?? safeListing.extractionConfidenceScore ?? "-")}</p>`,
@@ -355,6 +357,28 @@
   function networkEvidenceCount(listing, runtime = {}) {
     const safeListing = listing || {};
     return Number(runtime.networkEvidenceCount ?? runtime.networkObserver?.observationCount ?? safeListing.openlaneMetadata?.networkEvidence?.length ?? 0);
+  }
+
+  function carfaxDiagnosticsLabel(listing = {}) {
+    const diagnostics = listing.openlaneMetadata?.carfaxDiagnostics || {};
+    return [
+      `links ${Number(diagnostics.carfaxLinkCandidateCount || 0)}`,
+      `data-href ${Number(diagnostics.carfaxDataHrefCandidateCount || 0)}`,
+      `data-url ${Number(diagnostics.carfaxDataUrlCandidateCount || 0)}`,
+      `html ${Number(diagnostics.carfaxHtmlZoneCandidateCount || 0)}`,
+      `safe-attrs ${Number(diagnostics.carfaxSafeAttributeCandidateCount || 0)}`,
+      `network ${Number(diagnostics.carfaxNetworkCandidateCount || 0)}`,
+      `text-only ${Number(diagnostics.carfaxTextOnlyCandidateCount || 0)}`,
+    ].join(", ");
+  }
+
+  function networkObserverDiagnosticMessage(listing = {}, runtime = {}) {
+    const observer = runtime.networkObserver || {};
+    const count = networkEvidenceCount(listing, runtime);
+    if (observer.enabled && count === 0) {
+      return "Network observer is enabled but no OpenLane vehicle JSON has been observed yet. Reload the VDP or check early hook/endpoint allowlist.";
+    }
+    return "";
   }
 
   function deepCaptureStatusLabel(listing) {

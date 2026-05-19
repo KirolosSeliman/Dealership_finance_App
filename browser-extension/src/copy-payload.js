@@ -55,12 +55,23 @@
       carfaxStatus: readiness.carfaxStatus || safeListing.carfaxUrlStatus || "missing",
       carfaxUrl: safeListing.carfaxUrl || "",
       carfaxEvidenceSource: safeListing.openlaneMetadata?.carfaxEvidence?.[0]?.source || safeListing.carfax?.evidence?.[0]?.source || "",
+      carfaxDiagnostics: safeListing.openlaneMetadata?.carfaxDiagnostics || {},
       networkObserver: runtime.networkObserver || null,
       networkEvidenceCount: runtime.networkEvidenceCount ?? safeListing.openlaneMetadata?.networkEvidence?.length ?? 0,
+      networkObserverMessage: networkObserverMessage(runtime, safeListing),
       safeExpansion: safeListing.openlaneMetadata?.safeExpansion || null,
       missingData: readiness.missingData || safeListing.missingData || [],
       extractionConfidence: safeListing.extractionConfidenceScore,
     });
+  }
+
+  function networkObserverMessage(runtime = {}, listing = {}) {
+    const observer = runtime.networkObserver || {};
+    const count = Number(runtime.networkEvidenceCount ?? observer.observationCount ?? listing.openlaneMetadata?.networkEvidence?.length ?? 0);
+    if (observer.enabled && count === 0) {
+      return "Network observer is enabled but no OpenLane vehicle JSON has been observed yet. Reload the VDP or check early hook/endpoint allowlist.";
+    }
+    return "";
   }
 
   function sanitizeDebugValue(value) {

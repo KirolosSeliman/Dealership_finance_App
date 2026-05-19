@@ -250,11 +250,15 @@ test("Market Snap copy payload builder returns sanitized readiness and debug evi
       },
       deepCaptureRuntime: {
         active: true,
-        networkEvidenceCount: 1,
+        networkEvidenceCount: 0,
         networkObserver: { enabled: true, reason: "observing_page_generated_responses" },
       },
-      networkEvidence: [{ endpointPattern: "app.openlane.ca/api/vdp/:id", token: "secret-token" }],
+      networkEvidence: [],
       carfaxEvidence: [{ source: "network_json" }],
+      carfaxDiagnostics: {
+        carfaxNetworkCandidateCount: 0,
+        carfaxTextOnlyCandidateCount: 1,
+      },
     },
   }, {
     valuation: { confidenceScore: 88 },
@@ -265,7 +269,9 @@ test("Market Snap copy payload builder returns sanitized readiness and debug evi
   assert.equal((payload.readinessSummary as { readyToCapture?: boolean }).readyToCapture, true);
   assert.equal((payload.readinessSummary as { vinEvidenceSource?: string }).vinEvidenceSource, "header_chip");
   assert.equal((payload.readinessSummary as { carfaxEvidenceSource?: string }).carfaxEvidenceSource, "network_json");
-  assert.equal((payload.readinessSummary as { networkEvidenceCount?: number }).networkEvidenceCount, 1);
+  assert.equal((payload.readinessSummary as { networkEvidenceCount?: number }).networkEvidenceCount, 0);
+  assert.equal((payload.readinessSummary as { carfaxDiagnostics?: { carfaxTextOnlyCandidateCount?: number } }).carfaxDiagnostics?.carfaxTextOnlyCandidateCount, 1);
+  assert.match(String((payload.readinessSummary as { networkObserverMessage?: string }).networkObserverMessage), /enabled but no OpenLane vehicle JSON/i);
   assert.equal((payload.valuation as { confidenceScore?: number }).confidenceScore, 88);
   assert.doesNotMatch(JSON.stringify(payload), /should-not-copy|secret-token/i);
 });

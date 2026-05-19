@@ -164,6 +164,7 @@
         sectionMapSummary: summarizeSectionMapForDebug(textRegions.sectionMap),
         mediaFiltering: { rejected: mediaRejected },
         carfaxEvidence: carfax.carfaxEvidence,
+        carfaxDiagnostics: carfax.carfaxDiagnostics,
         conditionDetails,
         dealerNotes: conditionDetails.dealerNotes,
         purchaseStatus: purchaseEconomics.purchaseStatus,
@@ -780,26 +781,39 @@
 
   function extractCarfaxInfo(doc, href, text = "") {
     const candidates = [];
-    const add = (source, value) => {
+    const add = (source, value, metadata = {}) => {
       const raw = String(value || "");
       if (!/carfax/i.test(raw)) return;
-      candidates.push({ source, text: raw.slice(0, 240), url: carfaxUrlCandidate(raw) });
+      const url = carfaxUrlCandidate(raw);
+      candidates.push(compact({
+        source,
+        sourceText: raw.slice(0, 240),
+        text: raw.slice(0, 240),
+        url,
+        urlStatus: url ? "url_found" : "text_only",
+        rejectedReason: url ? undefined : rejectedCarfaxReason(raw),
+        confidenceScore: carfaxConfidence(source, Boolean(url)),
+        ...metadata,
+      }));
     };
     for (const link of Array.from(doc.querySelectorAll?.("a[href]") || [])) {
-      add("link", `${link.getAttribute("href")} ${link.innerText || ""} ${link.getAttribute("aria-label") || ""} ${link.getAttribute("title") || ""}`);
+      add("link_href", `${link.getAttribute("href")} ${link.innerText || ""} ${link.getAttribute("aria-label") || ""} ${link.getAttribute("title") || ""}`, { attributeName: "href" });
     }
     for (const node of Array.from(doc.querySelectorAll?.("[aria-label], [title], [data-href], [data-url], button, [role='button']") || [])) {
+      add("data_href", [node.getAttribute?.("data-href"), node.innerText, node.getAttribute?.("aria-label")].filter(Boolean).join(" "), { attributeName: "data-href" });
+      add("data_url", [node.getAttribute?.("data-url"), node.innerText, node.getAttribute?.("aria-label")].filter(Boolean).join(" "), { attributeName: "data-url" });
       add("dom_attribute", [
         node.getAttribute?.("aria-label"),
         node.getAttribute?.("title"),
-        node.getAttribute?.("data-href"),
-        node.getAttribute?.("data-url"),
         node.getAttribute?.("onclick"),
         node.innerText,
         node.textContent,
       ].filter(Boolean).join(" "));
     }
     add("safe_dom_attributes", extractSafeDomAttributeText(doc));
+    for (const evidence of extractCarfaxAttributeEvidenceFromHtml(doc.__openlaneHtml || "", "href")) add("link_href", evidence, { attributeName: "href" });
+    for (const evidence of extractCarfaxAttributeEvidenceFromHtml(doc.__openlaneHtml || "", "data-href")) add("data_href", evidence, { attributeName: "data-href" });
+    for (const evidence of extractCarfaxAttributeEvidenceFromHtml(doc.__openlaneHtml || "", "data-url")) add("data_url", evidence, { attributeName: "data-url" });
     for (const evidence of extractCarfaxZoneEvidenceFromHtml(doc.__openlaneHtml || "")) add("html_carfax_zone", evidence);
     for (const evidence of extractCarfaxEvidenceFromHtml(doc.__openlaneHtml || "")) add("html_node", evidence);
     add("html_attributes", extractAttributeText(doc.__openlaneHtml || ""));
@@ -813,7 +827,36 @@
       carfaxUrl,
       carfaxUrlStatus: carfaxUrl ? "url_found" : carfaxMentioned ? "text_only" : "missing",
       carfaxEvidence: candidates.slice(0, 8),
+      carfaxDiagnostics: buildCarfaxDiagnostics(candidates, carfaxUrl, carfaxMentioned),
     };
+  }
+
+  function buildCarfaxDiagnostics(candidates = [], carfaxUrl, carfaxMentioned) {
+    const count = (predicate) => candidates.filter(predicate).length;
+    const urlFound = Boolean(carfaxUrl);
+    return {
+      carfaxDomCandidateCount: count((item) => /link|data_|dom_attribute|safe_dom_attributes|html_/i.test(item.source || "")),
+      carfaxLinkCandidateCount: count((item) => item.source === "link_href"),
+      carfaxHrefCandidateCount: count((item) => item.attributeName === "href" || item.source === "link_href"),
+      carfaxDataHrefCandidateCount: count((item) => item.source === "data_href"),
+      carfaxDataUrlCandidateCount: count((item) => item.source === "data_url"),
+      carfaxHtmlZoneCandidateCount: count((item) => item.source === "html_carfax_zone"),
+      carfaxSafeAttributeCandidateCount: count((item) => item.source === "safe_dom_attributes"),
+      carfaxNetworkCandidateCount: 0,
+      carfaxTextOnlyCandidateCount: urlFound ? 0 : (carfaxMentioned ? Math.max(1, count((item) => item.urlStatus === "text_only")) : 0),
+    };
+  }
+
+  function rejectedCarfaxReason(value) {
+    const text = String(value || "");
+    if (/\.(?:svg|png|jpe?g|webp|avif|css|js)(?:$|[?#\s])/i.test(text)) return "asset_url_not_report";
+    return "carfax_text_without_safe_url";
+  }
+
+  function carfaxConfidence(source, hasUrl) {
+    if (/link_href|data_href|data_url|safe_dom_attributes|html_carfax_zone/i.test(source)) return hasUrl ? 92 : 62;
+    if (/html_node|html_attributes/i.test(source)) return hasUrl ? 84 : 58;
+    return hasUrl ? 70 : 50;
   }
 
   function carfaxUrlCandidate(value) {
@@ -833,6 +876,18 @@
       if (/carfax/i.test(source)) evidence.push(`${source.match(/<[^>]+>/)?.[0] || ""} ${stripTags(source)}`.slice(0, 500));
     }
     return evidence;
+  }
+
+  function extractCarfaxAttributeEvidenceFromHtml(html, attributeName) {
+    const evidence = [];
+    const pattern = new RegExp(`(?:^|[\\s<])${escapeRegExp(attributeName)}=["']([^"']+)["']`, "gi");
+    for (const match of String(html || "").matchAll(pattern)) {
+      const start = Math.max(0, (match.index || 0) - 240);
+      const end = Math.min(String(html || "").length, (match.index || 0) + 500);
+      const snippet = String(html || "").slice(start, end);
+      if (/carfax/i.test(`${match[1]} ${snippet}`)) evidence.push(`${match[1]} ${stripTags(snippet)}`.slice(0, 500));
+    }
+    return evidence.slice(0, 8);
   }
 
   function extractCarfaxZoneEvidenceFromHtml(html) {

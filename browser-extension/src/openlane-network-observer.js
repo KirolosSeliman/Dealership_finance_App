@@ -173,6 +173,10 @@
     merged.carfaxUrlStatus = merged.carfaxUrl ? "url_found" : "text_only";
     merged.openlaneMetadata = {
       ...(merged.openlaneMetadata || {}),
+      carfaxDiagnostics: mergeCarfaxDiagnostics(
+        merged.openlaneMetadata?.carfaxDiagnostics,
+        { carfaxNetworkCandidateCount: fieldCandidates.filter((candidate) => candidate.field === "carfaxUrl" || candidate.field === "carfaxUrlStatus").length },
+      ),
       carfaxEvidence: [
         ...(merged.openlaneMetadata?.carfaxEvidence || []),
         ...[carfaxUrlCandidate, carfaxTextCandidate].filter(Boolean).map((candidate) => ({
@@ -185,6 +189,13 @@
           confidenceScore: candidate.confidence,
         })),
       ].slice(0, 12),
+    };
+  }
+
+  function mergeCarfaxDiagnostics(existing = {}, incoming = {}) {
+    return {
+      ...existing,
+      ...Object.fromEntries(Object.entries(incoming).map(([key, value]) => [key, Number(existing?.[key] || 0) + Number(value || 0)])),
     };
   }
 
@@ -295,6 +306,9 @@
       conditionCandidates: conditionCandidates.slice(0, 30),
       priceCandidates: dedupeCandidates(priceCandidates).slice(0, 30),
       transportCandidates: dedupeCandidates(transportCandidates).slice(0, 20),
+      carfaxDiagnostics: {
+        carfaxNetworkCandidateCount: countCarfaxCandidates(fieldCandidates),
+      },
     };
   }
 
