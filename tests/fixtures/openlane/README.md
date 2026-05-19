@@ -32,6 +32,8 @@ Fixtures in this folder must be sanitized snapshots of visible page structure on
 - `openlane-vdp-active-current-bid-proxy-history.html` - active VDP fixture reproducing `Highest proxy applied $21,000` plus lower bid-history `$11,100` and `2 Bids`.
 - `openlane-vdp-active-current-bid-with-lower-history-row.html` - Phase 10 required lower bid-history row fixture using the same `$21,000` versus `$11,100` trap.
 - `openlane-vdp-active-current-bid-29-bids.html` - active VDP fixture reproducing `Current bid $5,100` plus `29 Bids` and transport estimate noise.
+- `openlane-vdp-active-mazda-stale-active-bidbar.html` - active Mazda VDP fixture reproducing a stale sticky `$8,500` active bid bar with fresher bid-panel `Current bid $10,300` and `59 Bids`.
+- `openlane-vdp-active-pickup-instructions-not-purchase.html` - active VDP fixture with pickup instruction text that must not be classified as purchase/outcome evidence.
 - `openlane-vdp-carfax-router-metadata.html`, `openlane-network-current-bid-carfax-diagnostics.json` - CARFAX router/network metadata fixtures for URL recovery diagnostics.
 - `openlane-vdp-active-current-bid-with-bid-count.html`, `openlane-vdp-active-current-bid-footer-fallback.html`, `openlane-vdp-active-current-bid-no-money.html` - Phase 7 exact current-bid fixtures for bid-count rejection, sticky footer fallback, and no-money protection.
 - `openlane-router-carfax-url.html`, `openlane-backend-bad-price-evidence.json` - Phase 7 exact CARFAX router and backend bad-price evidence fixtures.
