@@ -93,7 +93,10 @@
         scheduleRuntime(0, "settings-saved");
       },
       onSettingsError: (message) => {
-        STATE.widget?.render({ status: "warning", listing: STATE.listing, valuation: STATE.valuation, message });
+        STATE.widget?.render({ status: "warning", listing: STATE.listing, valuation: STATE.valuation, message: sanitizeErrorMessage(message) });
+      },
+      onActionError: (message) => {
+        STATE.widget?.render({ status: "error", listing: STATE.listing, valuation: STATE.valuation, message: sanitizeErrorMessage(message) });
       },
       onHidePage: () => hideCurrentPage(),
     });
@@ -612,16 +615,25 @@
   }
 
   function sanitizeDebugValue(value) {
-    if (typeof value === "string") return value.replace(/\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b/g, "[redacted]").replace(/\bsk_(?:live|test|proj)_[A-Za-z0-9_-]{16,}\b/g, "[redacted]");
+    if (typeof value === "string") return sanitizeErrorMessage(value);
     if (Array.isArray(value)) return value.map(sanitizeDebugValue);
     if (!value || typeof value !== "object") return value;
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, /token|secret|password|credential|authorization|cookie/i.test(key) ? "[redacted]" : sanitizeDebugValue(item)]));
   }
 
+  function sanitizeErrorMessage(message) {
+    return String(message || "Market Snap failed.")
+      .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}\b/gi, "Bearer [redacted]")
+      .replace(/\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b/g, "[redacted]")
+      .replace(/\bsk_(?:live|test|proj)_[A-Za-z0-9_-]{16,}\b/g, "[redacted]")
+      .replace(/\b(authorization|cookie|token|secret|credential|session|password|csrf|jwt)\b\s*[:=]\s*[^,\s;]+/gi, "$1=[redacted]")
+      .slice(0, 500);
+  }
+
   function formatError(error) {
     const message = error?.message || "Market Snap failed.";
     if (message.includes("Failed to fetch")) return "Dealer Flow is unreachable or blocked by extension origin settings.";
-    return message;
+    return sanitizeErrorMessage(message);
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {

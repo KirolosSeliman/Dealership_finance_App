@@ -335,6 +335,42 @@ test("Market Snap widget settings save surfaces success and failure and reloads 
   assert.match(saveBlock, /loadWidgetSettings\(shadow,\s*saved\)/);
 });
 
+test("Market Snap widget render helpers are null-safe when no extraction exists", () => {
+  const widget = readFileSync(join(repoRoot, "browser-extension/src/market-snap-widget.js"), "utf8");
+  const readinessBlock = widget.slice(
+    widget.indexOf("function readinessSummary"),
+    widget.indexOf("function vinStatusLabel"),
+  );
+  const conditionBlock = widget.slice(
+    widget.indexOf("function conditionWarningItems"),
+    widget.indexOf("function topEvidenceLabel"),
+  );
+  const priceStateBlock = widget.slice(
+    widget.indexOf("function priceStateLabel"),
+    widget.indexOf("function carfaxLabel"),
+  );
+
+  assert.match(readinessBlock, /const safeListing = listing \|\| \{\}/);
+  assert.match(readinessBlock, /safeListing\.missingData/);
+  assert.doesNotMatch(readinessBlock, /listing\.missingData/);
+  assert.match(conditionBlock, /const safeListing = listing \|\| \{\}/);
+  assert.match(priceStateBlock, /const safeListing = listing \|\| \{\}/);
+});
+
+test("Market Snap widget wraps async button actions and sanitizes action errors", () => {
+  const widget = readFileSync(join(repoRoot, "browser-extension/src/market-snap-widget.js"), "utf8");
+
+  assert.match(widget, /runWidgetAction/);
+  assert.match(widget, /onActionError/);
+  assert.match(widget, /Refresh failed/);
+  assert.match(widget, /Save failed/);
+  assert.match(widget, /Copy JSON failed/);
+  assert.match(widget, /Open Dealer Flow failed/);
+  assert.match(widget, /Hide page failed/);
+  assert.match(widget, /sanitizeWidgetError/);
+  assert.doesNotMatch(widget, /authorization bearer/i);
+});
+
 test("Market Snap content script surfaces extraction failures instead of leaving stale debug state", () => {
   const contentScript = readFileSync(join(repoRoot, "browser-extension/src/content-script.js"), "utf8");
   const runAnalysisBlock = contentScript.slice(
