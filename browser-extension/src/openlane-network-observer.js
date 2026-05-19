@@ -7,12 +7,14 @@
   const VEHICLE_KEY = /\b(vehicle|vin|listing|inventory|vdp|photo|image|media|condition|disclosure|damage|mechanical|history|note|purchase|fee|price)\b/i;
   const TEXT_FIELD = new Set(["make", "model", "trim", "sellerName", "location", "auctionStatus", "saleDate", "runNumber", "lane", "lotNumber", "stockNumber", "titleStatus", "carfaxUrl", "carfaxUrlStatus"]);
   const observations = [];
+  const observedEventIds = new Set();
   let observerStatus = { enabled: false, reason: "stopped", observationCount: 0 };
 
   function startOpenLaneNetworkObserver(settings = {}, context = {}) {
     const activation = isDeepCaptureAllowed(settings, context);
     if (!activation.active) {
       root.removeEventListener?.("message", onPageMessage);
+      clearEarlyPageHookQueue();
       observerStatus = {
         ...observerStatus,
         enabled: false,
@@ -25,6 +27,7 @@
     }
     if (activation.observePageNetworkData !== true) {
       root.removeEventListener?.("message", onPageMessage);
+      clearEarlyPageHookQueue();
       observerStatus = {
         ...observerStatus,
         enabled: false,
@@ -35,8 +38,10 @@
       };
       return getOpenLaneNetworkObserverStatus();
     }
-    injectPageHook();
     root.addEventListener?.("message", onPageMessage);
+    injectPageHook();
+    flushEarlyPageHookQueue();
+    root.setTimeout?.(flushEarlyPageHookQueue, 0);
     observerStatus = {
       ...observerStatus,
       enabled: true,
@@ -50,6 +55,7 @@
 
   function stopOpenLaneNetworkObserver() {
     root.removeEventListener?.("message", onPageMessage);
+    clearEarlyPageHookQueue();
     observerStatus = { ...observerStatus, enabled: false, reason: "stopped", observationCount: observations.length };
   }
 
@@ -64,10 +70,12 @@
 
   function onPageMessage(event) {
     if (event.source !== root || event.data?.source !== "dealer-flow-openlane-network") return;
-    rememberNetworkPayload(event.data.body, event.data.url, event.data.contentType);
+    rememberNetworkPayload(event.data.body, event.data.url, event.data.contentType, event.data.eventId);
   }
 
-  function rememberNetworkPayload(body, url = "", contentType = "") {
+  function rememberNetworkPayload(body, url = "", contentType = "", eventId = "") {
+    if (eventId && observedEventIds.has(eventId)) return undefined;
+    if (eventId) rememberEventId(eventId);
     const decision = endpointDecision(url);
     if (!decision.allowed) {
       observerStatus = {
@@ -103,6 +111,13 @@
       lastAllowedEndpointPattern: decision.endpointPattern,
     };
     return observation;
+  }
+
+  function rememberEventId(eventId) {
+    observedEventIds.add(eventId);
+    if (observedEventIds.size <= 80) return;
+    const first = observedEventIds.values().next().value;
+    observedEventIds.delete(first);
   }
 
   function getOpenLaneNetworkEvidence() {
@@ -341,6 +356,22 @@
     script.async = false;
     (document.documentElement || document.head).appendChild(script);
     script.remove();
+  }
+
+  function flushEarlyPageHookQueue() {
+    postPageHookControl("flush");
+  }
+
+  function clearEarlyPageHookQueue() {
+    postPageHookControl("clear");
+  }
+
+  function postPageHookControl(type) {
+    try {
+      root.postMessage?.({ source: "dealer-flow-openlane-network-control", type }, root.location?.origin || "*");
+    } catch {
+      // Passive observation only; never break page runtime.
+    }
   }
 
   function parseJsonBody(body) {

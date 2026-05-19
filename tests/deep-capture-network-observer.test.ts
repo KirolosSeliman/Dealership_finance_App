@@ -15,7 +15,7 @@ const networkObserver = require("../browser-extension/src/openlane-network-obser
     candidateCounts?: { vin: number; carfax: number; media: number; condition: number; price: number; transport: number };
   };
   stopOpenLaneNetworkObserver: () => void;
-  rememberNetworkPayload: (body: unknown, url?: string, contentType?: string) => unknown;
+  rememberNetworkPayload: (body: unknown, url?: string, contentType?: string, eventId?: string) => unknown;
   extractCandidatesFromNetworkPayload: (payload: unknown, url?: string) => {
     fieldCandidates: Array<{ field: string; value: unknown; confidence: number; endpointPattern: string; sourceText: string }>;
     vinCandidates: Array<{ field: string; value: string; vin: string; confidence: number }>;
@@ -81,6 +81,50 @@ test("OpenLane network observer status reports current evidence count", () => {
   assert.equal(after.observationCount, before + 1);
   assert.equal(after.lastAllowedEndpointPattern, "app.openlane.ca/api/vdp/:id");
   assert.equal(after.candidateCounts?.vin, 1);
+  networkObserver.stopOpenLaneNetworkObserver();
+});
+
+test("OpenLane network observer flushes early page hook queue when active and clears it when stopped", async () => {
+  const previousPostMessage = globalThis.postMessage;
+  const messages: Array<{ source?: string; type?: string }> = [];
+  globalThis.postMessage = ((message: { source?: string; type?: string }) => {
+    messages.push(message);
+  }) as typeof globalThis.postMessage;
+
+  try {
+    networkObserver.startOpenLaneNetworkObserver({
+      dealerFlowBaseUrl: "https://dealer-flow.example",
+      organizationId: "63c47786-fb41-40c1-a573-71346969b9e0",
+      observePageNetworkData: true,
+      deepCaptureEnabled: true,
+      deepCaptureConsentStatus: "active",
+      deepCaptureConsentId: "33333333-3333-4333-8333-333333333333",
+    }, { href: "https://app.openlane.ca/vdp/123" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.ok(messages.some((message) => message.source === "dealer-flow-openlane-network-control" && message.type === "flush"));
+
+    networkObserver.stopOpenLaneNetworkObserver();
+    assert.ok(messages.some((message) => message.source === "dealer-flow-openlane-network-control" && message.type === "clear"));
+  } finally {
+    globalThis.postMessage = previousPostMessage;
+  }
+});
+
+test("OpenLane network observer ignores duplicate page-hook replay events", () => {
+  networkObserver.startOpenLaneNetworkObserver({
+    dealerFlowBaseUrl: "https://dealer-flow.example",
+    organizationId: "63c47786-fb41-40c1-a573-71346969b9e0",
+    observePageNetworkData: true,
+    deepCaptureEnabled: true,
+  }, { href: "https://app.openlane.ca/vdp/KM8J3CA46HU123456" });
+  const body = JSON.stringify({ vehicle: { vin: "KM8J3CA46HU123456" } });
+  const first = networkObserver.rememberNetworkPayload(body, "https://app.openlane.ca/api/vdp/KM8J3CA46HU123456", "application/json", "early-event-1");
+  const afterFirst = networkObserver.getOpenLaneNetworkObserverStatus().observationCount;
+  const duplicate = networkObserver.rememberNetworkPayload(body, "https://app.openlane.ca/api/vdp/KM8J3CA46HU123456", "application/json", "early-event-1");
+
+  assert.ok(first);
+  assert.equal(duplicate, undefined);
+  assert.equal(networkObserver.getOpenLaneNetworkObserverStatus().observationCount, afterFirst);
   networkObserver.stopOpenLaneNetworkObserver();
 });
 

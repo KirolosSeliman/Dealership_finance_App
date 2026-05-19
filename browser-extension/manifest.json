@@ -13,6 +13,11 @@
   "content_scripts": [
     {
       "matches": ["https://*.openlane.com/*", "https://*.openlane.ca/*"],
+      "js": ["src/openlane-network-early-hook.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://*.openlane.com/*", "https://*.openlane.ca/*"],
       "js": [
         "src/deep-capture-activation.js",
         "src/storage.js",

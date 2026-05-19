@@ -3,14 +3,46 @@
   window.__dealerFlowOpenLaneNetworkHook = true;
 
   const MAX_TEXT_LENGTH = 120000;
+  const MAX_QUEUE_LENGTH = 10;
   const ALLOWED_HOST = /(^|\.)openlane\.(ca|com)$|kar-media\.com$/i;
   const ALLOW_ENDPOINT = /\b(vdp|vehicle|vehicles|listing|inventory|purchase|purchases|condition|disclosure|media|photo|image|bid|offer|fee|fees|invoice|post-sale|sale)\b/i;
   const DENY_ENDPOINT = /\b(auth|oauth|login|logout|session|profile|account|payment|billing|user|users|me|token|cookie|password)\b/i;
+  const earlyQueue = [];
+  let sequence = 0;
+  let contentScriptActive = false;
+  let queueEnabled = true;
 
   function emit(url, contentType, body) {
     if (!isAllowedEndpoint(url)) return;
-    window.postMessage({ source: "dealer-flow-openlane-network", url: String(url || ""), contentType: String(contentType || ""), body }, window.location.origin);
+    const message = {
+      source: "dealer-flow-openlane-network",
+      eventId: `openlane-network-${Date.now()}-${++sequence}`,
+      url: String(url || ""),
+      contentType: String(contentType || ""),
+      body,
+    };
+    if (queueEnabled && !contentScriptActive) {
+      earlyQueue.push(message);
+      earlyQueue.splice(0, Math.max(0, earlyQueue.length - MAX_QUEUE_LENGTH));
+    }
+    window.postMessage(message, window.location.origin);
   }
+
+  window.addEventListener("message", (event) => {
+    if (event.source !== window || event.data?.source !== "dealer-flow-openlane-network-control") return;
+    if (event.data.type === "flush") {
+      contentScriptActive = true;
+      queueEnabled = false;
+      for (const item of earlyQueue.splice(0)) {
+        window.postMessage({ ...item, replayed: true }, window.location.origin);
+      }
+    }
+    if (event.data.type === "clear") {
+      contentScriptActive = false;
+      queueEnabled = false;
+      earlyQueue.splice(0);
+    }
+  });
 
   const originalFetch = window.fetch;
   if (typeof originalFetch === "function") {

@@ -33,9 +33,15 @@ test("Market Snap extension injects on OpenLane Canada vehicle pages", () => {
   const matches = manifest.content_scripts.flatMap((script: { matches: string[] }) => script.matches);
   const scripts = manifest.content_scripts.flatMap((script: { js: string[] }) => script.js);
   const css = manifest.content_scripts.flatMap((script: { css?: string[] }) => script.css ?? []);
+  const earlyHookScript = manifest.content_scripts.find((script: { run_at?: string; js: string[] }) => script.run_at === "document_start" && script.js.includes("src/openlane-network-early-hook.js"));
+  const mainScript = manifest.content_scripts.find((script: { js: string[] }) => script.js.includes("src/content-script.js"));
 
   assert.ok(matches.includes("https://*.openlane.ca/*"));
   assert.ok(matches.includes("https://*.openlane.com/*"));
+  assert.ok(earlyHookScript);
+  assert.deepEqual(earlyHookScript.matches, ["https://*.openlane.com/*", "https://*.openlane.ca/*"]);
+  assert.deepEqual(earlyHookScript.js, ["src/openlane-network-early-hook.js"]);
+  assert.equal(mainScript.run_at, "document_idle");
   assert.ok(scripts.includes("src/deep-capture-activation.js"));
   assert.ok(scripts.includes("src/storage.js"));
   assert.ok(scripts.includes("src/api-client.js"));
@@ -56,6 +62,20 @@ test("Market Snap extension injects on OpenLane Canada vehicle pages", () => {
   assert.equal(manifest.permissions.includes("tabs"), false);
   assert.equal(manifest.permissions.includes("webRequest"), false);
   assert.equal(manifest.permissions.includes("scripting"), false);
+});
+
+test("OpenLane early network hook is injection-only and keeps extraction in the main observer", () => {
+  const earlyHook = readFileSync(join(repoRoot, "browser-extension/src/openlane-network-early-hook.js"), "utf8");
+  const pageHook = readFileSync(join(repoRoot, "browser-extension/src/openlane-network-page-hook.js"), "utf8");
+  const observer = readFileSync(join(repoRoot, "browser-extension/src/openlane-network-observer.js"), "utf8");
+
+  assert.match(earlyHook, /document\.createElement\("script"\)/);
+  assert.match(earlyHook, /openlane-network-page-hook\.js/);
+  assert.doesNotMatch(earlyHook, /DealerFlowMarketSnapApi|chrome\.storage|fetch\s*\(|XMLHttpRequest|localStorage|sessionStorage|document\.body|querySelector/i);
+  assert.match(pageHook, /MAX_QUEUE_LENGTH/);
+  assert.match(pageHook, /dealer-flow-openlane-network-control/);
+  assert.match(observer, /flushEarlyPageHookQueue/);
+  assert.doesNotMatch(pageHook, /requestHeaders|getRequestHeader|setRequestHeader|credentials|authorization\s*:/i);
 });
 
 test("Market Snap extension uses in-page OpenLane widget instead of popup-only analysis", () => {
