@@ -10,8 +10,20 @@ const networkObserver = require("../browser-extension/src/openlane-network-obser
     enabled: boolean;
     reason: string;
     observationCount: number;
+    pageHookInstalled?: boolean;
+    earlyHookInstalled?: boolean;
+    earlyQueueLength?: number;
+    earlyQueueFlushed?: boolean;
+    pageHookEventCount?: number;
+    allowedEventCount?: number;
+    deniedEventCount?: number;
+    irrelevantJsonCount?: number;
+    duplicateEventCount?: number;
+    parseErrorCount?: number;
     lastAllowedEndpointPattern?: string;
+    lastDeniedEndpointPattern?: string;
     lastDeniedEndpointReason?: string;
+    lastObservedEndpointSample?: string;
     candidateCounts?: { vin: number; carfax: number; media: number; condition: number; price: number; transport: number };
   };
   stopOpenLaneNetworkObserver: () => void;
@@ -80,6 +92,8 @@ test("OpenLane network observer status reports current evidence count", () => {
   assert.equal(after.enabled, true);
   assert.equal(after.observationCount, before + 1);
   assert.equal(after.lastAllowedEndpointPattern, "app.openlane.ca/api/vdp/:id");
+  assert.ok(Number(after.allowedEventCount || 0) >= 1);
+  assert.equal(after.lastObservedEndpointSample, "app.openlane.ca/api/vdp/:id");
   assert.equal(after.candidateCounts?.vin, 1);
   networkObserver.stopOpenLaneNetworkObserver();
 });
@@ -125,17 +139,33 @@ test("OpenLane network observer ignores duplicate page-hook replay events", () =
   assert.ok(first);
   assert.equal(duplicate, undefined);
   assert.equal(networkObserver.getOpenLaneNetworkObserverStatus().observationCount, afterFirst);
+  assert.ok(Number(networkObserver.getOpenLaneNetworkObserverStatus().duplicateEventCount || 0) >= 1);
   networkObserver.stopOpenLaneNetworkObserver();
 });
 
 test("OpenLane network observer ignores irrelevant and auth/session endpoints", () => {
   const body = JSON.stringify({ vehicle: { vin: "2T3R1RFV5MW123456" } });
+  const beforeDenied = Number(networkObserver.getOpenLaneNetworkObserverStatus().deniedEventCount || 0);
 
   assert.equal(networkObserver.rememberNetworkPayload(body, "https://app.openlane.ca/api/profile/me", "application/json"), undefined);
   assert.equal(networkObserver.getOpenLaneNetworkObserverStatus().lastDeniedEndpointReason, "denied_sensitive_endpoint");
+  assert.equal(networkObserver.getOpenLaneNetworkObserverStatus().lastDeniedEndpointPattern, "app.openlane.ca/api/profile/me");
   assert.equal(networkObserver.rememberNetworkPayload(body, "https://app.openlane.ca/oauth/session", "application/json"), undefined);
   assert.equal(networkObserver.rememberNetworkPayload(body, "https://app.openlane.ca/api/user/vehicles/123", "application/json"), undefined);
+  assert.ok(Number(networkObserver.getOpenLaneNetworkObserverStatus().deniedEventCount || 0) >= beforeDenied + 3);
   assert.equal(networkObserver.rememberNetworkPayload(body, "https://app.openlane.ca/api/vdp/123", "application/json") !== undefined, true);
+});
+
+test("OpenLane network observer counts irrelevant JSON and parse errors without storing sensitive URL details", () => {
+  const before = networkObserver.getOpenLaneNetworkObserverStatus();
+  assert.equal(networkObserver.rememberNetworkPayload(JSON.stringify({ ok: true }), "https://app.openlane.ca/api/vdp/123?token=secret-token", "application/json"), undefined);
+  assert.equal(networkObserver.rememberNetworkPayload("{bad json", "https://app.openlane.ca/api/vdp/123?authorization=secret-token", "application/json"), undefined);
+  const after = networkObserver.getOpenLaneNetworkObserverStatus();
+
+  assert.ok(Number(after.irrelevantJsonCount || 0) >= Number(before.irrelevantJsonCount || 0) + 1);
+  assert.ok(Number(after.parseErrorCount || 0) >= Number(before.parseErrorCount || 0) + 1);
+  assert.equal(after.lastObservedEndpointSample, "app.openlane.ca/api/vdp/:id");
+  assert.doesNotMatch(JSON.stringify(after), /secret-token|authorization=|token=/i);
 });
 
 test("OpenLane network observer stops when Deep Capture or network observation is disabled", () => {

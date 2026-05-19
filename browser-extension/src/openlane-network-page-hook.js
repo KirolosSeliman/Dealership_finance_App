@@ -12,6 +12,8 @@
   let contentScriptActive = false;
   let queueEnabled = true;
 
+  postDiagnostic("page_hook_installed");
+
   function emit(url, contentType, body) {
     if (!isAllowedEndpoint(url)) return;
     const message = {
@@ -33,6 +35,7 @@
     if (event.data.type === "flush") {
       contentScriptActive = true;
       queueEnabled = false;
+      postDiagnostic("early_queue_flushed");
       for (const item of earlyQueue.splice(0)) {
         window.postMessage({ ...item, replayed: true }, window.location.origin);
       }
@@ -41,6 +44,7 @@
       contentScriptActive = false;
       queueEnabled = false;
       earlyQueue.splice(0);
+      postDiagnostic("early_queue_cleared");
     }
   });
 
@@ -97,5 +101,19 @@
     if (!ALLOWED_HOST.test(parsed.hostname)) return false;
     if (DENY_ENDPOINT.test(target)) return false;
     return ALLOW_ENDPOINT.test(target);
+  }
+
+  function postDiagnostic(type) {
+    try {
+      window.postMessage({
+        source: "dealer-flow-openlane-network-diagnostics",
+        type,
+        pageHookInstalled: true,
+        earlyHookInstalled: Boolean(window.__dealerFlowOpenLaneEarlyNetworkHook),
+        earlyQueueLength: earlyQueue.length,
+      }, window.location.origin);
+    } catch {
+      // Passive diagnostics only; never break the OpenLane page.
+    }
   }
 })();

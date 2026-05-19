@@ -292,7 +292,24 @@ test("Market Snap copy payload builder returns sanitized readiness and debug evi
       deepCaptureRuntime: {
         active: true,
         networkEvidenceCount: 0,
-        networkObserver: { enabled: true, reason: "observing_page_generated_responses" },
+        networkObserver: {
+          enabled: true,
+          reason: "observing_page_generated_responses",
+          pageHookInstalled: true,
+          earlyHookInstalled: true,
+          earlyQueueLength: 0,
+          earlyQueueFlushed: true,
+          pageHookEventCount: 3,
+          allowedEventCount: 1,
+          deniedEventCount: 1,
+          irrelevantJsonCount: 1,
+          duplicateEventCount: 1,
+          parseErrorCount: 1,
+          lastAllowedEndpointPattern: "app.openlane.ca/api/vdp/:id",
+          lastDeniedEndpointPattern: "app.openlane.ca/api/profile/me",
+          lastDeniedEndpointReason: "denied_sensitive_endpoint",
+          lastObservedEndpointSample: "app.openlane.ca/api/vdp/:id",
+        },
       },
       networkEvidence: [],
       carfaxEvidence: [{ source: "network_json" }],
@@ -320,8 +337,11 @@ test("Market Snap copy payload builder returns sanitized readiness and debug evi
   assert.equal((payload.readinessSummary as { vinEvidenceSource?: string }).vinEvidenceSource, "header_chip");
   assert.equal((payload.readinessSummary as { carfaxEvidenceSource?: string }).carfaxEvidenceSource, "network_json");
   assert.equal((payload.readinessSummary as { networkEvidenceCount?: number }).networkEvidenceCount, 0);
+  assert.equal((payload.readinessSummary as { networkObserverDiagnostics?: { pageHookInstalled?: boolean } }).networkObserverDiagnostics?.pageHookInstalled, true);
+  assert.equal((payload.readinessSummary as { networkObserverDiagnostics?: { deniedEventCount?: number } }).networkObserverDiagnostics?.deniedEventCount, 1);
+  assert.equal((payload.readinessSummary as { networkObserverDiagnostics?: { irrelevantJsonCount?: number } }).networkObserverDiagnostics?.irrelevantJsonCount, 1);
   assert.equal((payload.readinessSummary as { carfaxDiagnostics?: { carfaxTextOnlyCandidateCount?: number } }).carfaxDiagnostics?.carfaxTextOnlyCandidateCount, 1);
-  assert.match(String((payload.readinessSummary as { networkObserverMessage?: string }).networkObserverMessage), /enabled but no OpenLane vehicle JSON/i);
+  assert.match(String((payload.readinessSummary as { networkObserverMessage?: string }).networkObserverMessage), /no vehicle\/carfax\/price candidates/i);
   assert.equal((payload.readinessSummary as { priceState?: string }).priceState, "observation");
   assert.equal((payload.readinessSummary as { currentBidSource?: string }).currentBidSource, "section_map");
   assert.match(String((payload.readinessSummary as { currentBidSourceText?: string }).currentBidSourceText), /\$13,700/);
@@ -330,7 +350,7 @@ test("Market Snap copy payload builder returns sanitized readiness and debug evi
   assert.match(JSON.stringify((payload.priceDiagnostics as { priceDiagnosticMessages?: string[] }).priceDiagnosticMessages), /Rejected bid count as price: Current bid 4 Bids/);
   assert.deepEqual((payload.readinessSummary as { ignoredNoisyZones?: string[] }).ignoredNoisyZones, ["sidebar", "marketGuide", "qaSection"]);
   assert.equal((payload.readinessSummary as { rejectedFieldCandidateCount?: number }).rejectedFieldCandidateCount, 2);
-  assert.match(JSON.stringify(payload.debugSummary), /Network observer is enabled but no OpenLane vehicle JSON/i);
+  assert.match(JSON.stringify(payload.debugSummary), /Network JSON observed but no vehicle\/carfax\/price candidates/i);
   assert.match(JSON.stringify(payload.debugSummary), /Q&A\/sidebar\/market-guide text ignored/i);
   assert.equal((payload.valuation as { confidenceScore?: number }).confidenceScore, 88);
   assert.doesNotMatch(JSON.stringify(payload), /should-not-copy|secret-token/i);
@@ -346,6 +366,10 @@ test("Market Snap widget debug UX explains purchased, active, Carfax, network, a
     "Transport estimate ignored as listing price.",
     "Carfax text found, but no URL is exposed.",
     "Network observer is enabled but no OpenLane vehicle JSON has been observed yet",
+    "Network events observed but denied by allowlist/denylist.",
+    "Network JSON observed but no vehicle/carfax/price candidates found.",
+    "Network diagnostics:",
+    "networkObserverDiagnosticsLabel",
     "Q&A/sidebar/market-guide text ignored for canonical fields.",
     "Current bid source:",
     "Current bid source text:",

@@ -260,6 +260,7 @@
       safeListing.carfaxUrlStatus === "text_only" ? `<p>Carfax warning: ${safeHtml("Visible text only; URL was not available in page evidence.")}</p>` : "",
       `<p>Carfax diagnostics: ${safeHtml(carfaxDiagnosticsLabel(safeListing))}</p>`,
       `<p>Network observer: ${safeHtml(networkObserverLabel(deepCaptureRuntime))}</p>`,
+      `<p>Network diagnostics: ${safeHtml(networkObserverDiagnosticsLabel(deepCaptureRuntime))}</p>`,
       `<p>Network evidence count: ${safeHtml(String(networkEvidenceCount(safeListing, deepCaptureRuntime)))}</p>`,
       networkObserverDiagnosticMessage(safeListing, deepCaptureRuntime) ? `<p>Network diagnostic: ${safeHtml(networkObserverDiagnosticMessage(safeListing, deepCaptureRuntime))}</p>` : "",
       `<p>Price state: ${safeHtml(priceStateLabel(safeListing))}</p>`,
@@ -526,9 +527,30 @@
     const observer = runtime.networkObserver || {};
     const count = networkEvidenceCount(listing, runtime);
     if (observer.enabled && count === 0) {
+      if (Number(observer.deniedEventCount || 0) > 0 && Number(observer.allowedEventCount || 0) === 0) {
+        return "Network events observed but denied by allowlist/denylist.";
+      }
+      if (Number(observer.irrelevantJsonCount || 0) > 0) {
+        return "Network JSON observed but no vehicle/carfax/price candidates found.";
+      }
       return "Network observer is enabled but no OpenLane vehicle JSON has been observed yet. Reload the VDP or check early hook/endpoint allowlist.";
     }
     return "";
+  }
+
+  function networkObserverDiagnosticsLabel(runtime = {}) {
+    const observer = runtime.networkObserver || {};
+    return [
+      `hook:${observer.pageHookInstalled ? "on" : "unknown"}`,
+      `early:${observer.earlyHookInstalled ? "on" : "unknown"}`,
+      `queue:${Number(observer.earlyQueueLength || 0)}`,
+      `events:${Number(observer.pageHookEventCount || 0)}`,
+      `allowed:${Number(observer.allowedEventCount || 0)}`,
+      `denied:${Number(observer.deniedEventCount || 0)}`,
+      `irrelevant:${Number(observer.irrelevantJsonCount || 0)}`,
+      `duplicates:${Number(observer.duplicateEventCount || 0)}`,
+      `parseErrors:${Number(observer.parseErrorCount || 0)}`,
+    ].join(" ");
   }
 
   function deepCaptureStatusLabel(listing) {

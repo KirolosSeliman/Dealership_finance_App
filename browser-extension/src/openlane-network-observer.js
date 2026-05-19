@@ -8,7 +8,7 @@
   const TEXT_FIELD = new Set(["make", "model", "trim", "sellerName", "location", "auctionStatus", "saleDate", "runNumber", "lane", "lotNumber", "stockNumber", "titleStatus", "carfaxUrl", "carfaxUrlStatus"]);
   const observations = [];
   const observedEventIds = new Set();
-  let observerStatus = { enabled: false, reason: "stopped", observationCount: 0 };
+  let observerStatus = initialObserverStatus();
 
   function startOpenLaneNetworkObserver(settings = {}, context = {}) {
     const activation = isDeepCaptureAllowed(settings, context);
@@ -68,18 +68,71 @@
     };
   }
 
+  function initialObserverStatus() {
+    return {
+      enabled: false,
+      reason: "stopped",
+      observationCount: 0,
+      pageHookInstalled: false,
+      earlyHookInstalled: false,
+      earlyQueueLength: 0,
+      earlyQueueFlushed: false,
+      lastPageHookEventAt: "",
+      pageHookEventCount: 0,
+      allowedEventCount: 0,
+      deniedEventCount: 0,
+      irrelevantJsonCount: 0,
+      duplicateEventCount: 0,
+      parseErrorCount: 0,
+      lastAllowedEndpointPattern: "",
+      lastDeniedEndpointPattern: "",
+      lastDeniedEndpointReason: "",
+      lastObservedEndpointSample: "",
+    };
+  }
+
+  function rememberPageHookDiagnostic(data = {}) {
+    observerStatus = {
+      ...observerStatus,
+      pageHookInstalled: Boolean(data.pageHookInstalled || observerStatus.pageHookInstalled),
+      earlyHookInstalled: Boolean(data.earlyHookInstalled || observerStatus.earlyHookInstalled),
+      earlyQueueLength: Math.max(0, Number(data.earlyQueueLength || 0)),
+      earlyQueueFlushed: Boolean(observerStatus.earlyQueueFlushed || data.type === "early_queue_flushed"),
+      pageHookEventCount: Number(observerStatus.pageHookEventCount || 0) + 1,
+      lastPageHookEventAt: new Date().toISOString(),
+    };
+  }
+
   function onPageMessage(event) {
-    if (event.source !== root || event.data?.source !== "dealer-flow-openlane-network") return;
+    if (event.source !== root) return;
+    if (event.data?.source === "dealer-flow-openlane-network-diagnostics") {
+      rememberPageHookDiagnostic(event.data);
+      return;
+    }
+    if (event.data?.source !== "dealer-flow-openlane-network") return;
     rememberNetworkPayload(event.data.body, event.data.url, event.data.contentType, event.data.eventId);
   }
 
   function rememberNetworkPayload(body, url = "", contentType = "", eventId = "") {
-    if (eventId && observedEventIds.has(eventId)) return undefined;
+    observerStatus = {
+      ...observerStatus,
+      pageHookEventCount: Number(observerStatus.pageHookEventCount || 0) + 1,
+      lastPageHookEventAt: new Date().toISOString(),
+      lastObservedEndpointSample: endpointPattern(url),
+    };
+    if (eventId && observedEventIds.has(eventId)) {
+      observerStatus = {
+        ...observerStatus,
+        duplicateEventCount: Number(observerStatus.duplicateEventCount || 0) + 1,
+      };
+      return undefined;
+    }
     if (eventId) rememberEventId(eventId);
     const decision = endpointDecision(url);
     if (!decision.allowed) {
       observerStatus = {
         ...observerStatus,
+        deniedEventCount: Number(observerStatus.deniedEventCount || 0) + 1,
         lastDeniedEndpointPattern: decision.endpointPattern,
         lastDeniedEndpointReason: decision.reason,
         observationCount: observations.length,
@@ -88,13 +141,27 @@
     }
     observerStatus = {
       ...observerStatus,
+      allowedEventCount: Number(observerStatus.allowedEventCount || 0) + 1,
       lastAllowedEndpointPattern: decision.endpointPattern,
       observationCount: observations.length,
     };
     const parsed = parseJsonBody(body);
-    if (!parsed) return undefined;
+    if (!parsed) {
+      observerStatus = {
+        ...observerStatus,
+        parseErrorCount: Number(observerStatus.parseErrorCount || 0) + 1,
+      };
+      return undefined;
+    }
     const candidates = extractCandidatesFromNetworkPayload(parsed, url);
-    if (!isRelevantObservation(candidates)) return undefined;
+    if (!isRelevantObservation(candidates)) {
+      observerStatus = {
+        ...observerStatus,
+        irrelevantJsonCount: Number(observerStatus.irrelevantJsonCount || 0) + 1,
+        candidateCounts: candidateCounts(candidates),
+      };
+      return undefined;
+    }
     const observation = {
       capturedAt: new Date().toISOString(),
       endpointPattern: endpointPattern(url),
@@ -348,9 +415,13 @@
   }
 
   function injectPageHook() {
-    if (root.__dealerFlowOpenLaneNetworkObserverInjected) return;
+    if (root.__dealerFlowOpenLaneNetworkObserverInjected) {
+      observerStatus = { ...observerStatus, pageHookInstalled: true };
+      return;
+    }
     if (typeof document === "undefined") return;
     root.__dealerFlowOpenLaneNetworkObserverInjected = true;
+    observerStatus = { ...observerStatus, pageHookInstalled: true };
     const script = document.createElement("script");
     script.src = chrome.runtime.getURL("src/openlane-network-page-hook.js");
     script.async = false;

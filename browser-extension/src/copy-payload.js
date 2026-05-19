@@ -60,6 +60,7 @@
       carfaxEvidenceSource: safeListing.openlaneMetadata?.carfaxEvidence?.[0]?.source || safeListing.carfax?.evidence?.[0]?.source || "",
       carfaxDiagnostics: safeListing.openlaneMetadata?.carfaxDiagnostics || {},
       networkObserver: runtime.networkObserver || null,
+      networkObserverDiagnostics: networkObserverDiagnostics(runtime, safeListing),
       networkEvidenceCount: runtime.networkEvidenceCount ?? safeListing.openlaneMetadata?.networkEvidence?.length ?? 0,
       networkObserverMessage: networkObserverMessage(runtime, safeListing),
       priceState: priceStateLabel(safeListing),
@@ -101,6 +102,7 @@
       purchaseEvidenceSource: purchaseEvidenceSource(safeListing),
       deepCaptureActive: Boolean(runtime.active || safeListing.captureLevel === "deep_capture"),
       networkObserverEnabled: Boolean(runtime.networkObserver?.enabled),
+      networkObserverDiagnostics: networkObserverDiagnostics(runtime, safeListing),
       networkEvidenceCount: runtime.networkEvidenceCount ?? safeListing.openlaneMetadata?.networkEvidence?.length ?? 0,
       networkObserverMessage: networkObserverMessage(runtime, safeListing),
       carfaxStatus: safeListing.carfaxUrlStatus || "missing",
@@ -117,9 +119,37 @@
     const observer = runtime.networkObserver || {};
     const count = Number(runtime.networkEvidenceCount ?? observer.observationCount ?? listing.openlaneMetadata?.networkEvidence?.length ?? 0);
     if (observer.enabled && count === 0) {
+      if (Number(observer.deniedEventCount || 0) > 0 && Number(observer.allowedEventCount || 0) === 0) {
+        return "Network events observed but denied by allowlist/denylist.";
+      }
+      if (Number(observer.irrelevantJsonCount || 0) > 0) {
+        return "Network JSON observed but no vehicle/carfax/price candidates found.";
+      }
       return "Network observer is enabled but no OpenLane vehicle JSON has been observed yet. Reload the VDP or check early hook/endpoint allowlist.";
     }
     return "";
+  }
+
+  function networkObserverDiagnostics(runtime = {}, listing = {}) {
+    const observer = runtime.networkObserver || {};
+    return sanitizeDebugValue({
+      pageHookInstalled: Boolean(observer.pageHookInstalled),
+      earlyHookInstalled: Boolean(observer.earlyHookInstalled),
+      earlyQueueLength: Number(observer.earlyQueueLength || 0),
+      earlyQueueFlushed: Boolean(observer.earlyQueueFlushed),
+      lastPageHookEventAt: observer.lastPageHookEventAt || "",
+      pageHookEventCount: Number(observer.pageHookEventCount || 0),
+      allowedEventCount: Number(observer.allowedEventCount || 0),
+      deniedEventCount: Number(observer.deniedEventCount || 0),
+      irrelevantJsonCount: Number(observer.irrelevantJsonCount || 0),
+      duplicateEventCount: Number(observer.duplicateEventCount || 0),
+      parseErrorCount: Number(observer.parseErrorCount || 0),
+      lastAllowedEndpointPattern: observer.lastAllowedEndpointPattern || "",
+      lastDeniedEndpointPattern: observer.lastDeniedEndpointPattern || "",
+      lastDeniedEndpointReason: observer.lastDeniedEndpointReason || "",
+      lastObservedEndpointSample: observer.lastObservedEndpointSample || "",
+      networkObserverMessage: networkObserverMessage(runtime, listing),
+    });
   }
 
   function buildPriceDiagnostics(listing = {}) {
