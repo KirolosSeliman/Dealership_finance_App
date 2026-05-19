@@ -1126,6 +1126,7 @@ test("OpenLane active VDP keeps current bid observational and rejects transport 
   assert.equal(listing.captureKind, "observation");
   assert.equal(listing.currentBid, 5100);
   assert.equal(listing.listedPrice, 5100);
+  assert.equal((listing.priceSemantics as Record<string, string>).listedPrice, "observation_alias_current_bid");
   assert.equal(listing.soldPriceCandidate, undefined);
   assert.equal(listing.buyPriceAuction, undefined);
   assert.equal(listing.finalBidAmount, undefined);
@@ -1146,6 +1147,7 @@ test("OpenLane active current bid resolver rejects bid counts and selects the bi
   assert.equal(listing.captureKind, "observation");
   assert.equal(listing.currentBid, 13_700);
   assert.equal(listing.listedPrice, 13_700);
+  assert.equal((listing.priceSemantics as Record<string, string>).listedPrice, "observation_alias_current_bid");
   assert.notEqual(listing.currentBid, 4);
   assert.match(String(fields.currentBidEvidence?.sourceText), /\$13,700/);
   assert.ok(fields.debug?.priceCandidates?.some((item) => item.field === "currentBid" && item.value === 4 && item.rejectedReason === "bid_count_not_money"));

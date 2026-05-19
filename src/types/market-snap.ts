@@ -38,6 +38,7 @@ export type MarketSnapCaptureScope =
   | "model_improvement";
 export type PriceSemantic =
   | "observation"
+  | "observation_alias_current_bid"
   | "candidate_wholesale_label"
   | "verified_wholesale_label"
   | "retail_label"

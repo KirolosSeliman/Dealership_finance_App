@@ -258,8 +258,10 @@ test("Market Snap validation accepts currentBid as observation without treating 
     year: 2022,
     make: "Toyota",
     model: "Corolla",
+    listedPrice: 16_500,
     currentBid: 16_500,
     priceSemantics: {
+      listedPrice: "observation_alias_current_bid",
       currentBid: "observation",
     },
   });
@@ -267,6 +269,7 @@ test("Market Snap validation accepts currentBid as observation without treating 
   assert.equal(result.success, true);
   assert.equal(result.data?.pageType, "active_listing");
   assert.equal(result.data?.captureKind, "observation");
+  assert.equal(result.data?.priceSemantics?.listedPrice, "observation_alias_current_bid");
   assert.equal(result.data?.priceSemantics?.currentBid, "observation");
   assert.equal(result.data?.finalBidAmount, undefined);
 });

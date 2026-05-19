@@ -61,13 +61,18 @@
     const currentOffer = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(scopedLabelValues.price, OPENLANE_LABELS.currentOffer);
     const bestOffer = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(scopedLabelValues.price, OPENLANE_LABELS.bestOffer);
     const buyNowPrice = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(scopedLabelValues.price, OPENLANE_LABELS.buyNowPrice);
-    const listedPrice = isPurchaseOutcomePage ? undefined : buyNowPrice || currentBid || currentOffer || bestOffer || firstNonTransportMoney(mainVisibleText);
+    const listedPriceResult = isPurchaseOutcomePage ? { value: undefined, semantic: undefined } : resolveActiveListedPrice({
+      buyNowPrice,
+      currentBid,
+      currentBidEvidence: currentBidResult.evidence,
+    });
+    const listedPrice = listedPriceResult.value;
     const observationPriceSemantics = isPurchaseOutcomePage ? undefined : compact({
       currentBid: currentBid ? "observation" : undefined,
       currentOffer: currentOffer ? "observation" : undefined,
       bestOffer: bestOffer ? "observation" : undefined,
       buyNowPrice: buyNowPrice ? "observation" : undefined,
-      listedPrice: listedPrice ? "observation" : undefined,
+      listedPrice: listedPriceResult.semantic,
     });
     const mileageKm = mileageResult.mileageKm;
     const vin = vinResult.vin;
@@ -202,6 +207,7 @@
           mileageCandidates: mileageResult.candidates,
           candidateScores: titleResult.candidates,
           priceCandidates: [...(currentBidResult.candidates || []), ...(purchaseEconomics.priceCandidates || []), ...(postSaleOutcome.priceCandidates || [])],
+          listedPriceDecision: listedPriceResult.decision,
           mediaRejected,
           mainTextSample: mainVisibleText.slice(0, 800),
         },
@@ -728,6 +734,43 @@
       candidates: candidates
         .sort((a, b) => Number(b.confidenceScore || 0) - Number(a.confidenceScore || 0))
         .slice(0, 16),
+    };
+  }
+
+  function resolveActiveListedPrice({ buyNowPrice, currentBid, currentBidEvidence } = {}) {
+    if (buyNowPrice) {
+      return {
+        value: buyNowPrice,
+        semantic: "observation",
+        decision: {
+          field: "listedPrice",
+          source: "buy_now_price",
+          semantics: "observation",
+          reason: "explicit_buy_now_price",
+        },
+      };
+    }
+    if (currentBid && currentBidEvidence?.sourceText) {
+      return {
+        value: currentBid,
+        semantic: "observation_alias_current_bid",
+        decision: {
+          field: "listedPrice",
+          source: "current_bid",
+          semantics: "observation_alias_current_bid",
+          reason: "trusted_current_bid_alias_for_active_auction_preview",
+          sourceText: currentBidEvidence.sourceText,
+        },
+      };
+    }
+    return {
+      value: undefined,
+      semantic: undefined,
+      decision: {
+        field: "listedPrice",
+        source: "none",
+        reason: "no_explicit_buy_now_or_trusted_current_bid",
+      },
     };
   }
 
@@ -1546,18 +1589,6 @@
 
   function moneyRegex() {
     return /(?:CA\$|CAD|\$)\s*[\d][\d,.\s]*(?:\.\d{2})?|\b[\d][\d,.\s]*(?:\.\d{2})?\s*\$|\bCAD\s*[\d,]+(?:\.\d{2})?/i;
-  }
-
-  function firstNonTransportMoney(text) {
-    const source = String(text || "");
-    const regex = new RegExp(moneyRegex().source, "ig");
-    for (const match of source.matchAll(regex)) {
-      const index = match.index || 0;
-      const context = source.slice(Math.max(0, index - 120), index + String(match[0]).length + 120);
-      if (isTransportPriceContext(context)) continue;
-      return moneyFrom(match[0]);
-    }
-    return undefined;
   }
 
   function isTransportPriceContext(text) {

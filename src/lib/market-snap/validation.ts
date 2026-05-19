@@ -30,6 +30,7 @@ export const marketSnapCaptureScopes = DEEP_CAPTURE_SCOPES;
 export const outcomeConfidenceLevels = ["low", "medium", "high", "verified"] as const;
 export const priceSemanticValues = [
   "observation",
+  "observation_alias_current_bid",
   "candidate_wholesale_label",
   "verified_wholesale_label",
   "retail_label",
