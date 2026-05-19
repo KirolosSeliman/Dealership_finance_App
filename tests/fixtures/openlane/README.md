@@ -30,6 +30,7 @@ Fixtures in this folder must be sanitized snapshots of visible page structure on
 - `openlane-vdp-carfax-text-only.html`, `openlane-network-carfax-url.json` - exact Phase 8 CARFAX text-only and network URL fixtures.
 - `openlane-vdp-active-current-bid-before-label-4-bids.html` - active VDP fixture reproducing the live `$13,700` before `Current bid` plus `4 Bids` bid-count trap.
 - `openlane-vdp-active-current-bid-proxy-history.html` - active VDP fixture reproducing `Highest proxy applied $21,000` plus lower bid-history `$11,100` and `2 Bids`.
+- `openlane-vdp-active-current-bid-with-lower-history-row.html` - Phase 10 required lower bid-history row fixture using the same `$21,000` versus `$11,100` trap.
 - `openlane-vdp-active-current-bid-29-bids.html` - active VDP fixture reproducing `Current bid $5,100` plus `29 Bids` and transport estimate noise.
 - `openlane-vdp-carfax-router-metadata.html`, `openlane-network-current-bid-carfax-diagnostics.json` - CARFAX router/network metadata fixtures for URL recovery diagnostics.
 - `openlane-vdp-active-current-bid-with-bid-count.html`, `openlane-vdp-active-current-bid-footer-fallback.html`, `openlane-vdp-active-current-bid-no-money.html` - Phase 7 exact current-bid fixtures for bid-count rejection, sticky footer fallback, and no-money protection.

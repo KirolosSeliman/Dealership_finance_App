@@ -1301,7 +1301,7 @@ test("OpenLane strict current bid parser rejects UI counters and accepts explici
 
 test("OpenLane active current bid parser accepts highest proxy applied and rejects bid count", () => {
   const listing = extractor.extractOpenLaneFixture(
-    fixture("openlane-vdp-active-current-bid-proxy-history.html"),
+    fixture("openlane-vdp-active-current-bid-with-lower-history-row.html"),
     "https://app.openlane.ca/vdp/KM8J3CA46HU654321",
   );
   const fields = listing.extractedFields as {
