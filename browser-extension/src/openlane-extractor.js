@@ -709,6 +709,7 @@
     const sectionMap = textRegions.sectionMap || doc.__openlaneSectionMap || {};
     const zones = sectionMap.zones || {};
     addNetworkCurrentBidCandidates(candidates, options.networkEvidence);
+    addCurrentBidTextCandidates(candidates, "section-map:activeBidBar", zones.activeBidBar?.text, 98);
     addCurrentBidTextCandidates(candidates, "section-map:bidPanel", zones.bidPanel?.text, 88);
     addCurrentBidTextCandidates(candidates, "section-map:purchasePanel", zones.purchasePanel?.text, 76);
     addCurrentBidTextCandidates(candidates, "section-map:footer", textRegions.footerText, 52);
@@ -836,8 +837,7 @@
     addCurrentBidCounterCandidates(candidates, sourceName, source, baseScore);
     const labelWindows = currentBidLabelWindows(source);
     for (const window of labelWindows) {
-      const regex = new RegExp(moneyRegex().source, "ig");
-      for (const match of window.text.matchAll(regex)) {
+      for (const match of parseMoneyCandidateMatches(window.text)) {
         const token = match[0];
         const value = currentBidMoneyFrom(token);
         const tokenIndex = window.start + (match.index || 0);
@@ -848,7 +848,7 @@
           token,
           relationToLabel: tokenIndex >= window.labelIndex ? "after_label" : "before_label",
           betweenLabelAndToken: source.slice(Math.min(window.labelIndex, tokenIndex), Math.max(window.labelIndex, tokenIndex)),
-          sourceType: sourceName.startsWith("section-map") ? "section_map" : sourceName.startsWith("dom:") ? "dom_text" : "visible_text",
+          sourceType: currentBidSourceType(sourceName),
           sourceName,
           sourceText,
           confidenceScore: baseScore + (tokenIndex >= window.labelIndex ? 7 : 4) + Math.max(0, 6 - Math.floor(distance / 25)),
@@ -856,14 +856,13 @@
       }
     }
     if (!labelWindows.length && /\b(current bid|top bid|mise actuelle)\b/i.test(source)) {
-      const regex = new RegExp(moneyRegex().source, "ig");
-      for (const match of source.matchAll(regex)) {
+      for (const match of parseMoneyCandidateMatches(source)) {
         const token = match[0];
         const tokenIndex = match.index || 0;
         addCurrentBidCandidate(candidates, {
           value: currentBidMoneyFrom(token),
           token,
-          sourceType: sourceName.startsWith("section-map") ? "section_map" : "visible_text",
+          sourceType: currentBidSourceType(sourceName),
           sourceName,
           sourceText: currentBidCandidateSnippet(source, tokenIndex, token.length),
           confidenceScore: baseScore,
@@ -887,19 +886,19 @@
   }
 
   function addCurrentBidCounterCandidates(candidates, sourceName, text, baseScore) {
-    for (const label of OPENLANE_LABELS.currentBid) {
-      const regex = new RegExp(`\\b${escapeRegExp(label)}\\b[\\s\\S]{0,80}?\\b(\\d{1,4})\\b\\s*(bids?|outbid|watchlist|photos?|disclosures?|videos?|total|hours?|mins?|minutes?|days?|km)\\b`, "ig");
-      for (const match of String(text || "").matchAll(regex)) {
-        const value = moneyFrom(match[1]);
-        if (!value) continue;
+    for (const window of currentBidLabelWindows(text)) {
+      const regex = /\b(\d{1,4})\b\s*(bids?|outbid|watchlist|if deals?|photos?|photo|disclosures?|disclosure|videos?|video|total|hours?|mins?|minutes?|days?|page\s*number|auction\s*id|distance|km|features?\s+listed)\b/ig;
+      for (const match of window.text.matchAll(regex)) {
+        const value = numberFrom(match[1]);
+        if (value === undefined) continue;
         candidates.push({
           field: "currentBid",
           value,
-          sourceType: sourceName.startsWith("section-map") ? "section_map" : "visible_text",
+          sourceType: currentBidSourceType(sourceName),
           sourceName,
           sourceText: normalizeSpace(match[0]).slice(0, 240),
           confidenceScore: Math.max(1, baseScore - 40),
-          rejectedReason: "bid_count_not_money",
+          rejectedReason: rejectedPriceCounterReason(match[2]),
         });
       }
     }
@@ -925,7 +924,7 @@
     if (candidate.sourceType === "network_json") return "";
     const token = String(candidate.token || "");
     const sourceText = String(candidate.sourceText || "");
-    if (!hasMoneyMarker(token) && hasCounterPriceContext(sourceText)) return "bid_count_not_money";
+    if (!hasMoneyMarker(token) && isRejectedPriceCounterContext(sourceText)) return "bid_count_not_money";
     if (!hasMoneyMarker(`${token} ${sourceText}`)) return "missing_money_context";
     if (isTransportPriceContext(sourceText)) return "transport_or_distance_not_current_bid";
     if (/\b(buy now|buy it now)\b/i.test(candidate.betweenLabelAndToken || "")) return "buy_now_not_current_bid";
@@ -941,15 +940,45 @@
   }
 
   function hasCounterPriceContext(value) {
-    return /\b(bids?|outbid|watchlist|if deals?|photos?|photo|disclosures?|disclosure|videos?|video|total|hours?|mins?|minutes?|days?|page number|auction id|distance|km)\b/i.test(String(value || ""));
+    return /\b(bids?|outbid|watchlist|if deals?|photos?|photo|disclosures?|disclosure|videos?|video|total|hours?|mins?|minutes?|days?|page number|auction id|distance|km|features?\s+listed)\b/i.test(String(value || ""));
   }
 
   function currentBidMoneyFrom(value) {
+    const parsed = parseMoneyCandidate(value);
+    if (parsed !== undefined) return parsed;
+    return undefined;
+  }
+
+  function parseMoneyCandidate(value) {
     const text = String(value || "");
-    const leading = text.match(/(?:CA\$|CAD|\$)\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.\d{2})?/i);
-    const trailing = text.match(/\b([0-9]{1,3}(?:[,\s][0-9]{3})+|[0-9]+)(?:\.\d{2})?\s*\$/i);
+    const leading = text.match(/(?:CA\$|CAD|\$)[ \t]*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.\d{2})?/i);
+    const trailing = text.match(/\b([0-9]{1,3}(?:[,\s][0-9]{3})+|[0-9]+)(?:\.\d{2})?[ \t]*\$/i);
     const amount = leading?.[1] || trailing?.[1];
     return moneyFrom(amount);
+  }
+
+  function parseMoneyCandidateMatches(text) {
+    return Array.from(String(text || "").matchAll(/(?:CA\$|CAD|\$)[ \t]*(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.\d{2})?|\b(?:[0-9]{1,3}(?:[,\s][0-9]{3})+|[0-9]+)(?:\.\d{2})?[ \t]*\$/ig));
+  }
+
+  function isRejectedPriceCounterContext(text) {
+    return hasCounterPriceContext(text) || isTransportPriceContext(text);
+  }
+
+  function rejectedPriceCounterReason(label) {
+    const value = String(label || "");
+    if (/\b(bids?|outbid)\b/i.test(value)) return "bid_count_not_money";
+    if (/\b(photos?|videos?|total)\b/i.test(value)) return "media_count_not_money";
+    if (/\b(disclosures?|features?\s+listed)\b/i.test(value)) return "disclosure_count_not_money";
+    if (/\b(km|distance)\b/i.test(value)) return "transport_estimate_not_vehicle_price";
+    return "counter_not_money";
+  }
+
+  function currentBidSourceType(sourceName) {
+    if (/activeBidBar/i.test(sourceName)) return "active_bid_bar";
+    if (sourceName.startsWith("section-map")) return "section_map";
+    if (sourceName.startsWith("dom:")) return "dom_text";
+    return "visible_text";
   }
 
   function currentBidCandidateSnippet(source, index, length) {

@@ -1244,6 +1244,93 @@ test("OpenLane active current bid resolver does not fall back to bid count witho
   assert.ok(fields.debug?.priceCandidates?.some((item) => item.field === "currentBid" && item.value === 4 && item.rejectedReason === "bid_count_not_money"));
 });
 
+test("OpenLane strict current bid parser rejects UI counters and accepts explicit low money", () => {
+  const counterOnly = extractor.extractOpenLaneFixture(`
+    <!doctype html>
+    <html>
+      <body>
+        <main data-testid="vehicle-detail-page">
+          <section class="vehicle-hero" data-vin="2HGFC2F59KH123456">
+            <h1>2019 Honda Civic EX</h1>
+            <p>Odometer 88,210 KM</p>
+          </section>
+          <section class="bid-panel">
+            <h2>Current bid</h2>
+            <p>2 Bids</p>
+            <p>29 Bids</p>
+            <p>0 Outbid</p>
+            <p>14 total</p>
+            <p>5 disclosures</p>
+            <p>1 videos</p>
+          </section>
+        </main>
+      </body>
+    </html>
+  `, "https://app.openlane.ca/vdp/2HGFC2F59KH123456");
+  const counterFields = counterOnly.extractedFields as {
+    debug?: { priceCandidates?: Array<{ field?: string; value?: number; rejectedReason?: string; sourceText?: string }> };
+  };
+
+  assert.equal(counterOnly.currentBid, undefined);
+  assert.equal(counterOnly.listedPrice, undefined);
+  for (const value of [2, 29, 0, 14, 5, 1]) {
+    assert.ok(counterFields.debug?.priceCandidates?.some((item) => item.field === "currentBid" && item.value === value && item.rejectedReason), `missing rejected counter ${value}`);
+  }
+
+  const explicitLowMoney = extractor.extractOpenLaneFixture(`
+    <!doctype html>
+    <html>
+      <body>
+        <main data-testid="vehicle-detail-page">
+          <section class="vehicle-hero" data-vin="2HGFC2F59KH123456">
+            <h1>2019 Honda Civic EX</h1>
+            <p>Odometer 88,210 KM</p>
+          </section>
+          <section class="bid-panel">
+            <h2>Current bid</h2>
+            <p>$4</p>
+          </section>
+        </main>
+      </body>
+    </html>
+  `, "https://app.openlane.ca/vdp/2HGFC2F59KH123456");
+
+  assert.equal(explicitLowMoney.currentBid, 4);
+  assert.equal(explicitLowMoney.listedPrice, 4);
+});
+
+test("OpenLane active current bid parser accepts highest proxy applied and rejects bid count", () => {
+  const listing = extractor.extractOpenLaneFixture(
+    fixture("openlane-vdp-active-current-bid-proxy-history.html"),
+    "https://app.openlane.ca/vdp/KM8J3CA46HU654321",
+  );
+  const fields = listing.extractedFields as {
+    currentBidEvidence?: { sourceText?: string };
+    debug?: { priceCandidates?: Array<{ field?: string; value?: number; rejectedReason?: string; sourceText?: string }> };
+  };
+
+  assert.equal(listing.currentBid, 21_000);
+  assert.equal(listing.listedPrice, 21_000);
+  assert.match(String(fields.currentBidEvidence?.sourceText), /\$21,000/);
+  assert.ok(fields.debug?.priceCandidates?.some((item) => item.field === "currentBid" && item.value === 2 && item.rejectedReason === "bid_count_not_money"));
+});
+
+test("OpenLane active current bid parser rejects 29 Bids and transport distance noise", () => {
+  const listing = extractor.extractOpenLaneFixture(
+    fixture("openlane-vdp-active-current-bid-29-bids.html"),
+    "https://app.openlane.ca/vdp/2HGFC2F59KH123456",
+  );
+  const fields = listing.extractedFields as {
+    debug?: { priceCandidates?: Array<{ field?: string; value?: number; rejectedReason?: string; sourceText?: string }> };
+  };
+
+  assert.equal(listing.currentBid, 5_100);
+  assert.equal(listing.listedPrice, 5_100);
+  assert.notEqual(listing.currentBid, 29);
+  assert.notEqual(listing.currentBid, 428);
+  assert.ok(fields.debug?.priceCandidates?.some((item) => item.field === "currentBid" && item.value === 29 && item.rejectedReason === "bid_count_not_money"));
+});
+
 test("OpenLane Phase 7 CARFAX fixtures keep text-only and router URL behavior truthful", () => {
   const textOnly = extractor.extractOpenLaneFixture(
     fixture("openlane-vdp-carfax-text-only.html"),
