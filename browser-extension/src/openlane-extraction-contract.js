@@ -281,7 +281,9 @@
       manual_confirmation: 98,
       post_sale_page: item.captureKind === "verified_outcome" ? 94 : 78,
       network_json: 92,
-      dom_attribute: 90,
+      explicit_dom_attribute: 90,
+      header_chip: 88,
+      safe_dom_attribute: 86,
       dom_label: 85,
       safe_expansion: 82,
       section_map: 75,
@@ -317,22 +319,27 @@
       fee_page: 9,
       manual_confirmation: 9,
       post_sale_page: 8,
-      network_json: 7,
-      dom_attribute: 6,
-      dom_label: 5,
-      safe_expansion: 4,
-      section_map: 3,
+      network_json: 8,
+      explicit_dom_attribute: 7,
+      header_chip: 6,
+      safe_dom_attribute: 5,
+      dom_label: 4,
+      safe_expansion: 3,
+      section_map: 2,
       fallback_regex: 1,
     }[sourceType] ?? 0;
   }
 
   function sourceTypeForFlatField(field, listing) {
-    if (field === "vin" && /data-vin|dom_attribute|safe_dom_attributes|html_attributes|attribute:/i.test(String(listing.extractedFields?.vinEvidence?.matchedLabel || listing.extractedFields?.vinEvidence?.source || ""))) return "dom_attribute";
-    if (field === "vin" && /section-map/i.test(String(listing.extractedFields?.vinEvidence?.matchedLabel || ""))) return "section_map";
+    const vinSource = String(listing.extractedFields?.vinEvidence?.matchedLabel || listing.extractedFields?.vinEvidence?.source || "");
+    if (field === "vin" && /explicit_dom_attribute|data-vin|dom_attributes|attribute:/i.test(vinSource)) return "explicit_dom_attribute";
+    if (field === "vin" && /header_vin_chip/i.test(vinSource)) return "header_chip";
+    if (field === "vin" && /safe_dom_attributes|html_attributes|copy_button/i.test(vinSource)) return "safe_dom_attribute";
+    if (field === "vin" && /section-map/i.test(vinSource)) return "section_map";
     if (field === "mileageKm" && listing.extractedFields?.mileageEvidence) return "dom_label";
     if (["buyPriceAuction", "totalInvoiceAmount", "finalAcquisitionCost"].includes(field) && listing.pageType === "fee_details") return "fee_page";
     if (["soldPriceCandidate", "acceptedAmount", "finalBidAmount"].includes(field) && listing.pageType === "post_sale") return "post_sale_page";
-    if (field === "carfaxUrl" || field === "carfaxUrlStatus") return listing.carfaxUrl ? "dom_attribute" : "dom_label";
+    if (field === "carfaxUrl" || field === "carfaxUrlStatus") return listing.carfaxUrl ? "safe_dom_attribute" : "dom_label";
     return "dom_label";
   }
 

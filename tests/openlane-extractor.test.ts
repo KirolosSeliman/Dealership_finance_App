@@ -130,10 +130,30 @@ test("OpenLane VIN resolver prefers header chip and explicit DOM evidence over s
     </main>
   `, "https://app.openlane.ca/vdp/3KPFL4A72HE119966");
   const fields = listing.extractedFields as { vinEvidence?: { matchedLabel?: string; sourceText?: string } };
+  const fieldEvidence = listing.fieldEvidence as Record<string, Array<{ sourceType?: string }>>;
 
   assert.equal(listing.vin, "KM8J3CA46HU123456");
   assert.equal(fields.vinEvidence?.matchedLabel, "header_vin_chip");
+  assert.equal(fieldEvidence.vin?.[0]?.sourceType, "header_chip");
   assert.match(String(fields.vinEvidence?.sourceText || ""), /KM8J3CA46HU123456/);
+});
+
+test("OpenLane VIN field evidence keeps explicit DOM attributes above fallback URL evidence", () => {
+  const listing = extractor.extractOpenLaneFixture(`
+    <main class="vdp-page">
+      <section class="vehicle-hero" data-vin="KM8J3CA46HU123456">
+        <h1>2017 Hyundai Tucson AWD</h1>
+      </section>
+      <section class="vehicle-specs">Odometer 111,486 KM</section>
+      <section class="bid-panel">Current Bid $4,600</section>
+      <span>23 total photos</span>
+    </main>
+  `, "https://app.openlane.ca/vdp/3KPFL4A72HE119966");
+  const fieldEvidence = listing.fieldEvidence as Record<string, Array<{ sourceType?: string; normalizedValue?: string }>>;
+
+  assert.equal(listing.vin, "KM8J3CA46HU123456");
+  assert.equal(fieldEvidence.vin?.[0]?.sourceType, "explicit_dom_attribute");
+  assert.equal(fieldEvidence.vin?.[0]?.normalizedValue, "KM8J3CA46HU123456");
 });
 
 test("OpenLane VIN resolver rejects UI token candidates before choosing valid VIN", () => {

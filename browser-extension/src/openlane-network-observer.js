@@ -219,7 +219,9 @@
     if (listing.captureKind === "manual_confirmation") return 98;
     const label = String(listing.extractedFields?.vinEvidence?.matchedLabel || listing.extractedFields?.vinEvidence?.source || "");
     if (/network_observation|network_json/i.test(label)) return 92;
-    if (/data-vin|dom_attribute|safe_dom_attributes|html_attributes|attribute:/i.test(label)) return 90;
+    if (/explicit_dom_attribute|data-vin|dom_attribute|dom_attributes|attribute:/i.test(label)) return 90;
+    if (/header_vin_chip/i.test(label)) return 88;
+    if (/safe_dom_attribute|safe_dom_attributes|html_attributes|copy_button/i.test(label)) return 86;
     if (/section-map/i.test(label)) return 75;
     if (/url/i.test(label)) return 80;
     return listing.vin ? 55 : 0;

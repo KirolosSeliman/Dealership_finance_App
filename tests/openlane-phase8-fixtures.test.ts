@@ -46,7 +46,7 @@ test("Phase 8 fixtures protect VIN extraction sources and invalid VIN rejection"
   assert.equal(urlOnlyVin.vin, "3KPFL4A72HE119966");
   assert.match(String(((urlOnlyVin.fieldEvidence as { vin?: Array<{ sourceText?: string }> }).vin || [])[0]?.sourceText || ""), /3KPFL4A72HE119966/);
   assert.equal(attributeVin.vin, "3KPFL4A72HE119966");
-  assert.ok(((attributeVin.fieldEvidence as { vin?: Array<{ sourceType?: string }> }).vin || []).some((item) => item.sourceType === "dom_attribute"));
+  assert.ok(((attributeVin.fieldEvidence as { vin?: Array<{ sourceType?: string }> }).vin || []).some((item) => item.sourceType === "explicit_dom_attribute"));
   assert.equal(networkCandidates.vinCandidates[0]?.vin, "KM8J3CA46HU123456");
   assert.equal(invalidVin.vin, undefined);
   assert.ok((invalidVin.missingData as string[]).includes("vin"));
