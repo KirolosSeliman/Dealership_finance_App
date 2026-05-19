@@ -55,7 +55,7 @@
     const currentOffer = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(labelValues, OPENLANE_LABELS.currentOffer);
     const bestOffer = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(labelValues, OPENLANE_LABELS.bestOffer);
     const buyNowPrice = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(labelValues, OPENLANE_LABELS.buyNowPrice);
-    const listedPrice = isPurchaseOutcomePage ? undefined : buyNowPrice || currentBid || currentOffer || bestOffer || moneyFrom(mainVisibleText.match(moneyRegex())?.[0]);
+    const listedPrice = isPurchaseOutcomePage ? undefined : buyNowPrice || currentBid || currentOffer || bestOffer || firstNonTransportMoney(mainVisibleText);
     const mileageKm = mileageResult.mileageKm;
     const vin = vinResult.vin;
     const province = provinceFrom(firstLabel(labelValues, OPENLANE_LABELS.location) || mainVisibleText);
@@ -110,7 +110,7 @@
       currentOffer,
       bestOffer,
       buyNowPrice,
-      soldPriceCandidate: postSaleOutcome.soldPriceCandidate,
+      soldPriceCandidate: postSaleOutcome.soldPriceCandidate || purchaseEconomics.soldPriceCandidate,
       finalBidAmount: postSaleOutcome.finalBidAmount,
       negotiatedAmount: postSaleOutcome.negotiatedAmount,
       counterOfferAmount: postSaleOutcome.counterOfferAmount,
@@ -182,7 +182,7 @@
           vinCandidates: vinResult.candidates,
           mileageCandidates: mileageResult.candidates,
           candidateScores: titleResult.candidates,
-          priceCandidates: purchaseEconomics.priceCandidates || [],
+          priceCandidates: [...(purchaseEconomics.priceCandidates || []), ...(postSaleOutcome.priceCandidates || [])],
           mediaRejected,
           mainTextSample: mainVisibleText.slice(0, 800),
         },
@@ -927,7 +927,7 @@
   function extractPurchaseEconomics(text, classification) {
     if (!["fee_details", "purchase_detail", "purchase_info"].includes(classification.pageType)) return {};
     const priceCandidates = [];
-    const buyPriceAuction = moneyNearLabel(text, "Buy price - auction", priceCandidates) || moneyNearLabel(text, "Selling price", priceCandidates);
+    const soldPriceCandidate = moneyNearLabel(text, "Sold price", priceCandidates);
     const transactionFee = moneyNearLabel(text, "Transaction Fee");
     const vehicleHistoryFee = moneyNearLabel(text, "Vehicle history - auction") || moneyNearLabel(text, "Vehicle History Fee");
     const subtotal = moneyNearLabel(text, "Subtotal");
@@ -935,9 +935,13 @@
     const totalInvoiceAmount = moneyNearLabel(text, "Total invoice") || moneyNearLabel(text, "Invoice total") || (classification.pageType === "fee_details" ? moneyNearLabel(text, "Total") : undefined);
     const finalAcquisitionCost = totalInvoiceAmount;
     const purchaseStatus = cleanStatusValue(valueNearTextLabel(text, "Status"));
-    const verifiedWholesale = /\b(retrieved|paid|final|finalized|completed|purchase confirmed)\b/i.test(`${purchaseStatus || ""} ${text}`);
+    const verifiedWholesale = /\b(retrieved|mark as picked up|picked up|paid|final|finalized|completed|purchase confirmed|invoice)\b/i.test(`${purchaseStatus || ""} ${text}`);
+    const explicitBuyPriceAuction = moneyNearLabel(text, "Buy price - auction", priceCandidates) || moneyNearLabel(text, "Selling price", priceCandidates);
+    const buyPriceAuction = explicitBuyPriceAuction || (verifiedWholesale ? soldPriceCandidate : undefined);
     const sellingPriceEvidence = buyPriceAuction ? purchaseEvidenceSnippet(text, "Selling price") || purchaseEvidenceSnippet(text, "Buy price - auction") : undefined;
-    const priceSemantics = buyPriceAuction || transactionFee || vehicleHistoryFee || subtotal || taxes || totalInvoiceAmount ? compact({
+    const soldPriceEvidence = soldPriceCandidate ? purchaseEvidenceSnippet(text, "Sold price") : undefined;
+    const priceSemantics = soldPriceCandidate || buyPriceAuction || transactionFee || vehicleHistoryFee || subtotal || taxes || totalInvoiceAmount ? compact({
+      soldPriceCandidate: soldPriceCandidate ? "candidate_wholesale_label" : undefined,
       buyPriceAuction: buyPriceAuction ? (verifiedWholesale ? "verified_wholesale_label" : "candidate_wholesale_label") : undefined,
       transactionFee: transactionFee ? "acquisition_cost_component" : undefined,
       vehicleHistoryFee: vehicleHistoryFee ? "acquisition_cost_component" : undefined,
@@ -947,6 +951,7 @@
       finalAcquisitionCost: finalAcquisitionCost ? "final_acquisition_cost" : undefined,
     }) : undefined;
     return compact({
+      soldPriceCandidate,
       buyPriceAuction,
       transactionFee,
       vehicleHistoryFee,
@@ -956,9 +961,9 @@
       finalAcquisitionCost,
       purchaseStatus,
       priceSemantics,
-      outcomeEvidence: sellingPriceEvidence ? [{
+      outcomeEvidence: (sellingPriceEvidence || soldPriceEvidence) ? [{
         evidenceType: verifiedWholesale ? "purchase_document" : "visible_page_text",
-        sourceText: sellingPriceEvidence,
+        sourceText: sellingPriceEvidence || soldPriceEvidence,
         capturedAt: new Date().toISOString(),
         confidenceScore: classification.confidenceScore,
       }] : undefined,
@@ -975,7 +980,8 @@
 
   function extractPostSaleOutcome(text, classification) {
     if (classification.pageType !== "post_sale") return {};
-    const soldPriceCandidate = moneyNearLabel(text, "Sold Price") || moneyNearLabel(text, "Post Sale Amount");
+    const priceCandidates = [];
+    const soldPriceCandidate = moneyNearLabel(text, "Sold Price", priceCandidates) || moneyNearLabel(text, "Post Sale Amount", priceCandidates);
     const counterOfferAmount = moneyNearLabel(text, "Counter Offer Amount") || moneyNearLabel(text, "Counter Offer") || moneyNearLabel(text, "Counteroffer");
     const acceptedAmount = moneyNearLabel(text, "Accepted Amount") || moneyNearLabel(text, "Accepted Offer");
     const negotiationStatus = extractNegotiationStatus(text);
@@ -1015,6 +1021,7 @@
         acceptedAt: isVerified ? extractDateNearNegotiation(text) : undefined,
         trainingStatus: isVerified ? "eligible_verified_outcome" : "candidate_only_do_not_train",
       }),
+      priceCandidates,
     });
   }
 
@@ -1169,6 +1176,24 @@
 
   function moneyRegex() {
     return /(?:CA\$|CAD|\$)\s*[\d][\d,.\s]*(?:\.\d{2})?|\b[\d][\d,.\s]*(?:\.\d{2})?\s*\$|\bCAD\s*[\d,]+(?:\.\d{2})?/i;
+  }
+
+  function firstNonTransportMoney(text) {
+    const source = String(text || "");
+    const regex = new RegExp(moneyRegex().source, "ig");
+    for (const match of source.matchAll(regex)) {
+      const index = match.index || 0;
+      const context = source.slice(Math.max(0, index - 120), index + String(match[0]).length + 120);
+      if (isTransportPriceContext(context)) continue;
+      return moneyFrom(match[0]);
+    }
+    return undefined;
+  }
+
+  function isTransportPriceContext(text) {
+    return /\b(transport|transport direct|rate info|delivery|pickup|shipping|distance|estimate|livraison|ramassage)\b/i.test(String(text || ""))
+      || /\bCAD\b[\s\S]{0,80}\/\s*\d[\d,. ]*\s*km\b/i.test(String(text || ""))
+      || /\/\s*(?:km|kilomet(?:er|re)s?)\b/i.test(String(text || ""));
   }
 
   function valueNearTextLabel(text, label) {

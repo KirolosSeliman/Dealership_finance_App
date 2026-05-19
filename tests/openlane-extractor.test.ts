@@ -1017,6 +1017,42 @@ test("OpenLane classifier ignores sidebar and footer purchase noise without a re
   assert.equal(footerOnly.captureKind, "observation");
 });
 
+test("OpenLane purchased VDP extracts sold price as outcome and ignores transport estimate as price", () => {
+  const listing = extractor.extractOpenLaneFixture(
+    fixture("openlane-vdp-purchased-sold-price-picked-up.html"),
+    "https://app.openlane.ca/vdp/KM8J3CA46HU123456",
+  );
+  const semantics = listing.priceSemantics as Record<string, string>;
+  const fields = listing.extractedFields as { debug?: { priceCandidates?: Array<{ label?: string; value?: number; sourceText?: string }> } };
+
+  assert.equal(listing.pageType, "purchase_detail");
+  assert.equal(listing.captureKind, "verified_outcome");
+  assert.equal(listing.outcomeConfidence, "verified");
+  assert.equal(listing.soldPriceCandidate, 4000);
+  assert.equal(semantics.soldPriceCandidate, "candidate_wholesale_label");
+  assert.notEqual(listing.listedPrice, 378);
+  assert.equal(listing.listedPrice, undefined);
+  assert.equal(listing.currentBid, undefined);
+  assert.ok(fields.debug?.priceCandidates?.some((item) => item.label === "Sold price" && item.value === 4000));
+  assert.equal(fields.debug?.priceCandidates?.some((item) => /Transport estimate/i.test(String(item.sourceText)) && item.value === 378), false);
+});
+
+test("OpenLane active VDP keeps current bid observational and rejects transport estimate as listed price", () => {
+  const listing = extractor.extractOpenLaneFixture(
+    fixture("openlane-vdp-active-current-bid-control.html").replace("$4,600", "$5,100"),
+    "https://app.openlane.ca/vdp/KM8J3CA46HU123456",
+  );
+
+  assert.equal(listing.pageType, "active_listing");
+  assert.equal(listing.captureKind, "observation");
+  assert.equal(listing.currentBid, 5100);
+  assert.equal(listing.listedPrice, 5100);
+  assert.equal(listing.soldPriceCandidate, undefined);
+  assert.equal(listing.buyPriceAuction, undefined);
+  assert.equal(listing.finalBidAmount, undefined);
+  assert.notEqual(listing.listedPrice, 378);
+});
+
 test("OpenLane extractor includes classifier result in listing payload", () => {
   const listing = extractor.extractOpenLaneFixture(fixture("openlane-fee-details.html"), "https://www.openlane.ca/purchases/123/fees");
 

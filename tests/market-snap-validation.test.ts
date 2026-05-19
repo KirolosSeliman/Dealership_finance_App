@@ -225,6 +225,28 @@ test("Market Snap validation rejects active listing payloads that claim verified
   assert.equal(result.success, false);
 });
 
+test("Market Snap validation rejects observation payloads that carry outcome price fields", () => {
+  const result = marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "active_listing",
+    captureKind: "observation",
+    title: "2017 Hyundai Tucson",
+    year: 2017,
+    make: "Hyundai",
+    model: "Tucson",
+    currentBid: 5_100,
+    soldPriceCandidate: 4_000,
+    priceSemantics: {
+      currentBid: "observation",
+      soldPriceCandidate: "candidate_wholesale_label",
+    },
+  });
+
+  assert.equal(result.success, false);
+});
+
 test("Market Snap validation accepts currentBid as observation without treating it as a final label", () => {
   const result = marketListingPayloadSchema.safeParse({
     organizationId,
