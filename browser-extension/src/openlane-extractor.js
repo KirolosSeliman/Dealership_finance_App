@@ -743,6 +743,7 @@
       ].filter(Boolean).join(" "));
     }
     add("safe_dom_attributes", extractSafeDomAttributeText(doc));
+    for (const evidence of extractCarfaxZoneEvidenceFromHtml(doc.__openlaneHtml || "")) add("html_carfax_zone", evidence);
     for (const evidence of extractCarfaxEvidenceFromHtml(doc.__openlaneHtml || "")) add("html_node", evidence);
     add("html_attributes", extractAttributeText(doc.__openlaneHtml || ""));
     add("visible_text", text);
@@ -775,6 +776,18 @@
       if (/carfax/i.test(source)) evidence.push(`${source.match(/<[^>]+>/)?.[0] || ""} ${stripTags(source)}`.slice(0, 500));
     }
     return evidence;
+  }
+
+  function extractCarfaxZoneEvidenceFromHtml(html) {
+    const source = String(html || "");
+    const evidence = [];
+    for (const match of source.matchAll(/carfax/gi)) {
+      const snippet = source.slice(Math.max(0, match.index - 800), match.index + 1200);
+      const combined = `${stripTags(snippet)}\n${extractAttributeText(snippet)}`;
+      if (carfaxUrlCandidate(combined)) evidence.push(combined.slice(0, 800));
+      if (evidence.length >= 8) break;
+    }
+    return Array.from(new Set(evidence));
   }
 
   function extractConditionDetails(sectionMap, text, labels) {

@@ -306,6 +306,28 @@ test("OpenLane CARFAX resolver extracts data-url metadata", () => {
   assert.equal(listing.carfaxUrlStatus, "url_found");
 });
 
+test("OpenLane CARFAX resolver pairs nearby report metadata with visible Carfax zone text", () => {
+  const listing = extractor.extractOpenLaneFixture(`
+    <main class="vdp-page">
+      <section class="vehicle-hero">
+        <h1>2017 Hyundai Tucson AWD</h1>
+        <p>VIN KM8J3CA46HU123456</p>
+      </section>
+      <section class="vehicle-specs">Odometer 111,486 KM</section>
+      <section class="bid-panel">Current Bid $4,600</section>
+      <section class="history-panel">
+        <p>Always view the CARFAX report before bidding.</p>
+        <button data-url="/vehicle-history/reports/TUCSON789">View report</button>
+      </section>
+      <span>23 total photos</span>
+    </main>
+  `, "https://app.openlane.ca/vdp/tucson");
+
+  assert.equal(listing.carfaxUrl, "https://app.openlane.ca/vehicle-history/reports/TUCSON789");
+  assert.equal(listing.carfaxUrlStatus, "url_found");
+  assert.ok((listing.openlaneMetadata as { carfaxEvidence?: Array<{ source?: string }> }).carfaxEvidence?.some((item) => item.source === "html_carfax_zone"));
+});
+
 test("OpenLane CARFAX resolver scans safe generic attributes and rejects asset URLs", () => {
   const genericAttribute = extractor.extractOpenLaneFixture(`
     <main class="vdp-page">
@@ -700,6 +722,38 @@ test("OpenLane network CARFAX candidate normalizes status and evidence after Dee
   assert.equal(merged.carfaxUrlStatus, "url_found");
   assert.equal(merged.fieldEvidence?.carfaxUrl?.[0]?.sourceType, "network_json");
   assert.ok(merged.openlaneMetadata?.carfaxEvidence?.some((item) => item.source === "network_json"));
+});
+
+test("OpenLane network CARFAX availability without URL remains truthful text_only", () => {
+  const candidates = networkObserver.extractCandidatesFromNetworkPayload({
+    vehicle: {
+      vin: "KM8J3CA46HU123456",
+      vehicleHistoryReportAvailable: true,
+    },
+  }, "https://app.openlane.ca/api/vdp/KM8J3CA46HU123456");
+  const merged = networkObserver.mergeNetworkEvidenceIntoListing({
+    sourceName: "OpenLane",
+    listingUrl: "https://app.openlane.ca/vdp/KM8J3CA46HU123456",
+    captureKind: "observation",
+    pageType: "active_listing",
+  }, [{
+    endpointPattern: "app.openlane.ca/api/vdp/:id",
+    capturedAt: "2026-05-17T12:00:00.000Z",
+    sanitizedKeys: candidates.sanitizedKeys,
+    candidates,
+  }]) as {
+    carfaxMentioned?: boolean;
+    carfaxAvailable?: boolean;
+    carfaxUrl?: string;
+    carfaxUrlStatus?: string;
+    openlaneMetadata?: { carfaxEvidence?: Array<{ urlStatus?: string }> };
+  };
+
+  assert.equal(merged.carfaxMentioned, true);
+  assert.equal(merged.carfaxAvailable, true);
+  assert.equal(merged.carfaxUrl, undefined);
+  assert.equal(merged.carfaxUrlStatus, "text_only");
+  assert.ok(merged.openlaneMetadata?.carfaxEvidence?.some((item) => item.urlStatus === "text_only"));
 });
 
 test("OpenLane extractor reads core auction fields from fixture HTML", () => {

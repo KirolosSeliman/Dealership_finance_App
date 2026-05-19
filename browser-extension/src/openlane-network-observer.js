@@ -278,6 +278,10 @@
           if (isMoneyField(field)) priceCandidates.push(candidate);
           fieldCandidates.push(candidate);
         }
+      } else if (typeof value === "boolean") {
+        if (value === true && isCarfaxAvailabilityKey(key)) {
+          fieldCandidates.push(candidateRecord("carfaxUrlStatus", "text_only", key, endpoint, confidenceForKey(key), String(value), capturedAt));
+        }
       }
     });
     return {
@@ -436,6 +440,11 @@
     if (/distance|kilometer|kilometre|km/.test(normalized)) return "transportDistanceKm";
     if (/cost|estimate|fee|price|cad|amount/.test(normalized)) return "transportCostCad";
     return "";
+  }
+
+  function isCarfaxAvailabilityKey(key) {
+    const normalized = String(key || "").toLowerCase().replace(/[_\s-]/g, "");
+    return /carfax|vehiclehistoryreport|historyreport|historyavailable/.test(normalized);
   }
 
   function isMoneyField(field) {
