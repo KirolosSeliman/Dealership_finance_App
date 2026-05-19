@@ -398,7 +398,7 @@
 
   function deepCaptureRuntimeMessage() {
     const state = deepCaptureRuntimeState();
-    if (state.deepCaptureActivationMode === "default_enabled_pending_consent_ui") return state.networkObserver.enabled ? "Deep Capture active by default. Network observer is on." : `Deep Capture active by default. Network observer ${state.networkObserver.reason || "off"}.`;
+    if (state.deepCaptureActivationMode === "default_enabled_pending_consent_ui") return state.networkObserver.enabled ? "Deep Capture active by default. Future installer consent UI pending. Network observer running." : `Deep Capture active by default. Future installer consent UI pending. Network observer ${state.networkObserver.reason || "off"}.`;
     if (state.deepCaptureActivationMode === "disabled_missing_required_settings") return "Deep Capture disabled: missing Dealer Flow URL or Organization ID.";
     if (state.active) return state.networkObserver.enabled ? "Deep Capture active. Network observer is on." : `Deep Capture active. Network observer ${state.networkObserver.reason || "off"}.`;
     if (state.consentStatus === "paused") return "Deep Capture paused. Check Dealer Flow connection and consent status.";

@@ -240,6 +240,7 @@
       `<p>Page type: ${safeHtml(safeListing.pageType || "-")}</p>`,
       `<p>Capture kind: ${safeHtml(safeListing.captureKind || "-")}</p>`,
       `<p>Capture level: ${safeHtml(safeListing.captureLevel || "basic_dom")}</p>`,
+      `<p>Deep Capture active: ${safeHtml(String(Boolean(deepCaptureRuntime.active || safeListing.captureLevel === "deep_capture")))}</p>`,
       `<p>Deep Capture activation mode: ${safeHtml(safeListing.deepCaptureActivationMode || deepCaptureRuntime.deepCaptureActivationMode || "-")}</p>`,
       `<p>Consent mode: ${safeHtml(safeListing.consentMode || deepCaptureRuntime.consentMode || "-")}</p>`,
       `<p>Readiness: ${safeHtml(readiness.state || "-")}</p>`,

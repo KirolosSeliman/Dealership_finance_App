@@ -134,6 +134,9 @@ test("Market Snap widget exposes draggable, settings, and data-quality controls"
     "Page type",
     "Capture kind",
     "Capture level",
+    "Deep Capture active",
+    "Deep Capture activation mode",
+    "Consent mode",
     "Readiness",
     "Capture blocked reason",
     "VIN status",
@@ -195,6 +198,8 @@ test("Market Snap copy JSON includes normalized extraction, runtime evidence, an
   assert.match(contentScript, /outcomeEvidence/);
   assert.match(contentScript, /debug/);
   assert.match(contentScript, /basic DOM extraction may miss VIN\/Carfax/);
+  assert.match(contentScript, /Future installer consent UI pending/);
+  assert.match(contentScript, /Network observer running/);
   assert.match(contentScript, /VIN missing\. Preview only - capture blocked to avoid bad data/);
   assert.match(contentScript, /Ready to capture/);
   assert.match(contentScript, /logExtractionDebug/);
