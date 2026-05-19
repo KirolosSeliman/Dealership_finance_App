@@ -357,6 +357,11 @@ test("Market Snap validation keeps post-sale negotiation candidates separate fro
     counterOfferAmount: 17_750,
     negotiationStatus: "Pending",
     outcomeConfidence: "medium",
+    outcomeEvidence: [{
+      evidenceType: "visible_page_text",
+      sourceText: "Sold Price $18,250 Counter Offer $17,750 Pending",
+      capturedAt: "2026-05-15T12:00:00.000Z",
+    }],
     priceSemantics: {
       soldPriceCandidate: "candidate_wholesale_label",
       counterOfferAmount: "candidate_wholesale_label",
@@ -409,6 +414,102 @@ test("Market Snap validation keeps post-sale negotiation candidates separate fro
   assert.equal(accepted.success, true);
   assert.equal(accepted.data?.acceptedAmount, 17_900);
   assert.equal(accepted.data?.finalBidAmount, 17_900);
+});
+
+test("Market Snap validation requires evidence for candidate OpenLane outcome prices", () => {
+  const withEvidence = marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "purchase_detail",
+    captureKind: "candidate_outcome",
+    title: "2017 Hyundai Tucson",
+    year: 2017,
+    make: "Hyundai",
+    model: "Tucson",
+    soldPriceCandidate: 4_000,
+    outcomeConfidence: "medium",
+    outcomeEvidence: [{
+      evidenceType: "visible_page_text",
+      sourceText: "Sold price $4,000",
+      capturedAt: "2026-05-18T12:00:00.000Z",
+      confidenceScore: 90,
+    }],
+    priceSemantics: {
+      soldPriceCandidate: "candidate_wholesale_label",
+    },
+  });
+  const withoutEvidence = marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "purchase_detail",
+    captureKind: "candidate_outcome",
+    title: "2017 Hyundai Tucson",
+    year: 2017,
+    make: "Hyundai",
+    model: "Tucson",
+    soldPriceCandidate: 4_000,
+    outcomeConfidence: "medium",
+    priceSemantics: {
+      soldPriceCandidate: "candidate_wholesale_label",
+    },
+  });
+
+  assert.equal(withEvidence.success, true);
+  assert.equal(withEvidence.data?.soldPriceCandidate, 4_000);
+  assert.equal(withoutEvidence.success, false);
+});
+
+test("Market Snap validation accepts verified purchased VDP outcome with strong evidence", () => {
+  const result = marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "purchase_detail",
+    captureKind: "verified_outcome",
+    title: "2017 Hyundai Tucson",
+    year: 2017,
+    make: "Hyundai",
+    model: "Tucson",
+    vin: "KM8J3CA46HU123456",
+    buyPriceAuction: 4_000,
+    soldPriceCandidate: 4_000,
+    outcomeConfidence: "verified",
+    outcomeEvidence: [{
+      evidenceType: "purchase_document",
+      sourceText: "Purchased VDP Sold price $4,000 Status Picked up",
+      capturedAt: "2026-05-18T12:00:00.000Z",
+      confidenceScore: 96,
+    }],
+    priceSemantics: {
+      soldPriceCandidate: "candidate_wholesale_label",
+      buyPriceAuction: "verified_wholesale_label",
+    },
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.data?.buyPriceAuction, 4_000);
+});
+
+test("Market Snap validation rejects current bid semantics marked as label", () => {
+  const result = marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "active_listing",
+    captureKind: "observation",
+    title: "2021 Toyota RAV4 LE",
+    year: 2021,
+    make: "Toyota",
+    model: "RAV4",
+    currentBid: 13_400,
+    priceSemantics: {
+      currentBid: "candidate_wholesale_label",
+    },
+  });
+
+  assert.equal(result.success, false);
 });
 
 test("Market Snap validation rejects unsafe or malformed listing payloads", () => {

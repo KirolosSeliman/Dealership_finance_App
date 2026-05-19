@@ -29,6 +29,13 @@ def test_training_row_rejects_listed_price_as_target():
         normalize_training_row(base_row(capture_kind=None, is_training_eligible=None, model_improvement_opted_in=None))
 
 
+def test_training_row_rejects_current_bid_and_transport_as_targets():
+    with pytest.raises(ValueError, match="missing_verified_target"):
+        normalize_training_row(base_row(current_bid=18500))
+    with pytest.raises(ValueError, match="missing_verified_target"):
+        normalize_training_row(base_row(transport_cost_cad=428, transport_distance_km=185))
+
+
 def test_training_row_rejects_zero_target():
     with pytest.raises(ValueError, match="non_positive_target"):
         normalize_training_row(base_row(accepted_amount=0))

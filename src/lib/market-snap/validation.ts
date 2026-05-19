@@ -463,6 +463,14 @@ function enforceCaptureContract(value: Partial<z.infer<typeof marketListingPaylo
     });
   }
 
+  if (value.captureKind === "candidate_outcome" && hasOutcomePrice && !hasOutcomePriceEvidence(value, outcomePriceFields)) {
+    context.addIssue({
+      code: "custom",
+      path: ["outcomeEvidence"],
+      message: "Candidate outcome price fields require visible price evidence.",
+    });
+  }
+
   if (value.captureKind === "verified_outcome" && !hasVerifiedOutcomePrice) {
     context.addIssue({
       code: "custom",
@@ -507,6 +515,18 @@ function enforceCaptureContract(value: Partial<z.infer<typeof marketListingPaylo
       });
     }
   }
+}
+
+function hasOutcomePriceEvidence(
+  value: Partial<z.infer<typeof marketListingPayloadBaseSchema>>,
+  outcomePriceFields: readonly string[],
+) {
+  if (value.outcomeEvidence?.some((item) => Boolean(item.sourceText || item.sourceUrl || item.evidenceType))) return true;
+  if (value.sourceEvidence?.some((item) => Boolean(item.sourceText || item.sourceUrl || item.endpointPattern || item.evidenceType))) return true;
+  return outcomePriceFields.some((field) => {
+    const evidence = value.fieldEvidence?.[field] ?? [];
+    return evidence.some((item) => !item.rejectionReason && Boolean(item.sourceText || item.endpointPattern || item.sourceName));
+  });
 }
 
 function hasOnlyTransportMileageEvidence(evidence: Array<{ sourceText?: string; rejectionReason?: string }> | undefined) {
