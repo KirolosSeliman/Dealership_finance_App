@@ -68,7 +68,8 @@
 
   async function runStableAttempt(doc, href, settings, options = {}) {
     const classifier = classifyOpenLanePage(doc, href);
-    const deepCaptureActive = hasActiveDeepCaptureConsent(settings);
+    const deepCaptureState = isDeepCaptureAllowed(settings, { href });
+    const deepCaptureActive = deepCaptureState.active;
     const safeExpansion = deepCaptureActive
       ? await root.DealerFlowOpenLaneSafeExpander?.expandOpenLaneReadOnlySections?.(doc, { maxSteps: 8, waitMs: 120 })
       : null;
@@ -212,8 +213,12 @@
     root.DealerFlowOpenLaneSectionMap?.clearOpenLaneExtractionCache?.(doc);
   }
 
-  function hasActiveDeepCaptureConsent(settings = {}) {
-    return Boolean(settings.deepCaptureEnabled && settings.deepCaptureConsentStatus === "active" && settings.deepCaptureConsentId);
+  function isDeepCaptureAllowed(settings = {}, context = {}) {
+    return root.DealerFlowMarketSnapDeepCaptureActivation?.isDeepCaptureAllowed?.(settings, context) || {
+      active: false,
+      deepCaptureActivationMode: "disabled_missing_required_settings",
+      reason: "activation_helper_unavailable",
+    };
   }
 
   function vinStatusFor(vin) {

@@ -3,8 +3,9 @@ import { createRequire } from "node:module";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
+require("../browser-extension/src/deep-capture-activation.js");
 const networkObserver = require("../browser-extension/src/openlane-network-observer.js") as {
-  startOpenLaneNetworkObserver: (settings: Record<string, unknown>) => { enabled: boolean; reason: string; observationCount?: number };
+  startOpenLaneNetworkObserver: (settings: Record<string, unknown>, context?: Record<string, unknown>) => { enabled: boolean; reason: string; observationCount?: number; activationMode?: string };
   getOpenLaneNetworkObserverStatus: () => { enabled: boolean; reason: string; observationCount: number };
   stopOpenLaneNetworkObserver: () => void;
   rememberNetworkPayload: (body: unknown, url?: string, contentType?: string) => unknown;
@@ -19,26 +20,52 @@ const networkObserver = require("../browser-extension/src/openlane-network-obser
   mergeNetworkEvidenceIntoListing: (listing: Record<string, unknown>, evidence: unknown[]) => Record<string, unknown>;
 };
 
-test("OpenLane network observer consent gate fails closed and enables only with active consent", () => {
-  assert.equal(networkObserver.startOpenLaneNetworkObserver({ observePageNetworkData: true }).enabled, false);
+test("OpenLane network observer enables in temporary default mode only for OpenLane with required settings", () => {
+  assert.equal(networkObserver.startOpenLaneNetworkObserver({
+    dealerFlowBaseUrl: "https://dealer-flow.example",
+    observePageNetworkData: true,
+    deepCaptureEnabled: true,
+  }, { href: "https://app.openlane.ca/vdp/123" }).enabled, false);
+  const pendingConsent = networkObserver.startOpenLaneNetworkObserver({
+    dealerFlowBaseUrl: "https://dealer-flow.example",
+    organizationId: "63c47786-fb41-40c1-a573-71346969b9e0",
+    observePageNetworkData: true,
+    deepCaptureEnabled: true,
+  }, { href: "https://app.openlane.ca/vdp/123" });
+  assert.equal(pendingConsent.enabled, true);
+  assert.equal(pendingConsent.activationMode, "default_enabled_pending_consent_ui");
+  networkObserver.stopOpenLaneNetworkObserver();
+
+  const nonOpenLane = networkObserver.startOpenLaneNetworkObserver({
+    dealerFlowBaseUrl: "https://dealer-flow.example",
+    organizationId: "63c47786-fb41-40c1-a573-71346969b9e0",
+    observePageNetworkData: true,
+    deepCaptureEnabled: true,
+  }, { href: "https://dealer-flow.example/market-snap" });
+  assert.equal(nonOpenLane.enabled, false);
+  assert.equal(nonOpenLane.reason, "disabled_non_openlane_context");
+
   const started = networkObserver.startOpenLaneNetworkObserver({
+    dealerFlowBaseUrl: "https://dealer-flow.example",
+    organizationId: "63c47786-fb41-40c1-a573-71346969b9e0",
     observePageNetworkData: true,
     deepCaptureEnabled: true,
     deepCaptureConsentStatus: "active",
     deepCaptureConsentId: "33333333-3333-4333-8333-333333333333",
-  });
+  }, { href: "https://app.openlane.ca/vdp/123" });
   assert.equal(started.enabled, true);
+  assert.equal(started.activationMode, "explicit_consent_active");
   assert.equal(typeof started.observationCount, "number");
   networkObserver.stopOpenLaneNetworkObserver();
 });
 
 test("OpenLane network observer status reports current evidence count", () => {
   networkObserver.startOpenLaneNetworkObserver({
+    dealerFlowBaseUrl: "https://dealer-flow.example",
+    organizationId: "63c47786-fb41-40c1-a573-71346969b9e0",
     observePageNetworkData: true,
     deepCaptureEnabled: true,
-    deepCaptureConsentStatus: "active",
-    deepCaptureConsentId: "33333333-3333-4333-8333-333333333333",
-  });
+  }, { href: "https://app.openlane.ca/vdp/KM8J3CA46HU123456" });
   const before = networkObserver.getOpenLaneNetworkObserverStatus().observationCount;
   networkObserver.rememberNetworkPayload(JSON.stringify({ vehicle: { vin: "KM8J3CA46HU123456" } }), "https://app.openlane.ca/api/vdp/KM8J3CA46HU123456", "application/json");
   const after = networkObserver.getOpenLaneNetworkObserverStatus();

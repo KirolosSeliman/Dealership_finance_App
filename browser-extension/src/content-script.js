@@ -284,11 +284,10 @@
   }
 
   async function refreshDeepCaptureConsentState(settings) {
-    if (!settings?.organizationId || !settings.deepCaptureEnabled) {
+    const activation = isDeepCaptureAllowed(settings);
+    if (activation.deepCaptureActivationMode === "disabled_missing_required_settings" || activation.deepCaptureActivationMode === "disabled_by_user") {
       return window.DealerFlowMarketSnapStorage.saveSettings({
         ...settings,
-        deepCaptureEnabled: false,
-        observePageNetworkData: false,
         deepCaptureConsentStatus: settings?.deepCaptureConsentStatus === "withdrawn" ? "withdrawn" : "off",
       });
     }
@@ -297,8 +296,8 @@
       const active = response.consentStatus === "active";
       return window.DealerFlowMarketSnapStorage.saveSettings({
         ...settings,
-        deepCaptureEnabled: active,
-        observePageNetworkData: active,
+        deepCaptureEnabled: settings.deepCaptureEnabled !== false,
+        observePageNetworkData: settings.observePageNetworkData !== false,
         deepCaptureConsentId: response.deepCaptureConsentId || "",
         deepCaptureConsentVersion: response.deepCaptureConsentVersion || "",
         deepCaptureConsentAcceptedAt: response.deepCaptureConsentAcceptedAt || "",
@@ -308,41 +307,53 @@
       if (settings.debugMode) console.warn("Deep Capture consent status check failed", error);
       return window.DealerFlowMarketSnapStorage.saveSettings({
         ...settings,
-        deepCaptureEnabled: false,
-        observePageNetworkData: false,
+        deepCaptureEnabled: settings.deepCaptureEnabled !== false,
+        observePageNetworkData: settings.observePageNetworkData !== false,
         deepCaptureConsentStatus: "paused",
       });
     }
   }
 
   function syncDeepCaptureObserver() {
-    if (hasActiveDeepCaptureConsent()) {
-      STATE.networkObserverStatus = window.DealerFlowOpenLaneNetworkObserver?.startOpenLaneNetworkObserver?.(STATE.settings) || { enabled: false, reason: "network_observer_unavailable" };
+    const activation = isDeepCaptureAllowed();
+    if (activation.active) {
+      STATE.networkObserverStatus = window.DealerFlowOpenLaneNetworkObserver?.startOpenLaneNetworkObserver?.(STATE.settings, runtimeContext()) || { enabled: false, reason: "network_observer_unavailable" };
       return;
     }
     window.DealerFlowOpenLaneNetworkObserver?.stopOpenLaneNetworkObserver?.();
-    STATE.networkObserverStatus = { enabled: false, reason: "deep_capture_inactive" };
+    STATE.networkObserverStatus = { enabled: false, reason: activation.reason || "deep_capture_inactive", activationMode: activation.deepCaptureActivationMode };
   }
 
-  function hasActiveDeepCaptureConsent() {
-    return Boolean(
-      STATE.settings?.deepCaptureEnabled
-        && STATE.settings?.deepCaptureConsentStatus === "active"
-        && STATE.settings?.deepCaptureConsentId,
-    );
+  function isDeepCaptureAllowed(settings = STATE.settings) {
+    return window.DealerFlowMarketSnapDeepCaptureActivation?.isDeepCaptureAllowed?.(settings || {}, runtimeContext()) || {
+      active: false,
+      deepCaptureActivationMode: "disabled_missing_required_settings",
+      consentMode: "future_download_consent_pending",
+      observePageNetworkData: false,
+      reason: "activation_helper_unavailable",
+    };
+  }
+
+  function runtimeContext() {
+    return { href: location.href, hostname: location.hostname };
   }
 
   function applyConsentGateToListing(listing) {
-    if (hasActiveDeepCaptureConsent()) {
+    const activation = isDeepCaptureAllowed();
+    if (activation.active) {
       return {
         ...listing,
         captureLevel: "deep_capture",
         captureScopes: deepCaptureScopes(),
-        deepCaptureConsentId: STATE.settings.deepCaptureConsentId,
+        ...(STATE.settings.deepCaptureConsentId ? { deepCaptureConsentId: STATE.settings.deepCaptureConsentId } : {}),
         sourceEvidence: buildSourceEvidence(listing),
+        deepCaptureActivationMode: activation.deepCaptureActivationMode,
+        consentMode: activation.consentMode,
         openlaneMetadata: {
           ...(listing.openlaneMetadata || {}),
           debugMode: Boolean(STATE.settings?.debugMode),
+          deepCaptureActivationMode: activation.deepCaptureActivationMode,
+          consentMode: activation.consentMode,
           deepCaptureRuntime: deepCaptureRuntimeState(),
         },
       };
@@ -358,6 +369,8 @@
       ...basic,
       captureLevel: "basic_dom",
       captureScopes: ["dom_visible"],
+      deepCaptureActivationMode: activation.deepCaptureActivationMode,
+      consentMode: activation.consentMode,
       openlaneMetadata: { ...metadata, debugMode: Boolean(STATE.settings?.debugMode), deepCaptureRuntime: deepCaptureRuntimeState() },
     };
   }
@@ -365,11 +378,16 @@
   function deepCaptureRuntimeState() {
     const networkEvidenceCount = window.DealerFlowOpenLaneNetworkObserver?.getOpenLaneNetworkEvidence?.().length || 0;
     const observerStatus = window.DealerFlowOpenLaneNetworkObserver?.getOpenLaneNetworkObserverStatus?.() || STATE.networkObserverStatus || { enabled: false, reason: "unknown" };
+    const activation = isDeepCaptureAllowed();
     return {
-      active: hasActiveDeepCaptureConsent(),
+      active: activation.active,
+      deepCaptureActivationMode: activation.deepCaptureActivationMode,
+      activationMode: activation.deepCaptureActivationMode,
+      consentMode: activation.consentMode,
+      reason: activation.reason,
       consentStatus: STATE.settings?.deepCaptureConsentStatus || "off",
       consentIdPresent: Boolean(STATE.settings?.deepCaptureConsentId),
-      observePageNetworkData: Boolean(STATE.settings?.observePageNetworkData),
+      observePageNetworkData: activation.observePageNetworkData,
       networkEvidenceCount,
       networkObserver: { ...observerStatus, observationCount: networkEvidenceCount },
     };
@@ -377,6 +395,8 @@
 
   function deepCaptureRuntimeMessage() {
     const state = deepCaptureRuntimeState();
+    if (state.deepCaptureActivationMode === "default_enabled_pending_consent_ui") return state.networkObserver.enabled ? "Deep Capture active by default. Network observer is on." : `Deep Capture active by default. Network observer ${state.networkObserver.reason || "off"}.`;
+    if (state.deepCaptureActivationMode === "disabled_missing_required_settings") return "Deep Capture disabled: missing Dealer Flow URL or Organization ID.";
     if (state.active) return state.networkObserver.enabled ? "Deep Capture active. Network observer is on." : `Deep Capture active. Network observer ${state.networkObserver.reason || "off"}.`;
     if (state.consentStatus === "paused") return "Deep Capture paused. Check Dealer Flow connection and consent status.";
     return "Deep Capture off: basic DOM extraction may miss VIN/Carfax on dynamic OpenLane pages.";

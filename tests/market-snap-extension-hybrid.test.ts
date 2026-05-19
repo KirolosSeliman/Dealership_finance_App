@@ -55,6 +55,7 @@ test("extension settings save preserves existing active Deep Capture consent fie
     deepCaptureConsentStatus: "active",
   };
   const context = extensionContext({ syncStore });
+  runExtensionScript(context, "browser-extension/src/deep-capture-activation.js");
   runExtensionScript(context, "browser-extension/src/storage.js");
 
   const saved = await context.window.DealerFlowMarketSnapStorage.saveSettings({
@@ -70,6 +71,24 @@ test("extension settings save preserves existing active Deep Capture consent fie
   assert.equal(saved.observePageNetworkData, true);
   assert.equal(saved.deepCaptureConsentStatus, "active");
   assert.equal(saved.deepCaptureConsentId, "33333333-3333-4333-8333-333333333333");
+});
+
+test("extension settings default Deep Capture on with org and URL without enabling model improvement", async () => {
+  const syncStore: Record<string, unknown> = {
+    dealerFlowBaseUrl: "https://dealer-flow.example",
+    organizationId,
+  };
+  const context = extensionContext({ syncStore });
+  runExtensionScript(context, "browser-extension/src/deep-capture-activation.js");
+  runExtensionScript(context, "browser-extension/src/storage.js");
+
+  const settings = await context.window.DealerFlowMarketSnapStorage.getSettings();
+
+  assert.equal(settings.deepCaptureEnabled, true);
+  assert.equal(settings.observePageNetworkData, true);
+  assert.equal(settings.deepCaptureActivationMode, "default_enabled_pending_consent_ui");
+  assert.equal(settings.consentMode, "future_download_consent_pending");
+  assert.equal(settings.modelImprovementOptIn, false);
 });
 
 test("content script listens for settings changes and refreshes runtime settings", () => {

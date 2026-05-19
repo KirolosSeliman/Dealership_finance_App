@@ -66,5 +66,7 @@ test("Market Snap extension options show Deep Capture consent disclosure before 
   assert.match(optionsHtml, /normal capture/i);
   assert.match(optionsHtml, /model improvement/i);
   assert.match(optionsHtml, /can be withdrawn/i);
-  assert.match(storage, /observePageNetworkData:\s*false/);
+  assert.match(storage, /observePageNetworkData:\s*true/);
+  assert.match(storage, /consentMode:\s*"future_download_consent_pending"/);
+  assert.match(storage, /modelImprovementOptIn:\s*false/);
 });

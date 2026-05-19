@@ -187,7 +187,7 @@
     if (!listing && !valuation) return "";
     return [
       pill("Carfax", carfaxLabel(listing)),
-      pill("Deep Capture", listing?.captureLevel === "deep_capture" ? "On - active consent" : "Off - consent needed"),
+      pill("Deep Capture", deepCaptureStatusLabel(listing)),
       pill("Photos", String(listing?.imageCount ?? listing?.photos?.length ?? 0)),
       pill("Videos", String(listing?.videoCount ?? listing?.videos?.length ?? 0)),
       pill("Warnings", String((valuation?.warnings || listing?.warnings || []).length)),
@@ -201,7 +201,7 @@
       message,
       readiness.blockedReason ? `Capture blocked: ${readiness.blockedReason}` : "",
       listing?.carfaxUrlStatus === "text_only" ? "Carfax text found, but no URL is visible." : "",
-      listing && listing.captureLevel !== "deep_capture" ? "Deep Capture off: VIN/Carfax may be incomplete on dynamic OpenLane pages." : "",
+      listing && listing.captureLevel !== "deep_capture" ? "Deep Capture disabled: missing Dealer Flow URL or Organization ID, or disabled by user." : "",
       savedResultLabel(saveResult),
       ...conditionWarningItems(listing).slice(0, 3),
       ...(valuation?.warnings || listing?.warnings || []).slice(0, 4),
@@ -236,6 +236,8 @@
       `<p>Page type: ${safeHtml(listing?.pageType || "-")}</p>`,
       `<p>Capture kind: ${safeHtml(listing?.captureKind || "-")}</p>`,
       `<p>Capture level: ${safeHtml(listing?.captureLevel || "basic_dom")}</p>`,
+      `<p>Deep Capture activation mode: ${safeHtml(listing?.deepCaptureActivationMode || deepCaptureRuntime.deepCaptureActivationMode || "-")}</p>`,
+      `<p>Consent mode: ${safeHtml(listing?.consentMode || deepCaptureRuntime.consentMode || "-")}</p>`,
       `<p>Readiness: ${safeHtml(readiness.state || "-")}</p>`,
       `<p>Capture blocked reason: ${safeHtml(readiness.blockedReason || "-")}</p>`,
       `<p>VIN: ${safeHtml(listing?.vin || "-")}</p>`,
@@ -341,6 +343,17 @@
 
   function networkEvidenceCount(listing, runtime = {}) {
     return Number(runtime.networkEvidenceCount ?? runtime.networkObserver?.observationCount ?? listing?.openlaneMetadata?.networkEvidence?.length ?? 0);
+  }
+
+  function deepCaptureStatusLabel(listing) {
+    const runtime = listing?.openlaneMetadata?.deepCaptureRuntime || {};
+    const mode = listing?.deepCaptureActivationMode || runtime.deepCaptureActivationMode;
+    if (mode === "default_enabled_pending_consent_ui") return "Active by default";
+    if (mode === "explicit_consent_active") return "On - active consent";
+    if (mode === "disabled_missing_required_settings") return "Disabled - missing settings";
+    if (mode === "disabled_by_user") return "Disabled by user";
+    if (listing?.captureLevel === "deep_capture") return "On";
+    return "Off";
   }
 
   function networkCandidateCount(candidates) {

@@ -5,8 +5,9 @@ import test from "node:test";
 
 const repoRoot = process.cwd();
 
-test("Deep Capture extension defaults fail closed until consent is active", () => {
+test("Deep Capture extension defaults to temporary safe activation pending installer consent UI", () => {
   const storage = readFileSync(join(repoRoot, "browser-extension/src/storage.js"), "utf8");
+  const helper = readFileSync(join(repoRoot, "browser-extension/src/deep-capture-activation.js"), "utf8");
 
   for (const setting of [
     "deepCaptureEnabled",
@@ -19,10 +20,15 @@ test("Deep Capture extension defaults fail closed until consent is active", () =
     assert.match(storage, new RegExp(setting));
   }
 
-  assert.match(storage, /deepCaptureEnabled:\s*false/);
+  assert.match(storage, /deepCaptureEnabled:\s*true/);
+  assert.match(storage, /observePageNetworkData:\s*true/);
+  assert.match(storage, /modelImprovementOptIn:\s*false/);
   assert.match(storage, /deepCaptureConsentStatus:\s*"off"/);
-  assert.match(storage, /observePageNetworkData:\s*false/);
-  assert.match(storage, /deepCaptureEnabled && deepCaptureConsentStatus === "active"/);
+  assert.match(helper, /default_enabled_pending_consent_ui/);
+  assert.match(helper, /explicit_consent_active/);
+  assert.match(helper, /disabled_by_user/);
+  assert.match(helper, /disabled_missing_required_settings/);
+  assert.match(helper, /future_download_consent_pending/);
 });
 
 test("Deep Capture API client exposes consent status, accept, and withdraw methods", () => {
@@ -50,7 +56,8 @@ test("Deep Capture options page shows status, independent toggles, accept, renew
     "modelImprovementOptIn",
     "View captured JSON",
     "Copy extracted JSON",
-    "Off - consent needed",
+    "Active by default - consent UI pending",
+    "Off - disabled or missing settings",
     "On - active consent",
     "Paused - backend unreachable",
     "Requires renewal - consent version changed",
@@ -61,25 +68,26 @@ test("Deep Capture options page shows status, independent toggles, accept, renew
   assert.match(options, /acceptDeepCaptureConsent/);
   assert.match(options, /withdrawDeepCaptureConsent/);
   assert.match(options, /deepCaptureConsentStatus:\s*active \? "active"/);
-  assert.match(options, /observePageNetworkData:\s*active \? true/);
-  assert.match(options, /observePageNetworkData:\s*false/);
+  assert.match(options, /observePageNetworkData:\s*settings\.observePageNetworkData !== false/);
+  assert.match(options, /Active by default - consent UI pending/);
 });
 
-test("Content script gates network observation and safe expansion on active consent", () => {
+test("Content script gates network observation and safe expansion through the activation helper", () => {
   const contentScript = readFileSync(join(repoRoot, "browser-extension/src/content-script.js"), "utf8");
   const networkObserver = readFileSync(join(repoRoot, "browser-extension/src/openlane-network-observer.js"), "utf8");
+  const activation = readFileSync(join(repoRoot, "browser-extension/src/deep-capture-activation.js"), "utf8");
 
   assert.match(contentScript, /refreshDeepCaptureConsentState/);
-  assert.match(contentScript, /hasActiveDeepCaptureConsent/);
+  assert.match(contentScript, /isDeepCaptureAllowed/);
   assert.match(contentScript, /stopOpenLaneNetworkObserver/);
   assert.match(contentScript, /applyConsentGateToListing/);
   assert.match(contentScript, /captureLevel:\s*"basic_dom"/);
   assert.match(contentScript, /captureLevel:\s*"deep_capture"/);
-  assert.match(contentScript, /deepCaptureConsentId/);
+  assert.match(contentScript, /deepCaptureActivationMode/);
+  assert.match(contentScript, /consentMode/);
   assert.match(contentScript, /sourceEvidence/);
-  assert.match(networkObserver, /deepCaptureEnabled/);
-  assert.match(networkObserver, /deepCaptureConsentStatus === "active"/);
-  assert.match(networkObserver, /deepCaptureConsentId/);
+  assert.match(networkObserver, /isDeepCaptureAllowed/);
+  assert.match(activation, /disabled_non_openlane_context/);
 });
 
 test("Backend has a Market Snap consent route for extension accept and withdrawal", () => {

@@ -4,6 +4,7 @@ import test from "node:test";
 
 const require = createRequire(import.meta.url);
 require("../browser-extension/src/openlane-extraction-contract.js");
+require("../browser-extension/src/deep-capture-activation.js");
 require("../browser-extension/src/openlane-section-map.js");
 require("../browser-extension/src/openlane-page-classifier.js");
 require("../browser-extension/src/openlane-network-observer.js");
@@ -84,6 +85,37 @@ test("OpenLane stable capture keeps no-VIN listings preview-only even when ident
   assert.equal(result.readiness.blockedReason, "missing_vin_openlane_preview_only");
   assert.equal(result.readiness.vinStatus, "missing");
   assert.ok(result.readiness.missingData.includes("vin"));
+});
+
+test("OpenLane stable capture merges network VIN in default Deep Capture mode without formal consent id", async () => {
+  const networkObserver = require("../browser-extension/src/openlane-network-observer.js") as {
+    startOpenLaneNetworkObserver: (settings: Record<string, unknown>, context?: Record<string, unknown>) => { enabled: boolean };
+    stopOpenLaneNetworkObserver: () => void;
+    rememberNetworkPayload: (body: unknown, url?: string, contentType?: string) => unknown;
+  };
+  const settings = {
+    dealerFlowBaseUrl: "https://dealer-flow.example",
+    organizationId: "63c47786-fb41-40c1-a573-71346969b9e0",
+    deepCaptureEnabled: true,
+    observePageNetworkData: true,
+  };
+  const href = "https://app.openlane.ca/vdp/KM8J3CA46HU123456";
+  assert.equal(networkObserver.startOpenLaneNetworkObserver(settings, { href }).enabled, true);
+  networkObserver.rememberNetworkPayload(
+    JSON.stringify({ vehicle: { vin: "KM8J3CA46HU123456", carfaxUrl: "/vehicle-history/report/KM8J3CA46HU123456" } }),
+    "https://app.openlane.ca/api/vdp/KM8J3CA46HU123456",
+    "application/json",
+  );
+
+  const doc = fakeDocument("2017 Hyundai Tucson Odometer 111,486 KM Current Bid $4,600 23 total photos CARFAX Canada");
+  doc.images = Array.from({ length: 23 }, () => ({}));
+  const result = await stableCapture.extractStableOpenLaneListing(doc, href, settings, { delaysMs: [0], sleep: async () => undefined });
+
+  assert.equal(result.listing.vin, "KM8J3CA46HU123456");
+  assert.equal(result.readiness.readyToCapture, true);
+  assert.equal(result.readiness.vinStatus, "found");
+  assert.equal(result.listing.carfaxUrlStatus, "url_found");
+  networkObserver.stopOpenLaneNetworkObserver();
 });
 
 test("OpenLane stable capture clears cache between route VIN changes", async () => {

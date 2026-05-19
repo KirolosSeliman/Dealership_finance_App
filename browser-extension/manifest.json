@@ -14,6 +14,7 @@
     {
       "matches": ["https://*.openlane.com/*", "https://*.openlane.ca/*"],
       "js": [
+        "src/deep-capture-activation.js",
         "src/storage.js",
         "src/api-client.js",
         "src/openlane-extraction-contract.js",

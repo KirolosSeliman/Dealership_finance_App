@@ -10,8 +10,10 @@
     debugMode: false,
     includeMediaUrls: true,
     includeRawVisibleText: true,
-    observePageNetworkData: false,
-    deepCaptureEnabled: false,
+    observePageNetworkData: true,
+    deepCaptureEnabled: true,
+    deepCaptureActivationMode: "disabled_missing_required_settings",
+    consentMode: "future_download_consent_pending",
     deepCaptureConsentId: "",
     deepCaptureConsentVersion: "",
     deepCaptureConsentAcceptedAt: "",
@@ -33,8 +35,8 @@
     const organizationId = String(values.organizationId ?? existing.organizationId ?? "").trim();
     const sameOrganization = !existing.organizationId || existing.organizationId === organizationId;
     const consentBase = sameOrganization ? existing : {
-      deepCaptureEnabled: false,
-      observePageNetworkData: false,
+      deepCaptureEnabled: true,
+      observePageNetworkData: true,
       deepCaptureConsentId: "",
       deepCaptureConsentVersion: "",
       deepCaptureConsentAcceptedAt: "",
@@ -51,8 +53,8 @@
       debugMode: Boolean(values.debugMode),
       includeMediaUrls: values.includeMediaUrls !== false,
       includeRawVisibleText: values.includeRawVisibleText !== false,
-      observePageNetworkData: values.observePageNetworkData ?? consentBase.observePageNetworkData,
-      deepCaptureEnabled: values.deepCaptureEnabled ?? consentBase.deepCaptureEnabled,
+      observePageNetworkData: values.observePageNetworkData ?? consentBase.observePageNetworkData ?? true,
+      deepCaptureEnabled: values.deepCaptureEnabled ?? consentBase.deepCaptureEnabled ?? true,
       deepCaptureConsentId: String(values.deepCaptureConsentId ?? consentBase.deepCaptureConsentId ?? ""),
       deepCaptureConsentVersion: String(values.deepCaptureConsentVersion ?? consentBase.deepCaptureConsentVersion ?? ""),
       deepCaptureConsentAcceptedAt: String(values.deepCaptureConsentAcceptedAt ?? consentBase.deepCaptureConsentAcceptedAt ?? ""),
@@ -79,15 +81,34 @@
     const dealerFlowBaseUrl = normalizeDealerFlowBaseUrl(settings.dealerFlowBaseUrl);
     const organizationId = String(settings.organizationId || "").trim();
     const deepCaptureConsentStatus = normalizeConsentStatus(settings.deepCaptureConsentStatus);
-    const deepCaptureEnabled = Boolean(organizationId && settings.deepCaptureEnabled && deepCaptureConsentStatus === "active" && settings.deepCaptureConsentId);
+    const requestedDeepCaptureEnabled = settings.deepCaptureEnabled !== false;
+    const requestedNetworkObservation = settings.observePageNetworkData !== false;
+    const activation = isDeepCaptureAllowed({
+      ...settings,
+      dealerFlowBaseUrl,
+      organizationId,
+      deepCaptureEnabled: requestedDeepCaptureEnabled,
+      observePageNetworkData: requestedNetworkObservation,
+      deepCaptureConsentStatus,
+    }, { href: "https://app.openlane.ca/" });
     return {
       ...settings,
       dealerFlowBaseUrl,
       organizationId,
       deepCaptureConsentStatus,
-      deepCaptureEnabled,
-      observePageNetworkData: Boolean(settings.observePageNetworkData && deepCaptureEnabled && deepCaptureConsentStatus === "active"),
+      deepCaptureEnabled: requestedDeepCaptureEnabled,
+      observePageNetworkData: requestedNetworkObservation,
+      deepCaptureActivationMode: activation.deepCaptureActivationMode,
+      consentMode: activation.consentMode,
       modelImprovementOptIn: Boolean(settings.modelImprovementOptIn),
+    };
+  }
+
+  function isDeepCaptureAllowed(settings, context) {
+    return window.DealerFlowMarketSnapDeepCaptureActivation?.isDeepCaptureAllowed?.(settings, context) || {
+      active: false,
+      deepCaptureActivationMode: "disabled_missing_required_settings",
+      consentMode: "future_download_consent_pending",
     };
   }
 

@@ -9,18 +9,19 @@
   const observations = [];
   let observerStatus = { enabled: false, reason: "stopped", observationCount: 0 };
 
-  function startOpenLaneNetworkObserver(settings = {}) {
-    if (!hasActiveDeepCaptureConsent(settings)) {
-      observerStatus = { enabled: false, reason: "deep_capture_consent_required", observationCount: observations.length };
+  function startOpenLaneNetworkObserver(settings = {}, context = {}) {
+    const activation = isDeepCaptureAllowed(settings, context);
+    if (!activation.active) {
+      observerStatus = { enabled: false, reason: activation.reason || "deep_capture_not_allowed", activationMode: activation.deepCaptureActivationMode, observationCount: observations.length };
       return getOpenLaneNetworkObserverStatus();
     }
-    if (settings.observePageNetworkData !== true) {
-      observerStatus = { enabled: false, reason: "disabled", observationCount: observations.length };
+    if (activation.observePageNetworkData !== true) {
+      observerStatus = { enabled: false, reason: "disabled", activationMode: activation.deepCaptureActivationMode, observationCount: observations.length };
       return getOpenLaneNetworkObserverStatus();
     }
     injectPageHook();
     root.addEventListener?.("message", onPageMessage);
-    observerStatus = { enabled: true, reason: "observing_page_generated_responses", observationCount: observations.length };
+    observerStatus = { enabled: true, reason: "observing_page_generated_responses", activationMode: activation.deepCaptureActivationMode, consentMode: activation.consentMode, observationCount: observations.length };
     return getOpenLaneNetworkObserverStatus();
   }
 
@@ -29,8 +30,13 @@
     observerStatus = { enabled: false, reason: "stopped", observationCount: observations.length };
   }
 
-  function hasActiveDeepCaptureConsent(settings = {}) {
-    return Boolean(settings.deepCaptureEnabled && settings.deepCaptureConsentStatus === "active" && settings.deepCaptureConsentId);
+  function isDeepCaptureAllowed(settings = {}, context = {}) {
+    return root.DealerFlowMarketSnapDeepCaptureActivation?.isDeepCaptureAllowed?.(settings, context) || {
+      active: false,
+      observePageNetworkData: false,
+      deepCaptureActivationMode: "disabled_missing_required_settings",
+      reason: "activation_helper_unavailable",
+    };
   }
 
   function onPageMessage(event) {

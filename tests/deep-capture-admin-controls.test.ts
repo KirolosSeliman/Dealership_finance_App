@@ -74,11 +74,12 @@ test("Dealer Flow settings page exposes Deep Capture transparency and admin cont
   assert.match(app, /delete_eligible_captures/);
 });
 
-test("Extension still treats withdrawn consent as inactive", () => {
-  const storage = readFileSync(join(repoRoot, "browser-extension/src/storage.js"), "utf8");
+test("Extension still treats withdrawn consent as inactive unless the user explicitly reconfigures it later", () => {
+  const activation = readFileSync(join(repoRoot, "browser-extension/src/deep-capture-activation.js"), "utf8");
   const contentScript = readFileSync(join(repoRoot, "browser-extension/src/content-script.js"), "utf8");
 
-  assert.match(storage, /deepCaptureConsentStatus === "active"/);
-  assert.match(contentScript, /hasActiveDeepCaptureConsent/);
+  assert.match(activation, /deepCaptureConsentStatus === "withdrawn"/);
+  assert.match(activation, /deep_capture_consent_withdrawn/);
+  assert.match(contentScript, /isDeepCaptureAllowed/);
   assert.match(contentScript, /stopOpenLaneNetworkObserver/);
 });

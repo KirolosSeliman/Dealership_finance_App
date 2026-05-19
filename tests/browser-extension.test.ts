@@ -7,12 +7,13 @@ import vm from "node:vm";
 
 const repoRoot = process.cwd();
 const require = createRequire(import.meta.url);
+require("../browser-extension/src/deep-capture-activation.js");
 require("../browser-extension/src/openlane-section-map.js");
 const networkObserver = require("../browser-extension/src/openlane-network-observer.js") as {
   extractCandidatesFromNetworkPayload: (payload: unknown, url?: string) => { vinCandidates: Array<{ vin: string }>; mediaCandidates: Array<{ url: string }>; conditionCandidates: Array<{ text: string }>; sanitizedKeys: string[] };
   sanitizeNetworkPayload: (payload: unknown) => unknown;
   rememberNetworkPayload: (body: unknown, url?: string, contentType?: string) => unknown;
-  startOpenLaneNetworkObserver: (settings?: Record<string, unknown>) => { enabled: boolean; reason: string; observationCount: number };
+  startOpenLaneNetworkObserver: (settings?: Record<string, unknown>, context?: Record<string, unknown>) => { enabled: boolean; reason: string; observationCount: number };
   stopOpenLaneNetworkObserver: () => void;
   getOpenLaneNetworkObserverStatus: () => { enabled: boolean; reason: string; observationCount: number };
   mergeNetworkEvidenceIntoListing: (listing: Record<string, unknown>, evidence: unknown[]) => Record<string, unknown>;
@@ -35,6 +36,7 @@ test("Market Snap extension injects on OpenLane Canada vehicle pages", () => {
 
   assert.ok(matches.includes("https://*.openlane.ca/*"));
   assert.ok(matches.includes("https://*.openlane.com/*"));
+  assert.ok(scripts.includes("src/deep-capture-activation.js"));
   assert.ok(scripts.includes("src/storage.js"));
   assert.ok(scripts.includes("src/api-client.js"));
   assert.ok(scripts.includes("src/openlane-extraction-contract.js"));
@@ -46,6 +48,7 @@ test("Market Snap extension injects on OpenLane Canada vehicle pages", () => {
   assert.ok(scripts.includes("src/openlane-stable-capture.js"));
   assert.ok(scripts.includes("src/market-snap-widget.js"));
   assert.ok(scripts.includes("src/content-script.js"));
+  assert.ok(scripts.indexOf("src/deep-capture-activation.js") < scripts.indexOf("src/storage.js"));
   assert.ok(scripts.indexOf("src/openlane-stable-capture.js") < scripts.indexOf("src/content-script.js"));
   assert.ok(css.includes("styles/widget.css"));
   assert.equal(manifest.permissions.includes("tabs"), false);
@@ -179,6 +182,8 @@ test("Market Snap copy JSON includes normalized extraction, runtime evidence, an
   const contentScript = readFileSync(join(repoRoot, "browser-extension/src/content-script.js"), "utf8");
 
   assert.match(contentScript, /normalizedExtraction/);
+  assert.match(contentScript, /deepCaptureActivationMode/);
+  assert.match(contentScript, /consentMode/);
   assert.match(contentScript, /legacyPayload/);
   assert.match(contentScript, /classification/);
   assert.match(contentScript, /sectionMap/);
@@ -243,6 +248,7 @@ test("Market Snap extension settings and API client are shared and secret-free",
   for (const setting of ["dealerFlowBaseUrl", "organizationId", "autoAnalyze", "autoCapture", "autoSave", "modelImprovementOptIn", "widgetCollapsed", "debugMode", "includeMediaUrls", "includeRawVisibleText", "observePageNetworkData"]) {
     assert.match(storage, new RegExp(setting));
   }
+  assert.match(storage, /deepCaptureActivationMode/);
   for (const fn of ["getMarketSnapSettings", "saveMarketSnapSettings", "validateMarketSnapSettings", "analyzeListing", "saveListing", "buildDealerFlowUrl", "formatApiError"]) {
     assert.match(apiClient, new RegExp(fn));
   }
@@ -489,29 +495,32 @@ test("OpenLane network observer ignores sensitive endpoints and reports consent-
   assert.equal(networkObserver.rememberNetworkPayload(JSON.stringify({ vehicle: { vin: "2T3R1RFV5MW123456" } }), "https://app.openlane.ca/api/session/token", "application/json"), undefined);
 
   const inactive = networkObserver.startOpenLaneNetworkObserver({
+    dealerFlowBaseUrl: "https://dealer-flow.example",
     organizationId: "63c47786-fb41-40c1-a573-71346969b9e0",
     deepCaptureEnabled: false,
     deepCaptureConsentStatus: "off",
     deepCaptureConsentId: "",
     observePageNetworkData: true,
-  });
+  }, { href: "https://app.openlane.ca/vdp/123" });
   const disabled = networkObserver.startOpenLaneNetworkObserver({
+    dealerFlowBaseUrl: "https://dealer-flow.example",
     organizationId: "63c47786-fb41-40c1-a573-71346969b9e0",
     deepCaptureEnabled: true,
     deepCaptureConsentStatus: "active",
     deepCaptureConsentId: "33333333-3333-4333-8333-333333333333",
     observePageNetworkData: false,
-  });
+  }, { href: "https://app.openlane.ca/vdp/123" });
   const active = networkObserver.startOpenLaneNetworkObserver({
+    dealerFlowBaseUrl: "https://dealer-flow.example",
     organizationId: "63c47786-fb41-40c1-a573-71346969b9e0",
     deepCaptureEnabled: true,
     deepCaptureConsentStatus: "active",
     deepCaptureConsentId: "33333333-3333-4333-8333-333333333333",
     observePageNetworkData: true,
-  });
+  }, { href: "https://app.openlane.ca/vdp/123" });
 
   assert.equal(inactive.enabled, false);
-  assert.equal(inactive.reason, "deep_capture_consent_required");
+  assert.equal(inactive.reason, "deep_capture_disabled_by_user");
   assert.equal(disabled.enabled, false);
   assert.equal(disabled.reason, "disabled");
   assert.equal(active.enabled, true);

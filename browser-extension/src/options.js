@@ -29,7 +29,7 @@ async function loadSettings() {
   includeMediaUrlsInput.checked = settings.includeMediaUrls !== false;
   includeRawVisibleTextInput.checked = settings.includeRawVisibleText !== false;
   observePageNetworkDataInput.checked = Boolean(settings.observePageNetworkData);
-  updateDeepCaptureStatus(settings.deepCaptureConsentStatus || "off");
+  updateDeepCaptureStatus(settings.deepCaptureConsentStatus || "off", settings);
   await refreshDeepCaptureConsent({ quiet: true });
 }
 
@@ -63,7 +63,7 @@ document.getElementById("saveSettings").addEventListener("click", async () => {
   statusEl.textContent = saved.organizationId
     ? "Settings saved. Refresh OpenLane tabs to apply changes."
     : "Settings saved without an organization ID. The widget will stay disconnected until one is added.";
-  updateDeepCaptureStatus(saved.deepCaptureConsentStatus);
+  applySettingsToForm(saved);
 });
 
 document.getElementById("refreshDeepCaptureConsent").addEventListener("click", () => refreshDeepCaptureConsent({ quiet: false }));
@@ -73,7 +73,7 @@ document.getElementById("withdrawDeepCaptureConsent").addEventListener("click", 
 async function refreshDeepCaptureConsent({ quiet } = { quiet: false }) {
   const settings = await window.DealerFlowMarketSnapApi.getMarketSnapSettings();
   if (!settings.organizationId) {
-    updateDeepCaptureStatus("off");
+    updateDeepCaptureStatus("off", settings);
     return;
   }
   try {
@@ -83,11 +83,11 @@ async function refreshDeepCaptureConsent({ quiet } = { quiet: false }) {
   } catch (error) {
     await window.DealerFlowMarketSnapApi.saveMarketSnapSettings({
       ...settings,
-      deepCaptureEnabled: false,
+      deepCaptureEnabled: settings.deepCaptureEnabled !== false,
       deepCaptureConsentStatus: "paused",
-      observePageNetworkData: false,
+      observePageNetworkData: settings.observePageNetworkData !== false,
     });
-    updateDeepCaptureStatus("paused");
+    updateDeepCaptureStatus("paused", settings);
     if (!quiet) statusEl.textContent = window.DealerFlowMarketSnapApi.formatApiError(error);
   }
 }
@@ -101,7 +101,7 @@ async function acceptDeepCaptureConsent() {
     await saveConsentState(settings, response);
     statusEl.textContent = "Deep Capture consent accepted. OpenLane pages will use Deep Capture by default for this consenting context.";
   } catch (error) {
-    updateDeepCaptureStatus("paused");
+    updateDeepCaptureStatus("paused", settings);
     statusEl.textContent = window.DealerFlowMarketSnapApi.formatApiError(error);
   }
 }
@@ -147,12 +147,12 @@ async function saveConsentState(settings, response) {
     debugMode: debugModeInput.checked,
     includeMediaUrls: includeMediaUrlsInput.checked,
     includeRawVisibleText: includeRawVisibleTextInput.checked,
-    deepCaptureEnabled: active,
+    deepCaptureEnabled: settings.deepCaptureEnabled !== false,
     deepCaptureConsentId: response.deepCaptureConsentId || "",
     deepCaptureConsentVersion: response.deepCaptureConsentVersion || "",
     deepCaptureConsentAcceptedAt: response.deepCaptureConsentAcceptedAt || "",
     deepCaptureConsentStatus: active ? "active" : response.consentStatus || "off",
-    observePageNetworkData: active ? true : false,
+    observePageNetworkData: settings.observePageNetworkData !== false,
   });
   applySettingsToForm(saved);
 }
@@ -161,10 +161,23 @@ function applySettingsToForm(settings) {
   deepCaptureEnabledInput.checked = Boolean(settings.deepCaptureEnabled);
   modelImprovementOptInInput.checked = Boolean(settings.modelImprovementOptIn);
   observePageNetworkDataInput.checked = Boolean(settings.observePageNetworkData);
-  updateDeepCaptureStatus(settings.deepCaptureConsentStatus);
+  updateDeepCaptureStatus(settings.deepCaptureConsentStatus, settings);
 }
 
-function updateDeepCaptureStatus(status) {
+function updateDeepCaptureStatus(status, settings = {}) {
+  const activation = window.DealerFlowMarketSnapDeepCaptureActivation?.isDeepCaptureAllowed?.(settings, { href: "https://app.openlane.ca/" });
+  if (activation?.deepCaptureActivationMode === "default_enabled_pending_consent_ui") {
+    deepCaptureStatusBadge.textContent = "Active by default - consent UI pending";
+    deepCaptureEnabledInput.disabled = false;
+    observePageNetworkDataInput.disabled = false;
+    return;
+  }
+  if (activation?.deepCaptureActivationMode === "disabled_missing_required_settings") {
+    deepCaptureStatusBadge.textContent = "Off - missing Dealer Flow URL or Organization ID";
+    deepCaptureEnabledInput.disabled = false;
+    observePageNetworkDataInput.disabled = false;
+    return;
+  }
   const labels = {
     active: "On - active consent",
     paused: "Paused - backend unreachable",
@@ -173,6 +186,6 @@ function updateDeepCaptureStatus(status) {
     off: "Off - consent needed",
   };
   deepCaptureStatusBadge.textContent = labels[status] || labels.off;
-  deepCaptureEnabledInput.disabled = status !== "active";
-  observePageNetworkDataInput.disabled = status !== "active";
+  deepCaptureEnabledInput.disabled = false;
+  observePageNetworkDataInput.disabled = false;
 }
