@@ -1305,13 +1305,20 @@ test("OpenLane active current bid parser accepts highest proxy applied and rejec
     "https://app.openlane.ca/vdp/KM8J3CA46HU654321",
   );
   const fields = listing.extractedFields as {
-    currentBidEvidence?: { sourceText?: string };
-    debug?: { priceCandidates?: Array<{ field?: string; value?: number; rejectedReason?: string; sourceText?: string }> };
+    currentBidEvidence?: { sourceType?: string; sourceText?: string };
+    debug?: {
+      priceCandidates?: Array<{ field?: string; value?: number; rejectedReason?: string; sourceText?: string }>;
+      lowerBidCandidates?: Array<{ value?: number; sourceText?: string; rejectedReason?: string }>;
+      currentBidDiagnostics?: { winningSourceType?: string };
+    };
   };
 
   assert.equal(listing.currentBid, 21_000);
   assert.equal(listing.listedPrice, 21_000);
+  assert.equal(fields.currentBidEvidence?.sourceType, "active_bid_bar");
+  assert.equal(fields.debug?.currentBidDiagnostics?.winningSourceType, "active_bid_bar");
   assert.match(String(fields.currentBidEvidence?.sourceText), /\$21,000/);
+  assert.ok(fields.debug?.lowerBidCandidates?.some((item) => item.value === 11_100 && /bid_history/i.test(String(item.rejectedReason))));
   assert.ok(fields.debug?.priceCandidates?.some((item) => item.field === "currentBid" && item.value === 2 && item.rejectedReason === "bid_count_not_money"));
 });
 

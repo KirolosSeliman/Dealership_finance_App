@@ -207,6 +207,8 @@
           mileageCandidates: mileageResult.candidates,
           candidateScores: titleResult.candidates,
           priceCandidates: [...(currentBidResult.candidates || []), ...(purchaseEconomics.priceCandidates || []), ...(postSaleOutcome.priceCandidates || [])],
+          lowerBidCandidates: currentBidResult.lowerBidCandidates,
+          currentBidDiagnostics: currentBidResult.diagnostics,
           listedPriceDecision: listedPriceResult.decision,
           mediaRejected,
           mainTextSample: mainVisibleText.slice(0, 800),
@@ -705,20 +707,31 @@
   }
 
   function extractCurrentBidFromBidPanel(textRegions = {}, doc = document, options = {}) {
+    return extractActiveListingCurrentBid({
+      sectionMap: textRegions.sectionMap || doc.__openlaneSectionMap || {},
+      doc,
+      networkEvidence: options.networkEvidence,
+      labelValues: options.labelValues,
+      mainText: options.mainText,
+      footerText: textRegions.footerText,
+    });
+  }
+
+  function extractActiveListingCurrentBid({ sectionMap = {}, doc = document, networkEvidence = [], labelValues, mainText, footerText } = {}) {
     const candidates = [];
-    const sectionMap = textRegions.sectionMap || doc.__openlaneSectionMap || {};
     const zones = sectionMap.zones || {};
-    addNetworkCurrentBidCandidates(candidates, options.networkEvidence);
+    addNetworkCurrentBidCandidates(candidates, networkEvidence);
     addCurrentBidTextCandidates(candidates, "section-map:activeBidBar", zones.activeBidBar?.text, 98);
     addCurrentBidTextCandidates(candidates, "section-map:bidPanel", zones.bidPanel?.text, 88);
     addCurrentBidTextCandidates(candidates, "section-map:purchasePanel", zones.purchasePanel?.text, 76);
-    addCurrentBidTextCandidates(candidates, "section-map:footer", textRegions.footerText, 52);
+    addCurrentBidTextCandidates(candidates, "section-map:footer", footerText, 52);
     addCurrentBidDomCandidates(candidates, doc);
-    addCurrentBidLabelValueCandidates(candidates, options.labelValues);
-    addCurrentBidTextCandidates(candidates, "visible_text", options.mainText, 36);
+    addCurrentBidLabelValueCandidates(candidates, labelValues);
+    addCurrentBidTextCandidates(candidates, "visible_text", mainText, 36);
     const accepted = candidates
       .filter((candidate) => !candidate.rejectedReason && candidate.value)
       .sort((a, b) => Number(b.confidenceScore || 0) - Number(a.confidenceScore || 0) || Number(b.value || 0) - Number(a.value || 0))[0];
+    const lowerBidCandidates = identifyLowerBidCandidates(candidates, accepted);
     return {
       value: accepted?.value,
       evidence: accepted ? {
@@ -732,6 +745,14 @@
         confidenceScore: accepted.confidenceScore,
         capturedAt: accepted.capturedAt || new Date().toISOString(),
       } : undefined,
+      lowerBidCandidates,
+      diagnostics: {
+        winningSourceType: accepted?.sourceType,
+        winningSourceName: accepted?.sourceName,
+        candidateCount: candidates.length,
+        rejectedCandidateCount: candidates.filter((candidate) => candidate.rejectedReason).length,
+        lowerBidCandidateCount: lowerBidCandidates.length,
+      },
       candidates: candidates
         .sort((a, b) => Number(b.confidenceScore || 0) - Number(a.confidenceScore || 0))
         .slice(0, 16),
@@ -918,6 +939,34 @@
       capturedAt: candidate.capturedAt,
       rejectedReason,
     }));
+  }
+
+  function identifyLowerBidCandidates(candidates, accepted) {
+    if (!accepted?.value) return [];
+    return dedupeCurrentBidCandidates(candidates
+      .filter((candidate) => !candidate.rejectedReason && candidate.value && candidate.value < accepted.value)
+      .map((candidate) => ({
+        field: "currentBid",
+        value: candidate.value,
+        sourceType: candidate.sourceType,
+        sourceName: candidate.sourceName,
+        sourceText: candidate.sourceText,
+        confidenceScore: candidate.confidenceScore,
+        rejectedReason: candidate.sourceType === "visible_text" || /history|bidder/i.test(`${candidate.sourceName || ""} ${candidate.sourceText || ""}`)
+          ? "lower_bid_history_candidate"
+          : "lower_current_bid_candidate",
+      })))
+      .slice(0, 8);
+  }
+
+  function dedupeCurrentBidCandidates(candidates) {
+    const seen = new Set();
+    return candidates.filter((candidate) => {
+      const key = `${candidate.value}|${candidate.sourceType}|${candidate.sourceText}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }
 
   function currentBidRejectedReason(candidate) {
