@@ -1132,6 +1132,75 @@ test("OpenLane active VDP keeps current bid observational and rejects transport 
   assert.notEqual(listing.listedPrice, 378);
 });
 
+test("OpenLane active current bid resolver rejects bid counts and selects the bid-panel money amount", () => {
+  const listing = extractor.extractOpenLaneFixture(
+    fixture("openlane-vdp-active-current-bid-before-label-4-bids.html"),
+    "https://app.openlane.ca/vdp/KNAE55LC7J6040713",
+  );
+  const fields = listing.extractedFields as {
+    currentBidEvidence?: { sourceText?: string };
+    debug?: { priceCandidates?: Array<{ field?: string; value?: number; rejectedReason?: string; sourceText?: string }> };
+  };
+
+  assert.equal(listing.pageType, "active_listing");
+  assert.equal(listing.captureKind, "observation");
+  assert.equal(listing.currentBid, 13_700);
+  assert.equal(listing.listedPrice, 13_700);
+  assert.notEqual(listing.currentBid, 4);
+  assert.match(String(fields.currentBidEvidence?.sourceText), /\$13,700/);
+  assert.ok(fields.debug?.priceCandidates?.some((item) => item.field === "currentBid" && item.value === 4 && item.rejectedReason === "bid_count_not_money"));
+});
+
+test("OpenLane active current bid resolver does not fall back to bid count without money context", () => {
+  const listing = extractor.extractOpenLaneFixture(`
+    <main data-testid="vehicle-detail-page">
+      <section class="vehicle-hero" data-vin="KNAE55LC7J6040713">
+        <h1>2018 Kia Stinger</h1>
+        <p>VIN KNAE55LC7J6040713</p>
+        <p>Odometer 111,486 KM</p>
+      </section>
+      <section class="bid-panel">
+        <h2>Current bid</h2>
+        <p>4 Bids</p>
+      </section>
+    </main>
+  `, "https://app.openlane.ca/vdp/KNAE55LC7J6040713");
+  const fields = listing.extractedFields as {
+    debug?: { priceCandidates?: Array<{ field?: string; value?: number; rejectedReason?: string }> };
+  };
+
+  assert.equal(listing.currentBid, undefined);
+  assert.equal(listing.listedPrice, undefined);
+  assert.ok(fields.debug?.priceCandidates?.some((item) => item.field === "currentBid" && item.value === 4 && item.rejectedReason === "bid_count_not_money"));
+});
+
+test("OpenLane network current bid fills missing DOM current bid from safe JSON evidence", () => {
+  const listing = extractor.extractOpenLaneFixture(`
+    <main data-testid="vehicle-detail-page">
+      <section class="vehicle-hero" data-vin="KNAE55LC7J6040713">
+        <h1>2018 Kia Stinger</h1>
+        <p>VIN KNAE55LC7J6040713</p>
+        <p>Odometer 111,486 KM</p>
+      </section>
+      <section class="bid-panel">
+        <h2>Current bid</h2>
+        <p>4 Bids</p>
+      </section>
+    </main>
+  `, "https://app.openlane.ca/vdp/KNAE55LC7J6040713");
+  const payload = JSON.parse(fixture("openlane-network-current-bid-carfax-diagnostics.json"));
+  const candidates = networkObserver.extractCandidatesFromNetworkPayload(payload, "https://app.openlane.ca/api/vdp/KNAE55LC7J6040713");
+  const merged = networkObserver.mergeNetworkEvidenceIntoListing(listing, [{
+    capturedAt: "2026-05-19T00:00:00.000Z",
+    endpointPattern: "app.openlane.ca/api/vdp/:id",
+    sanitizedKeys: [],
+    candidates,
+  }]) as { currentBid?: number; fieldEvidence?: Record<string, Array<{ sourceType?: string }>> };
+
+  assert.equal(merged.currentBid, 13_700);
+  assert.ok(merged.fieldEvidence?.currentBid?.some((item) => item.sourceType === "network_json"));
+});
+
 test("OpenLane canonical fields ignore Q&A sidebar footer market-guide and transport noise", () => {
   const listing = extractor.extractOpenLaneFixture(
     fixture("openlane-vdp-noisy-qa-sidebar-market-guide.html"),

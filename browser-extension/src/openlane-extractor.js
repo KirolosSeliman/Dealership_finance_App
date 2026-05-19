@@ -52,7 +52,12 @@
     const purchaseEconomics = extractPurchaseEconomics(mainVisibleText, classification);
     const postSaleOutcome = extractPostSaleOutcome(mainVisibleText, classification);
     const isPurchaseOutcomePage = ["fee_details", "purchase_detail", "purchase_info", "purchase_list", "post_sale"].includes(classification.pageType);
-    const currentBid = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(scopedLabelValues.price, OPENLANE_LABELS.currentBid);
+    const currentBidResult = isPurchaseOutcomePage ? { value: undefined, candidates: [] } : extractCurrentBidFromBidPanel(textRegions, doc, {
+      labelValues: scopedLabelValues.price,
+      mainText: mainVisibleText,
+      networkEvidence: options.networkEvidence,
+    });
+    const currentBid = currentBidResult.value;
     const currentOffer = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(scopedLabelValues.price, OPENLANE_LABELS.currentOffer);
     const bestOffer = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(scopedLabelValues.price, OPENLANE_LABELS.bestOffer);
     const buyNowPrice = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(scopedLabelValues.price, OPENLANE_LABELS.buyNowPrice);
@@ -135,6 +140,9 @@
       totalInvoiceAmount: purchaseEconomics.totalInvoiceAmount,
       finalAcquisitionCost: purchaseEconomics.finalAcquisitionCost,
       priceSemantics: mergeObjects(observationPriceSemantics, postSaleOutcome.priceSemantics, purchaseEconomics.priceSemantics),
+      fieldEvidence: compact({
+        currentBid: currentBidResult.evidence ? [currentBidResult.evidence] : undefined,
+      }),
       reservePrice: moneyFrom(firstLabel(labelValues, OPENLANE_LABELS.reservePrice)),
       estimatedAuctionFees: estimateAuctionFees(listedPrice),
       titleStatus: cleanStatusValue(firstCanonicalLabel(scopedLabelValues.condition, labelValues, OPENLANE_LABELS.titleStatus, "titleStatus", { allowFallback: true })),
@@ -184,6 +192,7 @@
         carfaxEvidence: carfax.carfaxEvidence,
         vinEvidence: vinResult.evidence,
         mileageEvidence: mileageResult.evidence,
+        currentBidEvidence: currentBidResult.evidence,
         debug: {
           classifierDecision: classification,
           decisiveEvidence: classification.decisiveEvidence || [],
@@ -192,7 +201,7 @@
           vinCandidates: vinResult.candidates,
           mileageCandidates: mileageResult.candidates,
           candidateScores: titleResult.candidates,
-          priceCandidates: [...(purchaseEconomics.priceCandidates || []), ...(postSaleOutcome.priceCandidates || [])],
+          priceCandidates: [...(currentBidResult.candidates || []), ...(purchaseEconomics.priceCandidates || []), ...(postSaleOutcome.priceCandidates || [])],
           mediaRejected,
           mainTextSample: mainVisibleText.slice(0, 800),
         },
@@ -687,6 +696,226 @@
       ...OPENLANE_LABELS.reservePrice,
     ];
     return moneyFrom(firstLabel(values, searchLabels));
+  }
+
+  function extractCurrentBidFromBidPanel(textRegions = {}, doc = document, options = {}) {
+    const candidates = [];
+    const sectionMap = textRegions.sectionMap || doc.__openlaneSectionMap || {};
+    const zones = sectionMap.zones || {};
+    addNetworkCurrentBidCandidates(candidates, options.networkEvidence);
+    addCurrentBidTextCandidates(candidates, "section-map:bidPanel", zones.bidPanel?.text, 88);
+    addCurrentBidTextCandidates(candidates, "section-map:purchasePanel", zones.purchasePanel?.text, 76);
+    addCurrentBidTextCandidates(candidates, "section-map:footer", textRegions.footerText, 52);
+    addCurrentBidDomCandidates(candidates, doc);
+    addCurrentBidLabelValueCandidates(candidates, options.labelValues);
+    addCurrentBidTextCandidates(candidates, "visible_text", options.mainText, 36);
+    const accepted = candidates
+      .filter((candidate) => !candidate.rejectedReason && candidate.value)
+      .sort((a, b) => Number(b.confidenceScore || 0) - Number(a.confidenceScore || 0) || Number(b.value || 0) - Number(a.value || 0))[0];
+    return {
+      value: accepted?.value,
+      evidence: accepted ? {
+        field: "currentBid",
+        value: accepted.value,
+        normalizedValue: accepted.value,
+        sourceType: accepted.sourceType,
+        sourceName: accepted.sourceName,
+        sourceText: accepted.sourceText,
+        endpointPattern: accepted.endpointPattern,
+        confidenceScore: accepted.confidenceScore,
+        capturedAt: accepted.capturedAt || new Date().toISOString(),
+      } : undefined,
+      candidates: candidates
+        .sort((a, b) => Number(b.confidenceScore || 0) - Number(a.confidenceScore || 0))
+        .slice(0, 16),
+    };
+  }
+
+  function addNetworkCurrentBidCandidates(candidates, evidence = []) {
+    const observations = Array.isArray(evidence) ? evidence : [];
+    for (const observation of observations) {
+      for (const candidate of observation?.candidates?.fieldCandidates || []) {
+        if (candidate.field !== "currentBid") continue;
+        const value = moneyFrom(candidate.value);
+        if (!value) continue;
+        candidates.push({
+          field: "currentBid",
+          value,
+          sourceType: "network_json",
+          sourceName: candidate.source || "OpenLane network JSON",
+          endpointPattern: candidate.endpointPattern || observation.endpointPattern,
+          sourceText: normalizeSpace(candidate.sourceText || candidate.source || "currentBid").slice(0, 240),
+          confidenceScore: Math.max(Number(candidate.confidence || 0), 94),
+          capturedAt: candidate.capturedAt || observation.capturedAt,
+        });
+      }
+    }
+  }
+
+  function addCurrentBidDomCandidates(candidates, doc) {
+    const selector = [
+      "[class*='bid']",
+      "[class*='Bid']",
+      "[data-testid*='bid']",
+      "[data-testid*='Bid']",
+      "[aria-label*='bid' i]",
+      "[title*='bid' i]",
+    ].join(",");
+    for (const node of Array.from(doc.querySelectorAll?.(selector) || []).slice(0, 80)) {
+      const sourceText = [
+        node.getAttribute?.("aria-label"),
+        node.getAttribute?.("title"),
+        node.getAttribute?.("data-testid"),
+        node.innerText,
+        node.textContent,
+      ].filter(Boolean).join("\n");
+      addCurrentBidTextCandidates(candidates, "dom:bidPanel", sourceText, 82);
+    }
+  }
+
+  function addCurrentBidLabelValueCandidates(candidates, labels) {
+    const values = labels instanceof Map ? labels : new Map(Object.entries(labels || {}));
+    const value = firstLabel(values, OPENLANE_LABELS.currentBid);
+    if (!value) return;
+    addCurrentBidCandidate(candidates, {
+      value: moneyFrom(value),
+      token: value,
+      sourceType: "label_value",
+      sourceName: "Current bid label",
+      sourceText: normalizeSpace(`Current bid ${value}`).slice(0, 240),
+      confidenceScore: 60,
+    });
+  }
+
+  function addCurrentBidTextCandidates(candidates, sourceName, text, baseScore) {
+    const source = String(text || "");
+    if (!source) return;
+    addCurrentBidCounterCandidates(candidates, sourceName, source, baseScore);
+    const labelWindows = currentBidLabelWindows(source);
+    for (const window of labelWindows) {
+      const regex = new RegExp(moneyRegex().source, "ig");
+      for (const match of window.text.matchAll(regex)) {
+        const token = match[0];
+        const value = currentBidMoneyFrom(token);
+        const tokenIndex = window.start + (match.index || 0);
+        const distance = Math.abs(tokenIndex - window.labelIndex);
+        const sourceText = currentBidCandidateSnippet(source, tokenIndex, token.length);
+        addCurrentBidCandidate(candidates, {
+          value,
+          token,
+          relationToLabel: tokenIndex >= window.labelIndex ? "after_label" : "before_label",
+          betweenLabelAndToken: source.slice(Math.min(window.labelIndex, tokenIndex), Math.max(window.labelIndex, tokenIndex)),
+          sourceType: sourceName.startsWith("section-map") ? "section_map" : sourceName.startsWith("dom:") ? "dom_text" : "visible_text",
+          sourceName,
+          sourceText,
+          confidenceScore: baseScore + (tokenIndex >= window.labelIndex ? 7 : 4) + Math.max(0, 6 - Math.floor(distance / 25)),
+        });
+      }
+    }
+    if (!labelWindows.length && /\b(current bid|top bid|mise actuelle)\b/i.test(source)) {
+      const regex = new RegExp(moneyRegex().source, "ig");
+      for (const match of source.matchAll(regex)) {
+        const token = match[0];
+        const tokenIndex = match.index || 0;
+        addCurrentBidCandidate(candidates, {
+          value: currentBidMoneyFrom(token),
+          token,
+          sourceType: sourceName.startsWith("section-map") ? "section_map" : "visible_text",
+          sourceName,
+          sourceText: currentBidCandidateSnippet(source, tokenIndex, token.length),
+          confidenceScore: baseScore,
+        });
+      }
+    }
+  }
+
+  function currentBidLabelWindows(text) {
+    const windows = [];
+    for (const label of OPENLANE_LABELS.currentBid) {
+      const regex = new RegExp(`\\b${escapeRegExp(label)}\\b`, "ig");
+      for (const match of String(text || "").matchAll(regex)) {
+        const labelIndex = match.index || 0;
+        const start = Math.max(0, labelIndex - 100);
+        const end = Math.min(String(text || "").length, labelIndex + String(match[0]).length + 140);
+        windows.push({ text: String(text || "").slice(start, end), start, labelIndex });
+      }
+    }
+    return windows.slice(0, 12);
+  }
+
+  function addCurrentBidCounterCandidates(candidates, sourceName, text, baseScore) {
+    for (const label of OPENLANE_LABELS.currentBid) {
+      const regex = new RegExp(`\\b${escapeRegExp(label)}\\b[\\s\\S]{0,80}?\\b(\\d{1,4})\\b\\s*(bids?|outbid|watchlist|photos?|disclosures?|videos?|total|hours?|mins?|minutes?|days?|km)\\b`, "ig");
+      for (const match of String(text || "").matchAll(regex)) {
+        const value = moneyFrom(match[1]);
+        if (!value) continue;
+        candidates.push({
+          field: "currentBid",
+          value,
+          sourceType: sourceName.startsWith("section-map") ? "section_map" : "visible_text",
+          sourceName,
+          sourceText: normalizeSpace(match[0]).slice(0, 240),
+          confidenceScore: Math.max(1, baseScore - 40),
+          rejectedReason: "bid_count_not_money",
+        });
+      }
+    }
+  }
+
+  function addCurrentBidCandidate(candidates, candidate) {
+    if (!candidate.value) return;
+    const rejectedReason = currentBidRejectedReason(candidate);
+    candidates.push(compact({
+      field: "currentBid",
+      value: candidate.value,
+      sourceType: candidate.sourceType,
+      sourceName: candidate.sourceName,
+      sourceText: normalizeSpace(candidate.sourceText).slice(0, 240),
+      endpointPattern: candidate.endpointPattern,
+      confidenceScore: rejectedReason ? Math.min(Number(candidate.confidenceScore || 0), 20) : candidate.confidenceScore,
+      capturedAt: candidate.capturedAt,
+      rejectedReason,
+    }));
+  }
+
+  function currentBidRejectedReason(candidate) {
+    if (candidate.sourceType === "network_json") return "";
+    const token = String(candidate.token || "");
+    const sourceText = String(candidate.sourceText || "");
+    if (!hasMoneyMarker(token) && hasCounterPriceContext(sourceText)) return "bid_count_not_money";
+    if (!hasMoneyMarker(`${token} ${sourceText}`)) return "missing_money_context";
+    if (isTransportPriceContext(sourceText)) return "transport_or_distance_not_current_bid";
+    if (/\b(buy now|buy it now)\b/i.test(candidate.betweenLabelAndToken || "")) return "buy_now_not_current_bid";
+    if (/\b(reserve|sold price|selling price|invoice total|subtotal|taxes|fees?)\b/i.test(sourceText)
+      && !/\b(current bid|top bid|mise actuelle)\b/i.test(sourceText)) {
+      return "non_current_bid_price_context";
+    }
+    return "";
+  }
+
+  function hasMoneyMarker(value) {
+    return /(?:CA\$|CAD|\$|\d[\d,.\s]*\$)/i.test(String(value || ""));
+  }
+
+  function hasCounterPriceContext(value) {
+    return /\b(bids?|outbid|watchlist|if deals?|photos?|photo|disclosures?|disclosure|videos?|video|total|hours?|mins?|minutes?|days?|page number|auction id|distance|km)\b/i.test(String(value || ""));
+  }
+
+  function currentBidMoneyFrom(value) {
+    const text = String(value || "");
+    const leading = text.match(/(?:CA\$|CAD|\$)\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.\d{2})?/i);
+    const trailing = text.match(/\b([0-9]{1,3}(?:[,\s][0-9]{3})+|[0-9]+)(?:\.\d{2})?\s*\$/i);
+    const amount = leading?.[1] || trailing?.[1];
+    return moneyFrom(amount);
+  }
+
+  function currentBidCandidateSnippet(source, index, length) {
+    const text = String(source || "");
+    const beforeBreak = text.lastIndexOf("\n", Math.max(0, index - 1));
+    const afterBreak = text.indexOf("\n", index + length);
+    const start = Math.max(0, beforeBreak >= 0 ? beforeBreak + 1 : index - 80);
+    const end = Math.min(text.length, afterBreak >= 0 ? afterBreak : index + length + 80);
+    return normalizeSpace(text.slice(start, end));
   }
 
   function extractCarfaxLink(doc = document, href = safeCurrentHref()) {
