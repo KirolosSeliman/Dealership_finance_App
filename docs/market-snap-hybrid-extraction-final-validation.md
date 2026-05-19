@@ -67,7 +67,7 @@ Security posture preserved:
 
 ## Test Results
 
-Latest automated commands from repository root:
+Latest automated commands from repository root, rerun on May 19, 2026 after the OpenLane purchased VDP and widget-debug phases:
 
 ```powershell
 npm.cmd run verify:extension
@@ -78,8 +78,8 @@ npm.cmd run build
 
 Results:
 
-- `npm.cmd run verify:extension`: passed, 76/76 tests.
-- `npm.cmd test`: passed, 261/261 tests.
+- `npm.cmd run verify:extension`: passed, 85/85 tests.
+- `npm.cmd test`: passed, 278/278 tests.
 - `npm.cmd run lint`: passed with no warnings.
 - `npm.cmd run build`: passed; Next.js production build compiled and generated all app routes.
 

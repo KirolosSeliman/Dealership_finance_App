@@ -117,11 +117,13 @@ python -m pytest
 
 ## Test Results
 
-- `npm.cmd run verify:extension`: passed, 61 tests.
-- `npm.cmd test`: passed, 239 tests.
+Latest repository-wide validation was rerun on May 19, 2026 after the OpenLane purchased VDP and widget-debug phases.
+
+- `npm.cmd run verify:extension`: passed, 85 tests.
+- `npm.cmd test`: passed, 278 tests.
 - `npm.cmd run lint`: passed.
 - `npm.cmd run build`: passed.
-- `python -m pytest`: passed, 24 tests.
+- `python -m pytest`: rerun from `ml-service`, passed, 25 tests.
 
 ## Remaining Risks
 
