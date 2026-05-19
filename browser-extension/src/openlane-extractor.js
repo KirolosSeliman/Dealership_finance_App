@@ -852,7 +852,7 @@
     const knownHistoryText = zones.knownHistory?.text || findSectionByHeadings(text, ["Known history", "Antécédents connus", "Antecedents connus"]);
     const disclosureText = zones.disclosuresCondition?.text || findSectionByHeadings(text, ["Disclosures and conditions", "Disclosures", "Divulgations et condition"]);
     const dealerNotes = cleanConditionSection(zones.dealerNotes?.text || findSectionByHeadings(text, ["Note from selling dealer", "Note du concessionnaire vendeur", "Dealer notes"]));
-    const qaSummary = cleanConditionSection(zones.qaSection?.text || findSectionByHeadings(text, ["Q and A", "Q&A", "Q et R"]));
+    const qaSummary = cleanConditionSection(zones.qaSection?.text || findSectionByHeadings(text, ["Q and A", "Q&A", "Q et R"]), { keepQuestions: true });
     const sellerBroadcasts = cleanConditionSection(findSectionByHeadings(text, ["Seller broadcasts", "Broadcasts", "Messages du vendeur"]));
     const knownHistoryItems = conditionItems(knownHistoryText, ["Known history", "Antécédents connus", "Antecedents connus"]);
     const safetyDisclosures = conditionItems(subsectionText(disclosureText, ["In relation to safety", "En relation avec la sécurité", "En relation avec la securite"]));
@@ -872,8 +872,6 @@
       tireWheelDisclosures.length ? `Tires and wheels: ${tireWheelDisclosures.join(" | ")}` : "",
       obd2Text ? `OBD2 Reader: ${cleanConditionSection(obd2Text)}` : "",
       dealerNotes ? `Dealer notes: ${dealerNotes}` : "",
-      sellerBroadcasts ? `Seller broadcasts: ${sellerBroadcasts}` : "",
-      qaSummary ? `Q and A: ${qaSummary}` : "",
       fallbackDeclarations.length ? `Declarations: ${fallbackDeclarations.join(" | ")}` : "",
     ].filter(Boolean).join(" | ").slice(0, 4000);
     const highRiskTerms = highRiskConditionTerms(allConditionText);
@@ -931,8 +929,32 @@
       .slice(0, 30);
   }
 
-  function cleanConditionSection(text) {
-    return normalizeSpace(String(text || "").replace(/\r/g, "\n"));
+  function cleanConditionSection(text, options = {}) {
+    return normalizeSpace(String(text || "")
+      .replace(/\r/g, "\n")
+      .split(/\n|\s+\|\s+/)
+      .map(cleanConditionLine)
+      .filter((line) => line && !isConditionNoiseLine(line, options))
+      .join("\n"));
+  }
+
+  function cleanConditionLine(line) {
+    return normalizeSpace(String(line || "")
+      .replace(/&amp;/gi, "&")
+      .replace(/^[-â€¢]\s*/, ""));
+  }
+
+  function isConditionNoiseLine(line, options = {}) {
+    const text = normalizeSpace(line);
+    if (!text) return true;
+    if (/^(BUYING|SELLING|Browse vehicles|Pending|Closing|Purchases|Create|Parked|Listings|Sold|Sent to Simulcast|PRO|Leads & customers|MyLot|Market guide|Terms & conditions|Privacy policy|Q&A|Q and A)$/i.test(text)) return true;
+    if (/^(OPENLANE Inc\. All rights reserved\.?|Subscribe to Market guide\.?|Historical sales of similar vehicles\.?)$/i.test(text)) return true;
+    if (/\b(Transport estimate|Transport Direct|Rate info|Vehicle location|Market guide|wholesale data, past \d+ days|Terms & conditions|Privacy policy|Subscribe to Market guide|OPENLANE Inc\. All rights reserved)\b/i.test(text)) return true;
+    if (/^\b(19|20)\d{2}\b\s+[A-Za-z][A-Za-z -]+\b/.test(text)) return true;
+    if (/^(VIN|NIV)\b|^[A-HJ-NPR-Z0-9]{17}$/i.test(text)) return true;
+    if (/^Odometer\b|^Odom[eÃ¨]tre\b|^\d[\d,.\s]*\s*KM$/i.test(text)) return true;
+    if (/^Q:\s/i.test(text) && !options.keepQuestions) return true;
+    return false;
   }
 
   function highRiskConditionTerms(text) {

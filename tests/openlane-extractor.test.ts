@@ -922,6 +922,73 @@ test("OpenLane extractor structures bilingual condition disclosures and dealer n
   assert.equal((listing.warnings as string[]).some((warning) => /Condition report text was not visible/i.test(warning)), false);
 });
 
+test("OpenLane condition disclosure cleanup removes navigation legal transport and Q&A bleed", () => {
+  const listing = extractor.extractOpenLaneFixture(`
+    <aside class="sidebar-navigation">
+      <nav>
+        <h2>BUYING</h2>
+        <a>SELLING</a>
+        <a>Purchases</a>
+        <a>Listings</a>
+        <a>Leads &amp; customers</a>
+      </nav>
+    </aside>
+    <main class="vdp-page">
+      <section class="vehicle-hero" data-vin="KM8J3CA46HU123456">
+        <h1>2017 Hyundai Tucson</h1>
+        <p>Odometer 111,486 KM</p>
+      </section>
+      <section class="disclosures-condition">
+        <h2>Disclosures and conditions</h2>
+        <h3>Mechanical</h3>
+        <p>OBD2 scan available.</p>
+        <p>This vehicle was not scanned.</p>
+        <h3>Exterior</h3>
+        <p>Roof (rust)</p>
+        <p>Rocker Panel (dent)</p>
+        <p>Bumper (scratch)</p>
+        <h3>Interior</h3>
+        <p>As-is</p>
+        <p>Red light</p>
+        <p>Previously Registered Out Of Province</p>
+        <p>Transport estimate CAD $378 / 211km</p>
+        <p>Market guide wholesale data, past 90 days</p>
+        <p>Terms &amp; conditions</p>
+      </section>
+      <section class="qa-section">
+        <h2>Q&amp;A</h2>
+        <p>Q: Engine and transmission are good? Thanks</p>
+      </section>
+    </main>
+    <footer>OPENLANE Inc. All rights reserved. Privacy policy. Subscribe to Market guide.</footer>
+  `, "https://app.openlane.ca/vdp/KM8J3CA46HU123456");
+  const condition = listing.condition as {
+    mechanicalDisclosures?: string[];
+    exteriorDisclosures?: string[];
+    interiorDisclosures?: string[];
+    qaSummary?: string;
+    conditionReportText?: string;
+  };
+
+  assert.ok(condition.mechanicalDisclosures?.some((item) => /OBD2 scan/i.test(item)));
+  assert.ok(condition.mechanicalDisclosures?.some((item) => /not scanned/i.test(item)));
+  assert.ok(condition.exteriorDisclosures?.some((item) => /Roof \(rust\)/i.test(item)));
+  assert.ok(condition.exteriorDisclosures?.some((item) => /Rocker Panel \(dent\)/i.test(item)));
+  assert.ok(condition.interiorDisclosures?.some((item) => /As-is/i.test(item)));
+  assert.ok(condition.interiorDisclosures?.some((item) => /Previously Registered Out Of Province/i.test(item)));
+  assert.match(String(condition.qaSummary), /Engine and transmission are good/i);
+
+  const structuredText = [
+    ...(condition.mechanicalDisclosures || []),
+    ...(condition.exteriorDisclosures || []),
+    ...(condition.interiorDisclosures || []),
+    condition.conditionReportText || "",
+  ].join(" | ");
+  assert.doesNotMatch(structuredText, /BUYING|SELLING|Purchases|Listings|Leads & customers/i);
+  assert.doesNotMatch(structuredText, /Transport estimate|Market guide|wholesale data|Terms & conditions|OPENLANE Inc|Privacy policy|Q&A|Engine and transmission are good/i);
+  assert.ok(String(condition.conditionReportText || "").length < 4000);
+});
+
 test("OpenLane page classifier separates active observations from outcome pages", () => {
   const active = classifier.classifyOpenLanePageFromHtml(fixture("openlane-basic.html"), "https://www.openlane.ca/vehicle/123");
   const purchaseList = classifier.classifyOpenLanePageFromHtml(fixture("openlane-purchase-list.html"), "https://www.openlane.ca/purchases");
