@@ -116,6 +116,46 @@ test("OpenLane extractor rejects VIN barcode label noise and keeps rejection rea
   assert.equal(debug.debug?.vinCandidates?.some((candidate) => candidate.vin === "BARCODE"), false);
 });
 
+test("OpenLane VIN resolver prefers header chip and explicit DOM evidence over stale URL fallback", () => {
+  const listing = extractor.extractOpenLaneFixture(`
+    <main class="vdp-page">
+      <header class="vehicle-identity">
+        <h1>2017 Hyundai Tucson AWD</h1>
+        <span class="vin-chip">VIN KM8J3CA46HU123456</span>
+        <button aria-label="Copy VIN KM8J3CA46HU123456">Copy</button>
+      </header>
+      <section class="vehicle-specs">Odometer 111,486 KM</section>
+      <section class="bid-panel">Current Bid $4,600</section>
+      <span>23 total photos</span>
+    </main>
+  `, "https://app.openlane.ca/vdp/3KPFL4A72HE119966");
+  const fields = listing.extractedFields as { vinEvidence?: { matchedLabel?: string; sourceText?: string } };
+
+  assert.equal(listing.vin, "KM8J3CA46HU123456");
+  assert.equal(fields.vinEvidence?.matchedLabel, "header_vin_chip");
+  assert.match(String(fields.vinEvidence?.sourceText || ""), /KM8J3CA46HU123456/);
+});
+
+test("OpenLane VIN resolver rejects UI token candidates before choosing valid VIN", () => {
+  const listing = extractor.extractOpenLaneFixture(`
+    <main class="vdp-page">
+      <section class="vehicle-hero">
+        <h1>2017 Hyundai Tucson AWD</h1>
+        <p>SIMULCASTPROLEADS DISCOUNTAVAILABLE</p>
+        <span class="vin-chip">VIN KM8J3CA46HU123456</span>
+      </section>
+      <section class="vehicle-specs">Odometer 111,486 KM</section>
+      <section class="bid-panel">Current Bid $4,600</section>
+      <span>23 total photos</span>
+    </main>
+  `, "https://app.openlane.ca/vdp/hyundai-tucson");
+  const debug = listing.extractedFields as { debug?: { vinCandidates?: Array<{ candidate?: string; rejectedReason?: string }> } };
+
+  assert.equal(listing.vin, "KM8J3CA46HU123456");
+  assert.ok(debug.debug?.vinCandidates?.some((candidate) => candidate.candidate === "SIMULCASTPROLEADS" && /ui_token|invalid/i.test(String(candidate.rejectedReason))));
+  assert.ok(debug.debug?.vinCandidates?.some((candidate) => candidate.candidate === "DISCOUNTAVAILABLE" && /ui_token|invalid/i.test(String(candidate.rejectedReason))));
+});
+
 test("OpenLane extractor recovers VIN from URL path and query when page metadata is delayed", () => {
   const html = `
     <main class="vdp-page">

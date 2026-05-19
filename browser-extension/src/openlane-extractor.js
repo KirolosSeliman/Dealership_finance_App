@@ -520,10 +520,8 @@
         candidates.push({ vin: rejectedReason ? undefined : candidate, candidate, source, sourceText, weight: score, score, rejectedReason });
       }
     };
-    addCandidates("url", href, 95);
-    addCandidates("main_text", mainText, 40);
-    addCandidates("visible_text", rawText, 10);
-    addCandidates("label_value", firstLabel(extractLabelValueMap(doc, mainText), OPENLANE_LABELS.vin), 55);
+    addCandidates("explicit_dom_attribute", extractExplicitVinAttributeText(doc), 94);
+    addCandidates("header_vin_chip", extractHeaderVinChipText(doc), 92);
     for (const node of Array.from(doc.querySelectorAll?.("[data-vin], [aria-label], [data-testid], [title], button, [role='button']") || [])) {
       const attrs = ["data-vin", "aria-label", "data-testid", "title"].map((name) => node.getAttribute?.(name)).filter(Boolean).join(" ");
       addCandidates("dom_attributes", attrs, /data-vin/i.test(attrs) ? 90 : 70);
@@ -534,9 +532,14 @@
     }
     const sectionMap = doc.__openlaneTextRegions?.sectionMap || doc.__openlaneSectionMap;
     addCandidates("safe_dom_attributes", extractSafeDomAttributeText(doc), 85);
+    addCandidates("copy_button", extractCopyVinButtonText(doc), 82);
+    addCandidates("url", href, 72);
+    addCandidates("label_value", firstLabel(extractLabelValueMap(doc, mainText), OPENLANE_LABELS.vin), 68);
     addCandidates("section-map:vehicleHero", sectionMap?.zones?.vehicleHero?.text, 50);
     addCandidates("section-map:vehicleSpecs", sectionMap?.zones?.vehicleSpecs?.text, 45);
     addCandidates("html_attributes", extractAttributeText(doc.__openlaneHtml || ""), 75);
+    addCandidates("main_text", mainText, 40);
+    addCandidates("visible_text", rawText, 10);
     candidates.sort((a, b) => b.weight - a.weight);
     const chosen = candidates.find((candidate) => !candidate.rejectedReason && candidate.vin);
     return {
@@ -548,9 +551,65 @@
 
   function rejectedVinReason(candidate, sourceText = "") {
     if (!candidate) return "empty_vin_candidate";
+    if (/^(SIMULCASTPROLEADS|DISCOUNTAVAILABLE)$/i.test(candidate)) return "ui_token_not_identifier";
     if (!/^[A-HJ-NPR-Z0-9]{17}$/i.test(candidate)) return "invalid_vin_characters_or_length";
     if (/\b(no additional information|not available|unknown)\b/i.test(sourceText)) return "non_identifier_label_text";
     return "";
+  }
+
+  function extractExplicitVinAttributeText(doc) {
+    const nodes = Array.from(doc.querySelectorAll?.("[data-vin], [data-vehicle], [data-openlane-vehicle], [data-listing], [data-testid], [aria-label], [title]") || []).slice(0, 250);
+    return nodes.map((node) => {
+      const values = [];
+      for (const attribute of Array.from(node.attributes || [])) {
+        const name = String(attribute.name || "");
+        if (/^(data-vin|data-vehicle|data-openlane-vehicle|data-listing|aria-label|title|data-testid)$/i.test(name) || /vin|vehicle|listing/i.test(name)) {
+          values.push(attribute.value);
+        }
+      }
+      return values.join(" ");
+    }).filter(Boolean).join("\n");
+  }
+
+  function extractHeaderVinChipText(doc) {
+    const parts = [];
+    const selectors = [
+      "header",
+      "[class*='vehicle']",
+      "[class*='Vehicle']",
+      "[class*='hero']",
+      "[class*='Hero']",
+      "[class*='vin']",
+      "[class*='VIN']",
+      "[data-testid*='vin']",
+      "[data-testid*='VIN']",
+    ];
+    const nodes = Array.from(doc.querySelectorAll?.(selectors.join(",")) || []).slice(0, 120);
+    parts.push(...nodes.map((node) => [
+      node.getAttribute?.("data-vin"),
+      node.getAttribute?.("aria-label"),
+      node.getAttribute?.("title"),
+      node.innerText,
+      node.textContent,
+    ].filter(Boolean).join(" ")).filter((text) => /\b(VIN|NIV)\b|[A-HJ-NPR-Z0-9]{17}/i.test(text)));
+    const html = String(doc.__openlaneHtml || "");
+    for (const match of html.matchAll(/<(?:header|section|div|span|button)\b[^>]*(?:vin|vehicle|hero|copy)[^>]*>[\s\S]{0,900}?(?:<\/(?:header|section|div|span|button)>|$)/gi)) {
+      const text = stripTags(match[0]);
+      if (/\b(VIN|NIV)\b|[A-HJ-NPR-Z0-9]{17}/i.test(text)) parts.push(text);
+      if (parts.length >= 120) break;
+    }
+    return parts.join("\n");
+  }
+
+  function extractCopyVinButtonText(doc) {
+    const nodes = Array.from(doc.querySelectorAll?.("button, [role='button'], [aria-label], [title], [data-testid]") || []).slice(0, 200);
+    return nodes.map((node) => [
+      node.getAttribute?.("aria-label"),
+      node.getAttribute?.("title"),
+      node.getAttribute?.("data-testid"),
+      node.innerText,
+      node.textContent,
+    ].filter(Boolean).join(" ")).filter((text) => /\b(copy|clipboard|VIN|NIV)\b/i.test(text)).join("\n");
   }
 
   function extractMoneyByLabels(labels, labelNames = []) {
