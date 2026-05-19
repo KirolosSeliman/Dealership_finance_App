@@ -86,6 +86,34 @@ test("Deep Capture release QA checklist covers consent, extension, persistence, 
   }
 });
 
+test("Market Snap extension deployment guide covers Vercel origin configuration", () => {
+  const envExample = readFileSync(join(repoRoot, ".env.example"), "utf8");
+  const guide = readFileSync(join(repoRoot, "docs/market-snap-extension-deployment.md"), "utf8");
+
+  assert.match(envExample, /MARKET_SNAP_EXTENSION_ORIGINS=chrome-extension:\/\/<chrome_extension_id>,chrome-extension:\/\/<brave_extension_id>/);
+  for (const required of [
+    "chrome://extensions",
+    "brave://extensions",
+    "chrome-extension://<extension-id>",
+    "MARKET_SNAP_EXTENSION_ORIGINS",
+    "NEXT_PUBLIC_APP_URL",
+    "NEXT_PUBLIC_SUPABASE_URL",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "CRON_SECRET",
+    "vercel env add MARKET_SNAP_EXTENSION_ORIGINS production",
+    "vercel --prod",
+    "Dealer Flow URL",
+    "Organization ID",
+    "Save to Deal Radar",
+    "Copy JSON",
+    "no cookies",
+    "no authorization headers",
+  ]) {
+    assert.ok(guide.includes(required), `Market Snap deployment guide missing ${required}`);
+  }
+});
+
 test("release verification workflow is CI-ready without production credentials", () => {
   const workflowPath = join(repoRoot, ".github/workflows/release-verification.yml");
   assert.equal(existsSync(workflowPath), true);

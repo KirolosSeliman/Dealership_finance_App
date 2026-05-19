@@ -60,6 +60,7 @@ Run this checklist in both Chrome and Brave with a staging Dealer Flow organizat
 - Keep `SUPABASE_SERVICE_ROLE_KEY`, `CRON_SECRET`, R2 keys, and any other secrets server-only.
 - Set `RATE_LIMIT_BACKEND=supabase` in production.
 - Set `MARKET_SNAP_EXTENSION_ORIGINS` to the exact Chrome/Brave extension origins used for the deployed extension.
+- Follow `docs/market-snap-extension-deployment.md` to collect the extension ID, add Vercel env vars, redeploy, and validate Save to Deal Radar.
 - Run `npm run verify:release` before deployment and confirm the Vercel build does not print secrets.
 - Confirm Market Snap routes reject cross-origin requests except the configured extension origins.
 

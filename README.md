@@ -49,7 +49,7 @@ Cloudflare R2 automatic backups require:
 Optional Market Snap variables:
 
 - `MARKET_SNAP_ML_SERVICE_URL`
-- `MARKET_SNAP_EXTENSION_ORIGINS`
+- `MARKET_SNAP_EXTENSION_ORIGINS` for deployed browser-extension API calls. Use exact origins such as `chrome-extension://<extension-id>`.
 
 Do not expose service-role or R2 secrets to the browser. `CRON_SECRET` is required; `/api/backups/daily` and `/api/market-snap/cron/daily-refresh` return an error when it is missing or incorrect.
 
@@ -93,7 +93,7 @@ Market Snap depends on the Market Snap migrations. The foundation migration crea
 
 Market Snap is additive to the existing Dealer Flow app. It keeps clean retail, wholesale, auction, salvage, rebuilt, and parts/non-running market contexts separate. The production MVP uses a comparable estimator with time-decay weighting and condition/risk scoring; the CatBoost service in `ml-service/` is candidate-only until a model is trained, evaluated, and manually promoted.
 
-Browser capture lives in `browser-extension/`. Configure the extension from its Options page with the Dealer Flow URL and organization ID. It is for visible, authorized, user-assisted listing capture only and must not be used for CAPTCHA bypass, login-wall bypass, proxy evasion, anti-bot evasion, rate-limit bypass, private-message capture, or unauthorized scraping.
+Browser capture lives in `browser-extension/`. Configure the extension from its Options page with the Dealer Flow URL and organization ID. For deployed testing, configure `MARKET_SNAP_EXTENSION_ORIGINS` with the exact installed extension origin; see `docs/market-snap-extension-deployment.md`. It is for visible, authorized, user-assisted listing capture only and must not be used for CAPTCHA bypass, login-wall bypass, proxy evasion, anti-bot evasion, rate-limit bypass, private-message capture, or unauthorized scraping.
 
 ### Local Market Snap ML service
 
