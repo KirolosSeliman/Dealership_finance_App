@@ -168,25 +168,38 @@
         rejectionReason: candidate.rejectedReason || candidate.rejectionReason,
       }))
       .slice(0, 8);
+    const lowerBidCandidates = (debug.lowerBidCandidates || [])
+      .map((candidate) => ({
+        field: candidate.field || "currentBid",
+        value: candidate.value ?? null,
+        sourceType: candidate.sourceType || "",
+        sourceName: candidate.sourceName || "",
+        sourceText: sanitizeText(candidate.sourceText || ""),
+        rejectionReason: candidate.rejectedReason || candidate.rejectionReason || "lower_bid_candidate",
+      }))
+      .slice(0, 6);
     return sanitizeDebugValue({
       currentBid: listing.currentBid ?? null,
       currentBidSource: currentBidEvidence.sourceType || currentBidEvidence.matchedLabel || "",
       currentBidSourceText: currentBidEvidence.sourceText || "",
       currentBidConfidence: currentBidEvidence.confidenceScore ?? null,
       rejectedPriceCandidates,
+      lowerBidCandidates,
       listedPrice: listing.listedPrice ?? null,
       listedPriceSource: debug.listedPriceDecision?.source || "",
       listedPriceSemantics: listing.priceSemantics?.listedPrice || debug.listedPriceDecision?.semantics || "",
-      priceDiagnosticMessages: priceDiagnosticMessages(listing, rejectedPriceCandidates),
+      priceDiagnosticMessages: priceDiagnosticMessages(listing, rejectedPriceCandidates, lowerBidCandidates),
     });
   }
 
-  function priceDiagnosticMessages(listing = {}, rejectedPriceCandidates = []) {
+  function priceDiagnosticMessages(listing = {}, rejectedPriceCandidates = [], lowerBidCandidates = []) {
     return [
       listing.currentBid ? `Current bid selected: ${moneyLabel(listing.currentBid)}.` : "Current bid not found. Active listing remains observation-only.",
       ...rejectedPriceCandidates
         .filter((candidate) => /bid_count_not_money/i.test(candidate.rejectionReason || ""))
         .map((candidate) => `Rejected bid count as price: ${candidate.sourceText || candidate.value}`),
+      ...lowerBidCandidates
+        .map((candidate) => `Lower bid candidate ignored: ${moneyLabel(candidate.value) || candidate.sourceText}`),
       listing.priceSemantics?.listedPrice === "observation_alias_current_bid" ? "Listed price is an observation alias of current bid, not a final sale label." : "",
     ].filter(Boolean);
   }

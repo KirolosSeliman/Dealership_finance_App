@@ -277,6 +277,9 @@ test("Market Snap copy payload builder returns sanitized readiness and debug evi
           { field: "currentBid", value: 4, sourceType: "section_map", sourceText: "Current bid 4 Bids", rejectedReason: "bid_count_not_money" },
           { field: "currentBid", value: 9, sourceType: "section_map", sourceText: "authorization=secret-token 9 Bids", rejectedReason: "bid_count_not_money" },
         ],
+        lowerBidCandidates: [
+          { field: "currentBid", value: 11_100, sourceType: "visible_text", sourceText: "$11,100", rejectedReason: "lower_bid_history_candidate" },
+        ],
         listedPriceDecision: { source: "current_bid", semantics: "observation_alias_current_bid" },
         apiToken: "Bearer should-not-copy",
       },
@@ -347,7 +350,9 @@ test("Market Snap copy payload builder returns sanitized readiness and debug evi
   assert.match(String((payload.readinessSummary as { currentBidSourceText?: string }).currentBidSourceText), /\$13,700/);
   assert.equal((payload.readinessSummary as { listedPriceSemantics?: string }).listedPriceSemantics, "observation_alias_current_bid");
   assert.match(JSON.stringify((payload.priceDiagnostics as { rejectedPriceCandidates?: unknown[] }).rejectedPriceCandidates), /bid_count_not_money/);
+  assert.match(JSON.stringify((payload.priceDiagnostics as { lowerBidCandidates?: unknown[] }).lowerBidCandidates), /11100/);
   assert.match(JSON.stringify((payload.priceDiagnostics as { priceDiagnosticMessages?: string[] }).priceDiagnosticMessages), /Rejected bid count as price: Current bid 4 Bids/);
+  assert.match(JSON.stringify((payload.priceDiagnostics as { priceDiagnosticMessages?: string[] }).priceDiagnosticMessages), /Lower bid candidate ignored: \$11,100/);
   assert.deepEqual((payload.readinessSummary as { ignoredNoisyZones?: string[] }).ignoredNoisyZones, ["sidebar", "marketGuide", "qaSection"]);
   assert.equal((payload.readinessSummary as { rejectedFieldCandidateCount?: number }).rejectedFieldCandidateCount, 2);
   assert.match(JSON.stringify(payload.debugSummary), /Network JSON observed but no vehicle\/carfax\/price candidates/i);
@@ -374,6 +379,7 @@ test("Market Snap widget debug UX explains purchased, active, Carfax, network, a
     "Current bid source:",
     "Current bid source text:",
     "Rejected price candidates:",
+    "Lower bid candidates ignored:",
     "Listed price semantics:",
     "Rejected bid count as price:",
     "buildPriceDiagnostics",

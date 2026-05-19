@@ -270,6 +270,8 @@
       `<p>Current bid confidence: ${safeHtml(priceDiagnostics.currentBidConfidence ?? "-")}</p>`,
       priceDiagnostics.rejectedPriceCandidates?.length ? `<p>Rejected price candidates: ${safeHtml(String(priceDiagnostics.rejectedPriceCandidates.length))}</p>` : "",
       priceDiagnostics.rejectedPriceCandidates?.length ? `<ul>${priceDiagnostics.rejectedPriceCandidates.slice(0, 5).map((item) => `<li>${safeHtml(rejectedPriceCandidateLabel(item))}</li>`).join("")}</ul>` : "",
+      priceDiagnostics.lowerBidCandidates?.length ? `<p>Lower bid candidates ignored: ${safeHtml(String(priceDiagnostics.lowerBidCandidates.length))}</p>` : "",
+      priceDiagnostics.lowerBidCandidates?.length ? `<ul>${priceDiagnostics.lowerBidCandidates.slice(0, 5).map((item) => `<li>${safeHtml(rejectedPriceCandidateLabel(item))}</li>`).join("")}</ul>` : "",
       `<p>Listed price source: ${safeHtml(priceDiagnostics.listedPriceSource || "-")}</p>`,
       `<p>Listed price semantics: ${safeHtml(priceDiagnostics.listedPriceSemantics || "-")}</p>`,
       `<p>Sold price candidate: ${safeHtml(moneyOrDash(safeListing.soldPriceCandidate))}</p>`,
@@ -383,12 +385,23 @@
         rejectionReason: candidate.rejectedReason || candidate.rejectionReason,
       }))
       .slice(0, 8);
+    const lowerBidCandidates = (debug.lowerBidCandidates || [])
+      .map((candidate) => ({
+        field: candidate.field || "currentBid",
+        value: candidate.value ?? null,
+        sourceType: candidate.sourceType || "",
+        sourceName: candidate.sourceName || "",
+        sourceText: redactSensitiveText(candidate.sourceText || "").slice(0, 300),
+        rejectionReason: candidate.rejectedReason || candidate.rejectionReason || "lower_bid_candidate",
+      }))
+      .slice(0, 6);
     return {
       currentBid: safeListing.currentBid ?? null,
       currentBidSource: currentBidEvidence.sourceType || currentBidEvidence.matchedLabel || "",
       currentBidSourceText: redactSensitiveText(currentBidEvidence.sourceText || "").slice(0, 300),
       currentBidConfidence: currentBidEvidence.confidenceScore ?? null,
       rejectedPriceCandidates,
+      lowerBidCandidates,
       listedPrice: safeListing.listedPrice ?? null,
       listedPriceSource: debug.listedPriceDecision?.source || "",
       listedPriceSemantics: safeListing.priceSemantics?.listedPrice || debug.listedPriceDecision?.semantics || "",
