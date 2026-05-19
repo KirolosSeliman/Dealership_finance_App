@@ -28,3 +28,5 @@ Fixtures in this folder must be sanitized snapshots of visible page structure on
 - `openlane-vdp-active-current-bid.html`, `openlane-vdp-transport-estimate-no-listed-price.html` - exact Phase 8 active/transport controls.
 - `openlane-vdp-noisy-qa-engine-transmission.html` - exact Phase 8 Q&A engine/transmission pollution fixture.
 - `openlane-vdp-carfax-text-only.html`, `openlane-network-carfax-url.json` - exact Phase 8 CARFAX text-only and network URL fixtures.
+- `openlane-vdp-active-current-bid-before-label-4-bids.html` - active VDP fixture reproducing the live `$13,700` before `Current bid` plus `4 Bids` bid-count trap.
+- `openlane-vdp-carfax-router-metadata.html`, `openlane-network-current-bid-carfax-diagnostics.json` - CARFAX router/network metadata fixtures for URL recovery diagnostics.

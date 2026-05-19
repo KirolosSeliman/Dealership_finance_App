@@ -1,0 +1,15 @@
+{
+  "vehicle": {
+    "vin": "KNAE55LC7J6040713",
+    "year": 2018,
+    "make": "Kia",
+    "model": "Stinger",
+    "odometerKm": 111486,
+    "currentBidAmount": 13700,
+    "bidCount": 4,
+    "carfaxReportUrl": "/vehicle-history/carfax/STINGER123",
+    "photos": [
+      "https://pub-us.kar-media.com/vehicle/KNAE55LC7J6040713/front.jpg"
+    ]
+  }
+}
