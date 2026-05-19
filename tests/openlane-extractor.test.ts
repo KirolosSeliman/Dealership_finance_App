@@ -1053,6 +1053,58 @@ test("OpenLane active VDP keeps current bid observational and rejects transport 
   assert.notEqual(listing.listedPrice, 378);
 });
 
+test("OpenLane canonical fields ignore Q&A sidebar footer market-guide and transport noise", () => {
+  const listing = extractor.extractOpenLaneFixture(
+    fixture("openlane-vdp-noisy-qa-sidebar-market-guide.html"),
+    "https://app.openlane.ca/vdp/KM8J3CA46HU123456",
+  );
+  const metadata = listing.openlaneMetadata as { conditionDetails?: { qaSummary?: string } };
+
+  assert.equal(listing.sellerName, "OpenLane Montreal");
+  assert.equal(listing.location, "Montreal, QC");
+  assert.equal(listing.engine, undefined);
+  assert.equal(listing.transmission, undefined);
+  assert.equal(listing.lane, undefined);
+  assert.equal(listing.auctionStatus, undefined);
+  assert.equal(listing.stockNumber, undefined);
+  assert.match(String(metadata.conditionDetails?.qaSummary), /Engine and transmission are good/i);
+});
+
+test("OpenLane valid vehicle specs still populate canonical specs from trusted zones", () => {
+  const listing = extractor.extractOpenLaneFixture(`
+    <main data-testid="vehicle-detail-page">
+      <section class="vehicle-hero" data-vin="KM8J3CA46HU123456">
+        <h1>2017 Hyundai Tucson SE AWD</h1>
+        <p>VIN KM8J3CA46HU123456</p>
+        <p>Odometer 111,486 KM</p>
+      </section>
+      <section class="vehicle-specs">
+        <dl>
+          <dt>Engine</dt><dd>2.0L I4</dd>
+          <dt>Transmission</dt><dd>Automatic</dd>
+          <dt>Drivetrain</dt><dd>AWD</dd>
+          <dt>Fuel Type</dt><dd>Gasoline</dd>
+          <dt>Body Style</dt><dd>SUV</dd>
+          <dt>Doors</dt><dd>4</dd>
+          <dt>Cylinders</dt><dd>4</dd>
+        </dl>
+      </section>
+      <section class="qa-section">
+        <h2>Q&amp;A</h2>
+        <p>Q: Engine and transmission are good? Thanks</p>
+      </section>
+    </main>
+  `, "https://app.openlane.ca/vdp/KM8J3CA46HU123456");
+
+  assert.equal(listing.engine, "2.0L I4");
+  assert.equal(listing.transmission, "Automatic");
+  assert.equal(listing.drivetrain, "AWD");
+  assert.equal(listing.fuelType, "Gasoline");
+  assert.equal(listing.bodyStyle, "SUV");
+  assert.equal(listing.doors, 4);
+  assert.equal(listing.cylinders, 4);
+});
+
 test("OpenLane extractor includes classifier result in listing payload", () => {
   const listing = extractor.extractOpenLaneFixture(fixture("openlane-fee-details.html"), "https://www.openlane.ca/purchases/123/fees");
 

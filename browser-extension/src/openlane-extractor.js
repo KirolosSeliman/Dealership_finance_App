@@ -37,6 +37,7 @@
     const mainVisibleText = textRegions.mainText || rawVisibleText;
     const classification = classifyOpenLanePage(doc, href);
     const labelValues = extractLabelValueMap(doc, mainVisibleText);
+    const scopedLabelValues = buildScopedLabelValues(textRegions);
     const titleResult = bestTitle(doc, mainVisibleText);
     const title = titleResult.title;
     const decodedTitle = extractYearMakeModelTrim(title || mainVisibleText);
@@ -46,19 +47,20 @@
     const mediaRejected = [...(media.rejected || []), ...(doc.__openlaneMediaRejected || [])];
     const mediaCounts = extractMediaCounts(mainVisibleText);
     const carfax = extractCarfaxInfo(doc, href, rawVisibleText);
-    const conditionDetails = extractConditionDetails(textRegions.sectionMap, mainVisibleText, labelValues);
-    const conditionReportText = [conditionDetails.conditionReportText, extractConditionText(mainVisibleText, labelValues)].filter(Boolean).join(" | ") || undefined;
+    const conditionDetails = extractConditionDetails(textRegions.sectionMap, mainVisibleText, scopedLabelValues.condition);
+    const conditionReportText = [conditionDetails.conditionReportText, extractConditionText(mainVisibleText, scopedLabelValues.condition)].filter(Boolean).join(" | ") || undefined;
     const purchaseEconomics = extractPurchaseEconomics(mainVisibleText, classification);
     const postSaleOutcome = extractPostSaleOutcome(mainVisibleText, classification);
     const isPurchaseOutcomePage = ["fee_details", "purchase_detail", "purchase_info", "purchase_list", "post_sale"].includes(classification.pageType);
-    const currentBid = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(labelValues, OPENLANE_LABELS.currentBid);
-    const currentOffer = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(labelValues, OPENLANE_LABELS.currentOffer);
-    const bestOffer = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(labelValues, OPENLANE_LABELS.bestOffer);
-    const buyNowPrice = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(labelValues, OPENLANE_LABELS.buyNowPrice);
+    const currentBid = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(scopedLabelValues.price, OPENLANE_LABELS.currentBid);
+    const currentOffer = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(scopedLabelValues.price, OPENLANE_LABELS.currentOffer);
+    const bestOffer = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(scopedLabelValues.price, OPENLANE_LABELS.bestOffer);
+    const buyNowPrice = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(scopedLabelValues.price, OPENLANE_LABELS.buyNowPrice);
     const listedPrice = isPurchaseOutcomePage ? undefined : buyNowPrice || currentBid || currentOffer || bestOffer || firstNonTransportMoney(mainVisibleText);
     const mileageKm = mileageResult.mileageKm;
     const vin = vinResult.vin;
-    const province = provinceFrom(firstLabel(labelValues, OPENLANE_LABELS.location) || mainVisibleText);
+    const location = firstCanonicalLabel(scopedLabelValues.business, labelValues, OPENLANE_LABELS.location, "location", { allowFallback: true });
+    const province = provinceFrom(location || mainVisibleText);
     const disclosureText = findDisclosureText(mainVisibleText);
     const declarations = conditionDetails.knownHistoryItems || splitAnnouncements(labelValues.get("declarations") || findSectionText(mainVisibleText, "Declarations") || disclosureText);
     const damageAnnouncements = conditionDetails.exteriorDisclosures || splitAnnouncements(findSectionText(mainVisibleText, "Damage"));
@@ -83,28 +85,28 @@
       year: decodedTitle.year,
       make: decodedTitle.make,
       model: decodedTitle.model,
-      trim: decodedTitle.trim || firstLabel(labelValues, OPENLANE_LABELS.trim) || extractTrim(mainVisibleText),
+      trim: decodedTitle.trim || firstCanonicalLabel(scopedLabelValues.specs, labelValues, OPENLANE_LABELS.trim, "trim", { allowFallback: true }) || extractTrim(mainVisibleText),
       vin,
       mileageKm,
-      exteriorColor: firstLabel(labelValues, OPENLANE_LABELS.exteriorColor),
-      interiorColor: firstLabel(labelValues, OPENLANE_LABELS.interiorColor),
-      drivetrain: firstLabel(labelValues, OPENLANE_LABELS.drivetrain),
-      transmission: firstLabel(labelValues, OPENLANE_LABELS.transmission),
-      engine: firstLabel(labelValues, OPENLANE_LABELS.engine),
-      fuelType: firstLabel(labelValues, OPENLANE_LABELS.fuelType),
-      bodyStyle: firstLabel(labelValues, OPENLANE_LABELS.bodyStyle),
-      doors: numberFrom(firstLabel(labelValues, OPENLANE_LABELS.doors)),
-      cylinders: numberFrom(firstLabel(labelValues, OPENLANE_LABELS.cylinders)),
-      location: firstLabel(labelValues, OPENLANE_LABELS.location),
+      exteriorColor: firstCanonicalLabel(scopedLabelValues.specs, labelValues, OPENLANE_LABELS.exteriorColor, "exteriorColor", { allowFallback: true }),
+      interiorColor: firstCanonicalLabel(scopedLabelValues.specs, labelValues, OPENLANE_LABELS.interiorColor, "interiorColor", { allowFallback: true }),
+      drivetrain: firstCanonicalLabel(scopedLabelValues.specs, labelValues, OPENLANE_LABELS.drivetrain, "drivetrain", { allowFallback: true }),
+      transmission: firstCanonicalLabel(scopedLabelValues.specs, labelValues, OPENLANE_LABELS.transmission, "transmission"),
+      engine: firstCanonicalLabel(scopedLabelValues.specs, labelValues, OPENLANE_LABELS.engine, "engine"),
+      fuelType: firstCanonicalLabel(scopedLabelValues.specs, labelValues, OPENLANE_LABELS.fuelType, "fuelType", { allowFallback: true }),
+      bodyStyle: firstCanonicalLabel(scopedLabelValues.specs, labelValues, OPENLANE_LABELS.bodyStyle, "bodyStyle", { allowFallback: true }),
+      doors: numberFrom(firstCanonicalLabel(scopedLabelValues.specs, labelValues, OPENLANE_LABELS.doors, "doors", { allowFallback: true })),
+      cylinders: numberFrom(firstCanonicalLabel(scopedLabelValues.specs, labelValues, OPENLANE_LABELS.cylinders, "cylinders", { allowFallback: true })),
+      location,
       province,
-      sellerName: cleanSellerName(firstLabel(labelValues, OPENLANE_LABELS.sellerName)),
+      sellerName: cleanSellerName(firstCanonicalLabel(scopedLabelValues.business, labelValues, OPENLANE_LABELS.sellerName, "sellerName")),
       sellerType: "auction",
-      auctionStatus: purchaseEconomics.purchaseStatus || postSaleOutcome.negotiationStatus || firstLabel(labelValues, OPENLANE_LABELS.auctionStatus),
-      saleDate: firstLabel(labelValues, OPENLANE_LABELS.saleDate),
-      runNumber: firstLabel(labelValues, OPENLANE_LABELS.runNumber),
-      lane: firstLabel(labelValues, OPENLANE_LABELS.lane),
-      lotNumber: firstLabel(labelValues, OPENLANE_LABELS.lotNumber),
-      stockNumber: firstLabel(labelValues, OPENLANE_LABELS.stockNumber),
+      auctionStatus: purchaseEconomics.purchaseStatus || postSaleOutcome.negotiationStatus || firstCanonicalLabel(scopedLabelValues.business, labelValues, OPENLANE_LABELS.auctionStatus, "auctionStatus"),
+      saleDate: firstCanonicalLabel(scopedLabelValues.business, labelValues, OPENLANE_LABELS.saleDate, "saleDate", { allowFallback: true }),
+      runNumber: firstCanonicalLabel(scopedLabelValues.business, labelValues, OPENLANE_LABELS.runNumber, "runNumber", { allowFallback: true }),
+      lane: firstCanonicalLabel(scopedLabelValues.business, labelValues, OPENLANE_LABELS.lane, "lane"),
+      lotNumber: firstCanonicalLabel(scopedLabelValues.business, labelValues, OPENLANE_LABELS.lotNumber, "lotNumber", { allowFallback: true }),
+      stockNumber: firstCanonicalLabel(scopedLabelValues.business, labelValues, OPENLANE_LABELS.stockNumber, "stockNumber"),
       listedPrice,
       currentBid,
       currentOffer,
@@ -128,7 +130,7 @@
       priceSemantics: mergeObjects(postSaleOutcome.priceSemantics, purchaseEconomics.priceSemantics),
       reservePrice: moneyFrom(firstLabel(labelValues, OPENLANE_LABELS.reservePrice)),
       estimatedAuctionFees: estimateAuctionFees(listedPrice),
-      titleStatus: cleanStatusValue(firstLabel(labelValues, OPENLANE_LABELS.titleStatus)),
+      titleStatus: cleanStatusValue(firstCanonicalLabel(scopedLabelValues.condition, labelValues, OPENLANE_LABELS.titleStatus, "titleStatus", { allowFallback: true })),
       declarations,
       conditionReportText,
       damageAnnouncements,
@@ -137,8 +139,8 @@
       safetyDisclosures: conditionDetails.safetyDisclosures,
       interiorAnnouncements: conditionDetails.interiorDisclosures,
       odometerAnnouncements,
-      tireCondition: conditionDetails.tireWheelDisclosures?.join(" | ") || firstLabel(labelValues, OPENLANE_LABELS.tireCondition),
-      keysAvailable: firstLabel(labelValues, OPENLANE_LABELS.keysAvailable),
+      tireCondition: conditionDetails.tireWheelDisclosures?.join(" | ") || firstCanonicalLabel(scopedLabelValues.condition, labelValues, OPENLANE_LABELS.tireCondition, "tireCondition", { allowFallback: true }),
+      keysAvailable: firstCanonicalLabel(scopedLabelValues.specs, labelValues, OPENLANE_LABELS.keysAvailable, "keysAvailable", { allowFallback: true }),
       carfaxMentioned: carfax.carfaxMentioned,
       carfaxUrl: carfax.carfaxUrl,
       carfaxAvailable: carfax.carfaxAvailable,
@@ -304,6 +306,8 @@
     if (doc.__openlaneTextRegions) return doc.__openlaneTextRegions;
     const classifierRegions = root.DealerFlowOpenLanePageClassifier?.extractDocumentRegions?.(doc);
     if (classifierRegions) return classifierRegions;
+    const sectionMap = root.DealerFlowOpenLaneSectionMap?.buildOpenLaneSectionMap?.(doc);
+    if (sectionMap) return root.DealerFlowOpenLaneSectionMap.regionsFromMap(sectionMap);
     const allText = normalizeSpace(doc.body?.innerText || doc.body?.textContent || "").slice(0, RAW_TEXT_LIMIT);
     return { allText, mainText: allText, sidebarText: "", footerText: "", marketGuideText: "" };
   }
@@ -311,6 +315,8 @@
   function extractHtmlTextRegions(html) {
     const classifierRegions = root.DealerFlowOpenLanePageClassifier?.extractHtmlRegions?.(html);
     if (classifierRegions) return classifierRegions;
+    const sectionMap = root.DealerFlowOpenLaneSectionMap?.buildOpenLaneSectionMapFromHtml?.(html);
+    if (sectionMap) return root.DealerFlowOpenLaneSectionMap.regionsFromMap(sectionMap);
     const text = `${stripTags(html)}\n${extractAttributeText(html)}`;
     return { allText: text, mainText: text, sidebarText: "", footerText: "", marketGuideText: "" };
   }
@@ -328,6 +334,57 @@
     const declarations = findSectionText(text, "Declarations");
     if (declarations) values.set("declarations", declarations);
     return values;
+  }
+
+  function buildScopedLabelValues(textRegions = {}) {
+    const zones = textRegions.sectionMap?.zones || {};
+    return {
+      specs: extractLabelValuesFromText(zoneText(zones, ["vehicleHero", "vehicleSpecs"])),
+      business: extractLabelValuesFromText(zoneText(zones, ["vehicleHero", "vehicleSpecs", "bidPanel", "purchasePanel", "feeDetailsPanel", "postSalePanel"])),
+      price: extractLabelValuesFromText(zoneText(zones, ["bidPanel", "purchasePanel", "postSalePanel", "feeDetailsPanel"])),
+      condition: extractLabelValuesFromText(zoneText(zones, ["knownHistory", "disclosuresCondition", "dealerNotes"])),
+    };
+  }
+
+  function extractLabelValuesFromText(text = "") {
+    const values = new Map();
+    for (const [field, labels] of Object.entries(OPENLANE_LABELS)) {
+      const value = labels.map((label) => valueNearTextLabel(text, label)).find(Boolean);
+      if (value) values.set(field, value);
+    }
+    const declarations = findSectionText(text, "Declarations");
+    if (declarations) values.set("declarations", declarations);
+    return values;
+  }
+
+  function zoneText(zones = {}, names = []) {
+    return normalizeSpace(names.map((name) => zones[name]?.text).filter(Boolean).join("\n"));
+  }
+
+  function firstCanonicalLabel(scopedValues, fallbackValues, labels, field, options = {}) {
+    const scoped = cleanCanonicalValue(field, firstLabel(scopedValues, labels));
+    if (scoped) return scoped;
+    if (!options.allowFallback) return undefined;
+    return cleanCanonicalValue(field, firstLabel(fallbackValues, labels));
+  }
+
+  function cleanCanonicalValue(field, value) {
+    const text = normalizeSpace(value || "");
+    if (!text || isForbiddenCanonicalValue(field, text)) return undefined;
+    return text;
+  }
+
+  function isForbiddenCanonicalValue(field, value) {
+    const text = normalizeSpace(value);
+    if (["doors", "cylinders"].includes(field) && !/\d/.test(text)) return true;
+    if (/\b(Q&A|Q&amp;A|Q and A|Questions? and answers?|Broadcasts?|Ownership|No questions asked yet|Ask a question|Terms? & conditions|OPENLANE wholesale|wholesale data|BUYING|SELLING|UNLESS STATED OTHERWISE)\b/i.test(text)) return true;
+    if (/\b(transport|transport direct|rate info|delivery|pickup|shipping|estimate)\b/i.test(text)) return true;
+    if (["engine", "transmission"].includes(field) && /\?|thanks\b|^and\s+\w+/i.test(text)) return true;
+    if (field === "sellerName" && /^(Q&A|Questions?|Seller name)$/i.test(text)) return true;
+    if (field === "auctionStatus" && /^(Ownership|Q&A|Broadcasts?)$/i.test(text)) return true;
+    if (field === "lane" && (text.length > 12 || /\b(wholesale|data|past \d+ days|unless|openlane|montreal|toronto|qc|on)\b/i.test(text))) return true;
+    if (field === "stockNumber" && /seller name|q&a|ownership/i.test(text)) return true;
+    return false;
   }
 
   function valueNearLabel(doc, text, label) {
@@ -1197,7 +1254,7 @@
   }
 
   function valueNearTextLabel(text, label) {
-    const match = String(text || "").match(new RegExp(`(?:^|\\n)\\s*${escapeRegExp(label)}\\s*[:\\n]?\\s*([^\\n]{1,160})`, "i"));
+    const match = String(text || "").match(new RegExp(`(?:^|\\n)\\s*${escapeRegExp(label)}\\b\\s*[:#]?\\s*(?:\\n\\s*)?([^\\n]{1,160})`, "i"));
     return normalizeSpace(match?.[1] || "");
   }
 
