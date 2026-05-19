@@ -1,0 +1,15 @@
+{
+  "vehicle": {
+    "vin": "3KPFK4A77HE123456",
+    "year": 2017,
+    "make": "Kia",
+    "model": "Forte",
+    "odometerKm": 111486,
+    "carfax": {
+      "reportUrl": "/vehicle-history/carfax/FORTE123"
+    },
+    "photos": [
+      "https://pub-us.kar-media.com/vehicle/3KPFK4A77HE123456/front.jpg"
+    ]
+  }
+}

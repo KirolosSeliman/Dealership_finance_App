@@ -25,3 +25,6 @@ Fixtures in this folder must be sanitized snapshots of visible page structure on
 - `openlane-vdp-active-current-bid-control.html` — active VDP control with current bid and transport estimate noise.
 - `openlane-vdp-noisy-qa-sidebar-market-guide.html` — Q&A/sidebar/market-guide pollution fixture for canonical-field zone tests.
 - `openlane-vdp-carfax-text-only-control.html` — CARFAX visible text without an exposed URL.
+- `openlane-vdp-active-current-bid.html`, `openlane-vdp-transport-estimate-no-listed-price.html` - exact Phase 8 active/transport controls.
+- `openlane-vdp-noisy-qa-engine-transmission.html` - exact Phase 8 Q&A engine/transmission pollution fixture.
+- `openlane-vdp-carfax-text-only.html`, `openlane-network-carfax-url.json` - exact Phase 8 CARFAX text-only and network URL fixtures.

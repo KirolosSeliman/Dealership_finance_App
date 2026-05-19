@@ -136,6 +136,53 @@ test("Phase 8 fixtures protect active observation and post-sale outcome semantic
   assert.equal(rejected.finalBidAmount, undefined);
 });
 
+test("Phase 8 required OpenLane purchased VDP fixture matrix protects known regressions", () => {
+  const purchased = extractor.extractOpenLaneFixture(fixture("openlane-vdp-purchased-sold-price-picked-up.html"), "https://app.openlane.ca/vdp/3KPFK4A77HE123456");
+  const active = extractor.extractOpenLaneFixture(fixture("openlane-vdp-active-current-bid.html"), "https://app.openlane.ca/vdp/3KPFK4A77HE123456");
+  const noisyQa = extractor.extractOpenLaneFixture(fixture("openlane-vdp-noisy-qa-engine-transmission.html"), "https://app.openlane.ca/vdp/3KPFK4A77HE123456");
+  const transportOnly = extractor.extractOpenLaneFixture(fixture("openlane-vdp-transport-estimate-no-listed-price.html"), "https://app.openlane.ca/vdp/3KPFK4A77HE123456");
+  const carfaxTextOnly = extractor.extractOpenLaneFixture(fixture("openlane-vdp-carfax-text-only.html"), "https://app.openlane.ca/vdp/3KPFK4A77HE123456");
+  const networkPayload = JSON.parse(fixture("openlane-network-carfax-url.json"));
+  const networkCandidates = networkObserver.extractCandidatesFromNetworkPayload(networkPayload, "https://app.openlane.ca/api/vdp/3KPFK4A77HE123456");
+  const networkMerged = networkObserver.mergeNetworkEvidenceIntoListing({
+    sourceName: "OpenLane",
+    pageType: "active_listing",
+    captureKind: "observation",
+    listingUrl: "https://app.openlane.ca/vdp/3KPFK4A77HE123456",
+  }, [{ endpointPattern: "app.openlane.ca/api/vdp/:id", capturedAt: "2026-05-18T12:00:00.000Z", sanitizedKeys: networkCandidates.sanitizedKeys, candidates: networkCandidates }]);
+
+  assert.equal(purchased.title, "2017 Kia Forte");
+  assert.equal(purchased.vin, "3KPFK4A77HE123456");
+  assert.equal(purchased.pageType, "purchase_detail");
+  assert.notEqual(purchased.pageType, "active_listing");
+  assert.equal(purchased.captureKind, "verified_outcome");
+  assert.equal(purchased.soldPriceCandidate, 4000);
+  assert.equal(purchased.buyPriceAuction, 4000);
+
+  assert.equal(active.pageType, "active_listing");
+  assert.equal(active.captureKind, "observation");
+  assert.equal(active.currentBid, 5100);
+  assert.equal((active.priceSemantics as Record<string, string>).currentBid, "observation");
+  assert.equal(active.soldPriceCandidate, undefined);
+
+  assert.equal(transportOnly.listedPrice, undefined);
+  assert.equal(transportOnly.currentBid, undefined);
+  assert.equal(transportOnly.buyNowPrice, undefined);
+  assert.equal(transportOnly.soldPriceCandidate, undefined);
+
+  assert.equal(noisyQa.engine, undefined);
+  assert.equal(noisyQa.transmission, undefined);
+  assert.equal(noisyQa.lane, undefined);
+  assert.equal(noisyQa.auctionStatus, undefined);
+  assert.equal(noisyQa.sellerName, "OpenLane Montreal");
+  assert.equal(noisyQa.location, "Montreal, QC");
+
+  assert.equal(carfaxTextOnly.carfaxUrlStatus, "text_only");
+  assert.equal(carfaxTextOnly.carfaxUrl, undefined);
+  assert.equal(networkMerged.carfaxUrlStatus, "url_found");
+  assert.match(String(networkMerged.carfaxUrl), /carfax\/FORTE123/i);
+});
+
 test("Phase 8 widget debug contract includes capture readiness state", () => {
   const contentScript = readFileSync(join(repoRoot, "browser-extension/src/content-script.js"), "utf8");
   const copyPayload = readFileSync(join(repoRoot, "browser-extension/src/copy-payload.js"), "utf8");

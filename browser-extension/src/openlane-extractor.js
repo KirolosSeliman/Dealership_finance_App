@@ -57,6 +57,13 @@
     const bestOffer = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(scopedLabelValues.price, OPENLANE_LABELS.bestOffer);
     const buyNowPrice = isPurchaseOutcomePage ? undefined : extractMoneyByLabels(scopedLabelValues.price, OPENLANE_LABELS.buyNowPrice);
     const listedPrice = isPurchaseOutcomePage ? undefined : buyNowPrice || currentBid || currentOffer || bestOffer || firstNonTransportMoney(mainVisibleText);
+    const observationPriceSemantics = isPurchaseOutcomePage ? undefined : compact({
+      currentBid: currentBid ? "observation" : undefined,
+      currentOffer: currentOffer ? "observation" : undefined,
+      bestOffer: bestOffer ? "observation" : undefined,
+      buyNowPrice: buyNowPrice ? "observation" : undefined,
+      listedPrice: listedPrice ? "observation" : undefined,
+    });
     const mileageKm = mileageResult.mileageKm;
     const vin = vinResult.vin;
     const location = firstCanonicalLabel(scopedLabelValues.business, labelValues, OPENLANE_LABELS.location, "location", { allowFallback: true });
@@ -127,7 +134,7 @@
       taxes: purchaseEconomics.taxes,
       totalInvoiceAmount: purchaseEconomics.totalInvoiceAmount,
       finalAcquisitionCost: purchaseEconomics.finalAcquisitionCost,
-      priceSemantics: mergeObjects(postSaleOutcome.priceSemantics, purchaseEconomics.priceSemantics),
+      priceSemantics: mergeObjects(observationPriceSemantics, postSaleOutcome.priceSemantics, purchaseEconomics.priceSemantics),
       reservePrice: moneyFrom(firstLabel(labelValues, OPENLANE_LABELS.reservePrice)),
       estimatedAuctionFees: estimateAuctionFees(listedPrice),
       titleStatus: cleanStatusValue(firstCanonicalLabel(scopedLabelValues.condition, labelValues, OPENLANE_LABELS.titleStatus, "titleStatus", { allowFallback: true })),

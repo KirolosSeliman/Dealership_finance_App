@@ -110,9 +110,15 @@
     const mainRaw = textFromNodes(doc.querySelectorAll?.("main, [class*='vdp' i], [data-testid*='vehicle-detail' i]") || []) || allText;
     const zones = {};
 
-    for (const zoneName of ZONE_ORDER.filter((name) => name !== "unknownMain")) {
+    for (const zoneName of ZONE_ORDER.filter((name) => name !== "unknownMain" && ZONES[name]?.ignored)) {
       const spec = ZONES[zoneName];
       zones[zoneName] = buildDomZone(doc, zoneName, spec, allText);
+    }
+
+    const allTextWithoutIgnored = removeKnownNoise(allText, ignoredZoneTexts(zones));
+    for (const zoneName of ZONE_ORDER.filter((name) => name !== "unknownMain" && !ZONES[name]?.ignored)) {
+      const spec = ZONES[zoneName];
+      zones[zoneName] = buildDomZone(doc, zoneName, spec, allTextWithoutIgnored);
     }
 
     const ignoredTexts = ignoredZoneTexts(zones);
@@ -144,16 +150,23 @@
     const mainHtml = matchesHtml(source, /<main\b[\s\S]*?<\/main>/gi).join("\n") || source;
     const zones = {};
 
-    for (const zoneName of ZONE_ORDER.filter((name) => name !== "unknownMain")) {
-      const spec = ZONES[zoneName];
-      zones[zoneName] = buildHtmlZone(source, zoneName, spec, allText);
-    }
-
     const ignoredBlocks = [
       /<(aside|nav)\b[\s\S]*?<\/\1>/gi,
       /<footer\b[\s\S]*?<\/footer>/gi,
       /<(section|div)\b[^>]*(?:market-guide|sales-history|market-overview)[^>]*>[\s\S]*?<\/\1>/gi,
     ];
+    for (const zoneName of ZONE_ORDER.filter((name) => name !== "unknownMain" && ZONES[name]?.ignored)) {
+      const spec = ZONES[zoneName];
+      zones[zoneName] = buildHtmlZone(source, zoneName, spec, allText);
+    }
+
+    const sourceWithoutIgnored = removeHtmlBlocks(source, ignoredBlocks);
+    const allTextWithoutIgnored = normalizeSpace(`${stripTags(sourceWithoutIgnored)}\n${extractAttributeText(sourceWithoutIgnored)}`).slice(0, RAW_TEXT_LIMIT);
+    for (const zoneName of ZONE_ORDER.filter((name) => name !== "unknownMain" && !ZONES[name]?.ignored)) {
+      const spec = ZONES[zoneName];
+      zones[zoneName] = buildHtmlZone(sourceWithoutIgnored, zoneName, spec, allTextWithoutIgnored);
+    }
+
     const mainWithoutIgnored = removeHtmlBlocks(mainHtml, ignoredBlocks);
     const mainRaw = normalizeSpace(`${stripTags(mainWithoutIgnored)}\n${extractAttributeText(mainWithoutIgnored)}`);
     const unknownMain = removeKnownNoise(mainRaw, ignoredZoneTexts(zones)).slice(0, RAW_TEXT_LIMIT);
