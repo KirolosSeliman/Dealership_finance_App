@@ -74,7 +74,11 @@
     purchasePanel: {
       selectors: ["[class*='purchase' i]", "[class*='order-history' i]", "[data-testid*='purchase' i]"],
       attr: ["purchase", "order-history", "open-order"],
-      markers: [/\b(purchases?|order history|selling price|mark retrieved|achats?|historique des commandes|prix de vente)\b/i],
+      markers: [
+        /\b(purchases?|order history|selling price|mark retrieved|achats?|historique des commandes|prix de vente)\b/i,
+        /\b(order history|purchases?|purchase details?)[\s\S]{0,500}\b(sold price|selling price|mark as picked up|picked up|purchase complete|purchased|paid|invoice|full bid history)\b/i,
+        /\b(mark as picked up|picked up|purchase complete|purchase confirmed)\b/i,
+      ],
     },
     feeDetailsPanel: {
       selectors: ["[class*='fee' i]", "[class*='invoice' i]", "[data-testid*='fee' i]"],

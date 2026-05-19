@@ -19,8 +19,10 @@ const classifier = require("../browser-extension/src/openlane-page-classifier.js
   classifyOpenLanePageFromHtml: (html: string, href?: string) => {
     pageType: string;
     captureKind: string;
+    outcomeConfidence?: string;
     confidenceScore: number;
     evidence: Array<{ marker: string }>;
+    decisiveEvidence?: Array<{ marker: string }>;
     warnings: string[];
   };
   classifyOpenLanePage: (doc: Record<string, unknown>, href?: string) => {
@@ -943,6 +945,76 @@ test("OpenLane page classifier separates active observations from outcome pages"
   assert.equal(unknown.pageType, "unknown");
   assert.equal(unknown.captureKind, "observation");
   assert.ok(unknown.warnings.some((warning) => /not enough OpenLane page markers/i.test(warning)));
+});
+
+test("OpenLane classifier treats purchased VDP sold-price panels as purchase details before active listing fallback", () => {
+  const purchased = classifier.classifyOpenLanePageFromHtml(
+    fixture("openlane-vdp-purchased-sold-price-picked-up.html"),
+    "https://app.openlane.ca/vdp/KM8J3CA46HU123456",
+  );
+  const active = classifier.classifyOpenLanePageFromHtml(
+    fixture("openlane-vdp-active-current-bid-control.html").replace("$4,600", "$5,100"),
+    "https://app.openlane.ca/vdp/KM8J3CA46HU123456",
+  );
+  const purchasedWithBidNoise = classifier.classifyOpenLanePageFromHtml(`
+    <main data-testid="vehicle-detail-page">
+      <section class="vehicle-hero" data-vin="KM8J3CA46HU123456">
+        <h1>2017 Hyundai Tucson</h1>
+        <p>Odometer 111,486 KM</p>
+      </section>
+      <section class="bid-panel"><h2>Current bid</h2><p>$5,100</p></section>
+      <section class="purchase-order-history">
+        <h2>Purchases</h2>
+        <h3>Order history</h3>
+        <p>Sold price $4,000</p>
+        <button>Mark as picked up</button>
+        <button>Full bid history</button>
+      </section>
+    </main>
+  `, "https://app.openlane.ca/vdp/KM8J3CA46HU123456");
+
+  assert.equal(purchased.pageType, "purchase_detail");
+  assert.equal(purchased.captureKind, "verified_outcome");
+  assert.equal(purchased.outcomeConfidence, "verified");
+  assert.ok(purchased.evidence.some((item) => item.marker === "vdp_sold_price"));
+  assert.ok(purchased.evidence.some((item) => item.marker === "mark_as_picked_up"));
+  assert.ok(purchased.decisiveEvidence?.some((item) => item.marker === "purchase_detail_panel"));
+
+  assert.equal(active.pageType, "active_listing");
+  assert.equal(active.captureKind, "observation");
+  assert.equal(active.outcomeConfidence, "low");
+
+  assert.equal(purchasedWithBidNoise.pageType, "purchase_detail");
+  assert.notEqual(purchasedWithBidNoise.pageType, "active_listing");
+  assert.equal(purchasedWithBidNoise.captureKind, "verified_outcome");
+});
+
+test("OpenLane classifier ignores sidebar and footer purchase noise without a real purchase panel", () => {
+  const sidebarOnly = classifier.classifyOpenLanePageFromHtml(`
+    <aside><nav><h2>PURCHASE</h2><a>Purchases</a><a>Closing</a></nav></aside>
+    <main data-testid="vehicle-detail-page">
+      <section class="vehicle-hero" data-vin="KM8J3CA46HU123456">
+        <h1>2017 Hyundai Tucson</h1>
+        <p>VIN KM8J3CA46HU123456</p>
+      </section>
+      <section class="bid-panel"><h2>Current bid</h2><p>$5,100</p></section>
+    </main>
+  `, "https://app.openlane.ca/vdp/KM8J3CA46HU123456");
+  const footerOnly = classifier.classifyOpenLanePageFromHtml(`
+    <main data-testid="vehicle-detail-page">
+      <section class="vehicle-hero" data-vin="KM8J3CA46HU123456">
+        <h1>2017 Hyundai Tucson</h1>
+        <p>VIN KM8J3CA46HU123456</p>
+      </section>
+      <section class="bid-panel"><h2>Current bid</h2><p>$5,100</p></section>
+    </main>
+    <footer>Sold price examples and purchase support documentation</footer>
+  `, "https://app.openlane.ca/vdp/KM8J3CA46HU123456");
+
+  assert.equal(sidebarOnly.pageType, "active_listing");
+  assert.equal(sidebarOnly.captureKind, "observation");
+  assert.equal(footerOnly.pageType, "active_listing");
+  assert.equal(footerOnly.captureKind, "observation");
 });
 
 test("OpenLane extractor includes classifier result in listing payload", () => {

@@ -19,15 +19,42 @@
     const url = safeUrl(href);
     const path = `${url.pathname} ${url.search}`.toLowerCase();
     const isVdpUrl = /\/vdp(?:\/|$)/i.test(url.pathname);
+    const zones = regions.sectionMap?.zones || {};
+    const purchaseZoneText = normalizeSpace(zones.purchasePanel?.text || "");
+    const postSaleZoneText = normalizeSpace(zones.postSalePanel?.text || "");
+    const feeDetailsZoneText = normalizeSpace(zones.feeDetailsPanel?.text || "");
+    const bidZoneText = normalizeSpace(zones.bidPanel?.text || "");
+    const footerText = normalizeSpace(regions.footerText || zones.footer?.text || "");
+    const purchaseScopedText = normalizeSpace([purchaseZoneText, postSaleZoneText, feeDetailsZoneText, mainText].filter(Boolean).join("\n")).slice(0, RAW_TEXT_LIMIT);
+    const hasOrderHistory = /\border history\b/i.test(purchaseScopedText);
+    const hasVdpSoldPrice = isVdpUrl && /\bsold price\b/i.test(purchaseScopedText);
+    const hasPickedUpAction = /\b(mark as picked up|picked up)\b/i.test(purchaseScopedText);
+    const hasPurchaseAction = /\b(mark as picked up|picked up|purchase complete|purchased|paid|invoice|full bid history|mark retrieved|retrieved)\b/i.test(purchaseScopedText);
+    const hasMainPurchaseContext = /\b(purchases?|open order|order history|purchase info|documents)\b/i.test(mainText);
+    const hasBuyerPurchasePanel = (
+      /\b(order history|purchase details?)\b/i.test(purchaseZoneText)
+      || (hasMainPurchaseContext && /\b(purchases?|purchase details?|order history)\b/i.test(purchaseZoneText || purchaseScopedText))
+    ) && !onlyIgnoredPurchaseEvidence(purchaseScopedText, footerText);
+    const hasPurchaseDetailPanel = isVdpUrl && (
+      (hasOrderHistory && (hasVdpSoldPrice || /\bselling price\b/i.test(purchaseScopedText) || hasPurchaseAction))
+      || (hasBuyerPurchasePanel && (hasVdpSoldPrice || hasPickedUpAction || /\bselling price\b/i.test(purchaseScopedText)))
+    );
 
     addEvidence(evidence, "openlane_host", /openlane\./i.test(url.hostname), url.hostname);
     addEvidence(evidence, "vdp_url", isVdpUrl, url.pathname);
     addEvidence(evidence, "vehicle_identity", /\bVIN\b|[A-HJ-NPR-Z0-9]{17}/i.test(mainText), snippet(mainText, /\bVIN\b|[A-HJ-NPR-Z0-9]{17}/i));
-    addEvidence(evidence, "current_bid", /\b(current bid|current offer|best offer|my offer|top bid|bid history|time remaining|offre actuelle|meilleure offre|mise actuelle)\b/i.test(mainText), snippet(mainText, /\b(current bid|current offer|best offer|my offer|top bid|bid history|time remaining|offre actuelle|meilleure offre|mise actuelle)\b/i));
+    addEvidence(evidence, "current_bid", /\b(current bid|current offer|best offer|my offer|top bid|bid history|time remaining|offre actuelle|meilleure offre|mise actuelle)\b/i.test(`${bidZoneText}\n${mainText}`), snippet(`${bidZoneText}\n${mainText}`, /\b(current bid|current offer|best offer|my offer|top bid|bid history|time remaining|offre actuelle|meilleure offre|mise actuelle)\b/i));
     addEvidence(evidence, "vehicle_header", /\b(19|20)\d{2}\b.+\b[A-Z][a-z]+/i.test(mainText), snippet(mainText, /\b(19|20)\d{2}\b[^\n]{0,120}/i));
     addEvidence(evidence, "vehicle_media", Number(doc.images?.length ?? 0) >= 2 || /\b(gallery|photos?|images?|\d{1,3}\s+total)\b/i.test(mainText), "visible gallery/media marker");
-    addEvidence(evidence, "purchase_context", /\b(purchases?|open order|order history|purchase info|documents)\b/i.test(mainText), snippet(mainText, /\b(purchases?|open order|order history|purchase info|documents)\b/i));
+    addEvidence(evidence, "purchase_context", hasMainPurchaseContext, snippet(mainText, /\b(purchases?|open order|order history|purchase info|documents)\b/i));
+    addEvidence(evidence, "order_history", hasOrderHistory, snippet(purchaseScopedText, /\border history\b/i));
     addEvidence(evidence, "vdp_selling_price", isVdpUrl && /\border history\b[\s\S]{0,300}\bselling price\b/i.test(mainText), snippet(mainText, /\border history\b[\s\S]{0,300}\bselling price\b/i));
+    addEvidence(evidence, "vdp_sold_price", hasVdpSoldPrice, snippet(purchaseScopedText, /\bsold price\b/i));
+    addEvidence(evidence, "mark_as_picked_up", /\bmark as picked up\b/i.test(purchaseScopedText), snippet(purchaseScopedText, /\bmark as picked up\b/i));
+    addEvidence(evidence, "picked_up_action", hasPickedUpAction, snippet(purchaseScopedText, /\b(mark as picked up|picked up)\b/i));
+    addEvidence(evidence, "purchase_action", hasPurchaseAction, snippet(purchaseScopedText, /\b(mark as picked up|picked up|purchase complete|purchased|paid|invoice|full bid history|mark retrieved|retrieved)\b/i));
+    addEvidence(evidence, "buyer_purchase_panel", hasBuyerPurchasePanel, snippet(purchaseScopedText, /\b(purchases?|purchase details?|order history)\b/i));
+    addEvidence(evidence, "purchase_detail_panel", hasPurchaseDetailPanel, snippet(purchaseScopedText, /\b(order history|sold price|selling price|mark as picked up|picked up)\b/i));
     addEvidence(evidence, "fee_details", /\b(fee details|buy price\s*-\s*auction|transaction fee|vehicle history fee|tax(?:es)?)\b/i.test(mainText), snippet(mainText, /\b(fee details|buy price\s*-\s*auction|transaction fee|vehicle history fee|tax(?:es)?)\b/i));
     addEvidence(evidence, "post_sale", /\b(post sale|sold price|negotiat|counter offer|accepted|rejected)\b/i.test(`${path} ${mainText}`), snippet(mainText, /\b(post sale|sold price|negotiat|counter offer|accepted|rejected)\b/i));
     addEvidence(evidence, "accepted_outcome", hasAcceptedOutcomeEvidence(mainText), snippet(mainText, /\b(status\s+accepted|accepted amount|seller accepted|paid|invoice|finalized|completed|purchase confirmed|retrieved)\b/i));
@@ -47,16 +74,16 @@
       captureKind = has(evidence, "accepted_outcome") || /\b(total|taxes|buy price\s*-\s*auction)\b/i.test(mainText) ? "verified_outcome" : "candidate_outcome";
       outcomeConfidence = captureKind === "verified_outcome" ? "verified" : "high";
       decisiveEvidence = evidence.filter((item) => ["fee_details", "accepted_outcome"].includes(item.marker));
-    } else if (has(evidence, "post_sale") && !has(evidence, "vdp_selling_price")) {
+    } else if (has(evidence, "post_sale") && !has(evidence, "vdp_selling_price") && !has(evidence, "purchase_detail_panel")) {
       pageType = "post_sale";
       captureKind = has(evidence, "accepted_outcome") ? "verified_outcome" : "candidate_outcome";
       outcomeConfidence = captureKind === "verified_outcome" ? "verified" : "medium";
       decisiveEvidence = evidence.filter((item) => ["post_sale", "accepted_outcome", "pending_outcome"].includes(item.marker));
-    } else if (has(evidence, "vdp_selling_price")) {
+    } else if (has(evidence, "vdp_selling_price") || has(evidence, "purchase_detail_panel")) {
       pageType = "purchase_detail";
-      captureKind = has(evidence, "accepted_outcome") ? "verified_outcome" : "candidate_outcome";
-      outcomeConfidence = has(evidence, "accepted_outcome") ? "verified" : "high";
-      decisiveEvidence = evidence.filter((item) => ["vdp_url", "vdp_selling_price", "accepted_outcome", "vehicle_identity", "vehicle_header"].includes(item.marker));
+      captureKind = has(evidence, "accepted_outcome") || has(evidence, "picked_up_action") || /\b(mark as picked up|picked up|paid|invoice|completed|purchase confirmed|retrieved)\b/i.test(purchaseScopedText) ? "verified_outcome" : "candidate_outcome";
+      outcomeConfidence = captureKind === "verified_outcome" ? "verified" : "high";
+      decisiveEvidence = evidence.filter((item) => ["vdp_url", "vdp_selling_price", "vdp_sold_price", "order_history", "purchase_action", "purchase_detail_panel", "accepted_outcome", "vehicle_identity", "vehicle_header"].includes(item.marker));
     } else if (isSupportedActiveListingPath(url.pathname) && (has(evidence, "current_bid") || has(evidence, "vehicle_identity") || has(evidence, "vehicle_header"))) {
       pageType = "active_listing";
       captureKind = "observation";
@@ -108,9 +135,16 @@
     return Math.max(10, Math.min(98, base + evidence.length * 5 + (hasDecisiveEvidence ? 8 : 0)));
   }
 
+  function onlyIgnoredPurchaseEvidence(purchaseScopedText, footerText) {
+    if (!footerText) return false;
+    const normalizedPurchase = normalizeSpace(purchaseScopedText).toLowerCase();
+    const normalizedFooter = normalizeSpace(footerText).toLowerCase();
+    return Boolean(normalizedPurchase) && normalizedFooter.includes(normalizedPurchase);
+  }
+
   function hasAcceptedOutcomeEvidence(text) {
     if (/\b(no|not|without)\s+accepted\b/i.test(text)) return false;
-    return /\b(status\s+accepted|accepted amount|seller accepted|paid|invoice|finalized|completed|purchase confirmed|retrieved)\b/i.test(text);
+    return /\b(status\s+accepted|accepted amount|seller accepted|paid|invoice|finalized|completed|purchase confirmed|retrieved|mark as picked up|picked up)\b/i.test(text);
   }
 
   function extractDocumentRegions(doc) {
