@@ -34,6 +34,7 @@ const extractor = require("../browser-extension/src/openlane-extractor.js") as {
   extractOpenLaneListing: (doc: Record<string, unknown>, href?: string) => Record<string, unknown>;
   extractOpenLaneFixture: (html: string, href?: string) => Record<string, unknown>;
   isOpenLaneVehiclePage: (doc: { body?: { innerText?: string; textContent?: string }; images?: unknown[] }, href?: string) => boolean;
+  extractPurchaseOutcomePrice: (options: Record<string, unknown>) => Record<string, unknown>;
 };
 const networkObserver = require("../browser-extension/src/openlane-network-observer.js") as {
   extractCandidatesFromNetworkPayload: (payload: unknown, url?: string) => {
@@ -1162,18 +1163,57 @@ test("OpenLane purchased VDP extracts sold price as outcome and ignores transpor
     "https://app.openlane.ca/vdp/KM8J3CA46HU123456",
   );
   const semantics = listing.priceSemantics as Record<string, string>;
-  const fields = listing.extractedFields as { debug?: { priceCandidates?: Array<{ label?: string; value?: number; sourceText?: string }> } };
+  const fields = listing.extractedFields as { debug?: { priceCandidates?: Array<{ label?: string; value?: number; sourceText?: string; rejectedReason?: string }> } };
+  const fieldEvidence = listing.fieldEvidence as Record<string, Array<{ sourceType?: string; sourceText?: string; confidenceScore?: number }>>;
 
   assert.equal(listing.pageType, "purchase_detail");
   assert.equal(listing.captureKind, "verified_outcome");
   assert.equal(listing.outcomeConfidence, "verified");
   assert.equal(listing.soldPriceCandidate, 4000);
+  assert.equal(listing.buyPriceAuction, 4000);
   assert.equal(semantics.soldPriceCandidate, "candidate_wholesale_label");
+  assert.equal(semantics.buyPriceAuction, "verified_wholesale_label");
   assert.notEqual(listing.listedPrice, 378);
   assert.equal(listing.listedPrice, undefined);
   assert.equal(listing.currentBid, undefined);
   assert.ok(fields.debug?.priceCandidates?.some((item) => item.label === "Sold price" && item.value === 4000));
-  assert.equal(fields.debug?.priceCandidates?.some((item) => /Transport estimate/i.test(String(item.sourceText)) && item.value === 378), false);
+  assert.ok(fields.debug?.priceCandidates?.some((item) => /Transport estimate/i.test(String(item.sourceText)) && item.value === 378 && item.rejectedReason === "transport_estimate_not_purchase_outcome"));
+  assert.ok(fieldEvidence.soldPriceCandidate?.some((item) => item.sourceType === "purchase_detail_panel" && /Sold price\s+\$4,000/i.test(String(item.sourceText))));
+  assert.ok(fieldEvidence.buyPriceAuction?.some((item) => item.sourceType === "purchase_detail_panel" && Number(item.confidenceScore) >= 90));
+});
+
+test("OpenLane purchase outcome resolver uses trusted zones and rejects active bid, bid count, and transport money", () => {
+  const sectionMapResult = sectionMap.buildOpenLaneSectionMapFromHtml(`
+    <main data-testid="vehicle-detail-page">
+      <section class="vehicle-hero" data-vin="KM8J3CA46HU123456">
+        <h1>2017 Hyundai Tucson</h1>
+        <p>Odometer 111,486 KM</p>
+      </section>
+      <section class="bid-panel"><h2>Current bid</h2><p>$5,100</p><p>59 Bids</p></section>
+      <section class="transport-estimate"><h2>Transport estimate</h2><p>CAD $378 / 185km</p></section>
+      <section class="purchase-order-history">
+        <h2>Order history</h2>
+        <p>Sold price</p>
+        <p>$4,000</p>
+        <button>Mark as picked up</button>
+      </section>
+    </main>
+  `, "https://app.openlane.ca/vdp/KM8J3CA46HU123456");
+
+  const result = extractor.extractPurchaseOutcomePrice({
+    pageContext: "purchase_detail",
+    captureKind: "verified_outcome",
+    outcomeConfidence: "verified",
+    confidenceScore: 96,
+    sectionMap: sectionMapResult,
+    text: sectionMapResult.mainText,
+  });
+
+  assert.equal(result.soldPriceCandidate, 4000);
+  assert.equal(result.buyPriceAuction, 4000);
+  assert.equal(result.finalBidAmount, undefined);
+  assert.ok((result.evidence as Array<{ sourceText?: string }>).some((item) => /Sold price\s+\$4,000/i.test(String(item.sourceText))));
+  assert.ok((result.rejectedCandidates as Array<{ rejectedReason?: string }>).some((item) => /active_current_bid|bid_count|transport_estimate/.test(String(item.rejectedReason))));
 });
 
 test("OpenLane active VDP keeps current bid observational and rejects transport estimate as listed price", () => {

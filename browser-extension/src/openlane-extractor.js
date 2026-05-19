@@ -49,7 +49,7 @@
     const carfax = extractCarfaxInfo(doc, href, rawVisibleText);
     const conditionDetails = extractConditionDetails(textRegions.sectionMap, mainVisibleText, scopedLabelValues.condition);
     const conditionReportText = [conditionDetails.conditionReportText, extractConditionText(mainVisibleText, scopedLabelValues.condition)].filter(Boolean).join(" | ") || undefined;
-    const purchaseEconomics = extractPurchaseEconomics(mainVisibleText, classification);
+    const purchaseEconomics = extractPurchaseEconomics(mainVisibleText, classification, textRegions.sectionMap, options.networkEvidence);
     const postSaleOutcome = extractPostSaleOutcome(mainVisibleText, classification);
     const isPurchaseOutcomePage = ["fee_details", "purchase_detail", "purchase_info", "purchase_list", "post_sale"].includes(classification.pageType);
     const currentBidResult = isPurchaseOutcomePage ? { value: undefined, candidates: [] } : extractCurrentBidFromBidPanel(textRegions, doc, {
@@ -147,6 +147,7 @@
       priceSemantics: mergeObjects(observationPriceSemantics, postSaleOutcome.priceSemantics, purchaseEconomics.priceSemantics),
       fieldEvidence: compact({
         currentBid: currentBidResult.evidence ? [currentBidResult.evidence] : undefined,
+        ...(purchaseEconomics.fieldEvidence || {}),
       }),
       reservePrice: moneyFrom(firstLabel(labelValues, OPENLANE_LABELS.reservePrice)),
       estimatedAuctionFees: estimateAuctionFees(listedPrice),
@@ -207,6 +208,7 @@
           mileageCandidates: mileageResult.candidates,
           candidateScores: titleResult.candidates,
           priceCandidates: [...(currentBidResult.candidates || []), ...(purchaseEconomics.priceCandidates || []), ...(postSaleOutcome.priceCandidates || [])],
+          rejectedPurchaseOutcomeCandidates: purchaseEconomics.rejectedCandidates,
           lowerBidCandidates: currentBidResult.lowerBidCandidates,
           currentBidDiagnostics: currentBidResult.diagnostics,
           listedPriceDecision: listedPriceResult.decision,
@@ -1440,10 +1442,19 @@
     return price ? Math.min(1800, Math.max(350, Math.round(price * 0.065))) : undefined;
   }
 
-  function extractPurchaseEconomics(text, classification) {
+  function extractPurchaseEconomics(text, classification, sectionMap, networkEvidence) {
     if (!["fee_details", "purchase_detail", "purchase_info"].includes(classification.pageType)) return {};
-    const priceCandidates = [];
-    const soldPriceCandidate = moneyNearLabel(text, "Sold price", priceCandidates);
+    const purchaseOutcomePrice = extractPurchaseOutcomePrice({
+      pageContext: classification.pageType,
+      captureKind: classification.captureKind,
+      outcomeConfidence: classification.outcomeConfidence,
+      confidenceScore: classification.confidenceScore,
+      sectionMap,
+      text,
+      networkEvidence,
+    });
+    const priceCandidates = [...(purchaseOutcomePrice.candidates || [])];
+    const soldPriceCandidate = purchaseOutcomePrice.soldPriceCandidate;
     const transactionFee = moneyNearLabel(text, "Transaction Fee");
     const vehicleHistoryFee = moneyNearLabel(text, "Vehicle history - auction") || moneyNearLabel(text, "Vehicle History Fee");
     const subtotal = moneyNearLabel(text, "Subtotal");
@@ -1451,11 +1462,9 @@
     const totalInvoiceAmount = moneyNearLabel(text, "Total invoice") || moneyNearLabel(text, "Invoice total") || (classification.pageType === "fee_details" ? moneyNearLabel(text, "Total") : undefined);
     const finalAcquisitionCost = totalInvoiceAmount;
     const purchaseStatus = cleanStatusValue(valueNearTextLabel(text, "Status"));
-    const verifiedWholesale = /\b(retrieved|mark as picked up|picked up|paid|final|finalized|completed|purchase confirmed|invoice)\b/i.test(`${purchaseStatus || ""} ${text}`);
-    const explicitBuyPriceAuction = moneyNearLabel(text, "Buy price - auction", priceCandidates) || moneyNearLabel(text, "Selling price", priceCandidates);
-    const buyPriceAuction = explicitBuyPriceAuction || (verifiedWholesale ? soldPriceCandidate : undefined);
-    const sellingPriceEvidence = buyPriceAuction ? purchaseEvidenceSnippet(text, "Selling price") || purchaseEvidenceSnippet(text, "Buy price - auction") : undefined;
-    const soldPriceEvidence = soldPriceCandidate ? purchaseEvidenceSnippet(text, "Sold price") : undefined;
+    const verifiedWholesale = purchaseOutcomePrice.verifiedWholesale || /\b(retrieved|mark as picked up|picked up|paid|final|finalized|completed|purchase confirmed|invoice)\b/i.test(`${purchaseStatus || ""} ${text}`);
+    const buyPriceAuction = purchaseOutcomePrice.buyPriceAuction;
+    const outcomeEvidence = purchaseOutcomePrice.evidence;
     const priceSemantics = soldPriceCandidate || buyPriceAuction || transactionFee || vehicleHistoryFee || subtotal || taxes || totalInvoiceAmount ? compact({
       soldPriceCandidate: soldPriceCandidate ? "candidate_wholesale_label" : undefined,
       buyPriceAuction: buyPriceAuction ? (verifiedWholesale ? "verified_wholesale_label" : "candidate_wholesale_label") : undefined,
@@ -1477,13 +1486,10 @@
       finalAcquisitionCost,
       purchaseStatus,
       priceSemantics,
-      outcomeEvidence: (sellingPriceEvidence || soldPriceEvidence) ? [{
-        evidenceType: verifiedWholesale ? "purchase_document" : "visible_page_text",
-        sourceText: sellingPriceEvidence || soldPriceEvidence,
-        capturedAt: new Date().toISOString(),
-        confidenceScore: classification.confidenceScore,
-      }] : undefined,
+      outcomeEvidence,
+      fieldEvidence: purchaseOutcomePrice.fieldEvidence,
       priceCandidates,
+      rejectedCandidates: purchaseOutcomePrice.rejectedCandidates,
       metadata: compact({
         currency: /\bCA\$|CAD\b/i.test(text) ? "CAD" : undefined,
         releaseFormStatus: cleanStatusValue(valueNearTextLabel(text, "Release Form")),
@@ -1491,6 +1497,177 @@
         inspectionStatus: cleanStatusValue(valueNearTextLabel(text, "Inspection")),
         transportStatus: cleanStatusValue(valueNearTextLabel(text, "Transport")),
       }),
+    });
+  }
+
+  function extractPurchaseOutcomePrice({ pageContext, captureKind, outcomeConfidence, confidenceScore, sectionMap, text, networkEvidence } = {}) {
+    if (!isPurchaseOutcomePriceContext(pageContext, captureKind)) return {};
+    const sources = trustedPurchaseOutcomeSources(sectionMap, text);
+    if (!sources.length) return {};
+    const rejectedCandidates = collectRejectedPurchaseOutcomeCandidates(sources, text);
+    const soldCandidate = firstTrustedPurchaseMoneyCandidate(sources, ["Sold price", "Final price", "Purchase price", "Accepted price"], "soldPriceCandidate");
+    const explicitBuyCandidate = firstTrustedPurchaseMoneyCandidate(sources, ["Buy price - auction", "Selling price"], "buyPriceAuction");
+    const networkCandidate = firstNetworkPurchaseOutcomeCandidate(networkEvidence);
+    const selectedSold = soldCandidate || networkCandidate;
+    const verifiedWholesale = Boolean(selectedSold) && hasVerifiedPurchaseCompletionEvidence(sources, outcomeConfidence);
+    const selectedBuy = explicitBuyCandidate || (verifiedWholesale ? selectedSold : undefined);
+    const evidenceCandidate = selectedBuy || selectedSold;
+    const evidence = evidenceCandidate ? [{
+      evidenceType: verifiedWholesale ? "purchase_document" : evidenceTypeForPurchaseSource(evidenceCandidate.sourceType),
+      sourceText: evidenceCandidate.sourceText,
+      capturedAt: new Date().toISOString(),
+      confidenceScore: evidenceCandidate.confidenceScore || confidenceScore || 70,
+    }] : undefined;
+    const fieldEvidence = compact({
+      soldPriceCandidate: selectedSold ? [fieldEvidenceFromPurchaseCandidate(selectedSold, "soldPriceCandidate", confidenceScore)] : undefined,
+      buyPriceAuction: selectedBuy ? [fieldEvidenceFromPurchaseCandidate(selectedBuy, "buyPriceAuction", confidenceScore)] : undefined,
+    });
+    const candidates = [
+      selectedSold,
+      selectedBuy && selectedBuy !== selectedSold ? selectedBuy : undefined,
+      ...rejectedCandidates,
+    ].filter(Boolean);
+
+    return compact({
+      soldPriceCandidate: selectedSold?.value,
+      buyPriceAuction: selectedBuy?.value,
+      finalBidAmount: undefined,
+      evidence,
+      confidence: selectedBuy ? "high" : selectedSold ? "medium" : undefined,
+      candidates,
+      fieldEvidence,
+      verifiedWholesale,
+      rejectedCandidates,
+    });
+  }
+
+  function isPurchaseOutcomePriceContext(pageContext, captureKind) {
+    return ["purchase_detail", "post_sale", "fee_details", "purchase_info", "verified_outcome", "candidate_outcome"].includes(String(pageContext || ""))
+      || ["verified_outcome", "candidate_outcome"].includes(String(captureKind || ""));
+  }
+
+  function trustedPurchaseOutcomeSources(sectionMap, text) {
+    const zones = sectionMap?.zones || {};
+    const sources = [
+      purchaseSourceFromZone("purchasePanel", zones.purchasePanel, "purchase_detail_panel"),
+      purchaseSourceFromZone("postSalePanel", zones.postSalePanel, "post_sale_page"),
+      purchaseSourceFromZone("feeDetailsPanel", zones.feeDetailsPanel, "fee_details_page"),
+    ].filter(Boolean);
+    if (sources.length) return sources;
+    const fallbackText = normalizeSpace(text || "");
+    return fallbackText ? [{ name: "mainText", sourceType: "purchase_detail_panel", text: fallbackText }] : [];
+  }
+
+  function purchaseSourceFromZone(name, zone, sourceType) {
+    const text = normalizeSpace(zone?.text || "");
+    if (!text) return undefined;
+    return { name, sourceType, text };
+  }
+
+  function firstTrustedPurchaseMoneyCandidate(sources, labels, field) {
+    for (const source of sources) {
+      for (const label of labels) {
+        const localCandidates = [];
+        const value = moneyNearLabel(source.text, label, localCandidates);
+        if (!value) continue;
+        const candidate = localCandidates[0] || { label, value, sourceText: purchaseEvidenceSnippet(source.text, label) || `${label} ${value}` };
+        if (isRejectedPurchasePriceSource(candidate.sourceText)) continue;
+        return {
+          field,
+          label,
+          value,
+          sourceText: purchaseEvidenceSnippet(source.text, label) || candidate.sourceText,
+          sourceName: source.name,
+          sourceType: source.sourceType,
+          confidenceScore: source.sourceType === "fee_details_page" ? 96 : 92,
+        };
+      }
+    }
+    return undefined;
+  }
+
+  function firstNetworkPurchaseOutcomeCandidate(networkEvidence) {
+    for (const item of Array.isArray(networkEvidence) ? networkEvidence : []) {
+      const candidates = item?.fieldCandidates || item?.candidates?.fieldCandidates || [];
+      for (const candidate of Array.isArray(candidates) ? candidates : []) {
+        if (!["soldPriceCandidate", "buyPriceAuction", "finalBidAmount"].includes(candidate.field)) continue;
+        const value = numberFrom(candidate.value);
+        if (!value || isRejectedPurchasePriceSource(candidate.sourceText)) continue;
+        return {
+          field: "soldPriceCandidate",
+          label: candidate.field,
+          value,
+          sourceText: normalizeSpace(candidate.sourceText || candidate.label || candidate.field).slice(0, 240),
+          sourceName: candidate.source || "OpenLane network JSON",
+          sourceType: "network_json",
+          endpointPattern: candidate.endpointPattern,
+          confidenceScore: candidate.confidence || 88,
+        };
+      }
+    }
+    return undefined;
+  }
+
+  function collectRejectedPurchaseOutcomeCandidates(sources, fullText) {
+    const rejected = [];
+    const noisyLabels = [
+      ["Current bid", "active_current_bid_not_purchase_outcome"],
+      ["Bid", "bid_count_or_active_bid_not_purchase_outcome"],
+      ["Transport estimate", "transport_estimate_not_purchase_outcome"],
+      ["Market guide", "market_guide_not_purchase_outcome"],
+      ["Estimated transportation", "transport_estimate_not_purchase_outcome"],
+    ];
+    const combinedText = normalizeSpace(`${sources.map((source) => source.text).join("\n")}\n${fullText || ""}`);
+    for (const [label, rejectedReason] of noisyLabels) {
+      const localCandidates = [];
+      moneyNearLabel(combinedText, label, localCandidates);
+      for (const candidate of localCandidates.slice(0, 3)) {
+        rejected.push({ ...candidate, field: "soldPriceCandidate", rejectedReason });
+      }
+    }
+    for (const match of combinedText.matchAll(/\b(\d{1,3})\s+Bids?\b/gi)) {
+      rejected.push({
+        field: "soldPriceCandidate",
+        label: "Bids",
+        value: numberFrom(match[1]),
+        sourceText: normalizeSpace(match[0]),
+        rejectedReason: "bid_count_not_purchase_outcome_price",
+      });
+      if (rejected.length >= 12) break;
+    }
+    return rejected.slice(0, 12);
+  }
+
+  function isRejectedPurchasePriceSource(sourceText) {
+    const text = String(sourceText || "");
+    return isTransportPriceContext(text)
+      || /\b(current bid|watchlist|outbid|market guide|sales history|similar vehicles|q\s*&\s*a|questions? and answers?)\b/i.test(text)
+      || /\b\d{1,3}\s+Bids?\b/i.test(text);
+  }
+
+  function hasVerifiedPurchaseCompletionEvidence(sources, outcomeConfidence) {
+    if (outcomeConfidence === "verified") return true;
+    return sources.some((source) => /\b(mark as picked up|picked up|paid|finalized|completed|retrieved|purchase confirmed|invoice)\b/i.test(source.text));
+  }
+
+  function evidenceTypeForPurchaseSource(sourceType) {
+    if (sourceType === "network_json") return "network_json";
+    if (sourceType === "fee_details_page") return "fee_details_page";
+    if (sourceType === "post_sale_page") return "post_sale_page";
+    return "visible_page_text";
+  }
+
+  function fieldEvidenceFromPurchaseCandidate(candidate, field, confidenceScore) {
+    return compact({
+      field,
+      value: candidate.value,
+      normalizedValue: candidate.value,
+      sourceType: candidate.sourceType,
+      sourceName: candidate.sourceName || "OpenLane purchase panel",
+      sourceText: candidate.sourceText,
+      endpointPattern: candidate.endpointPattern,
+      confidenceScore: candidate.confidenceScore || confidenceScore || 90,
+      capturedAt: new Date().toISOString(),
     });
   }
 
@@ -1781,6 +1958,7 @@
     extractVisibleText,
     extractLabelValueMap,
     extractMoneyByLabels,
+    extractPurchaseOutcomePrice,
     extractMileage,
     extractVin,
     extractYearMakeModelTrim,
