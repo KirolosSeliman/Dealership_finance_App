@@ -47,9 +47,11 @@ test("Market Snap extension injects on OpenLane Canada vehicle pages", () => {
   assert.ok(scripts.includes("src/openlane-extractor.js"));
   assert.ok(scripts.includes("src/openlane-stable-capture.js"));
   assert.ok(scripts.includes("src/market-snap-widget.js"));
+  assert.ok(scripts.includes("src/copy-payload.js"));
   assert.ok(scripts.includes("src/content-script.js"));
   assert.ok(scripts.indexOf("src/deep-capture-activation.js") < scripts.indexOf("src/storage.js"));
   assert.ok(scripts.indexOf("src/openlane-stable-capture.js") < scripts.indexOf("src/content-script.js"));
+  assert.ok(scripts.indexOf("src/copy-payload.js") < scripts.indexOf("src/content-script.js"));
   assert.ok(css.includes("styles/widget.css"));
   assert.equal(manifest.permissions.includes("tabs"), false);
   assert.equal(manifest.permissions.includes("webRequest"), false);
@@ -183,20 +185,23 @@ test("Market Snap widget exposes draggable, settings, and data-quality controls"
 
 test("Market Snap copy JSON includes normalized extraction, runtime evidence, and backend responses", () => {
   const contentScript = readFileSync(join(repoRoot, "browser-extension/src/content-script.js"), "utf8");
+  const copyPayload = readFileSync(join(repoRoot, "browser-extension/src/copy-payload.js"), "utf8");
+  const source = `${contentScript}\n${copyPayload}`;
 
-  assert.match(contentScript, /normalizedExtraction/);
-  assert.match(contentScript, /deepCaptureActivationMode/);
-  assert.match(contentScript, /consentMode/);
-  assert.match(contentScript, /legacyPayload/);
-  assert.match(contentScript, /classification/);
-  assert.match(contentScript, /sectionMap/);
-  assert.match(contentScript, /candidateScores/);
-  assert.match(contentScript, /safeExpansion/);
-  assert.match(contentScript, /networkEvidence/);
-  assert.match(contentScript, /readinessSummary/);
-  assert.match(contentScript, /buildReadinessSummary/);
-  assert.match(contentScript, /outcomeEvidence/);
-  assert.match(contentScript, /debug/);
+  assert.match(contentScript, /DealerFlowMarketSnapCopyPayload\.buildCopyPayload/);
+  assert.match(source, /normalizedExtraction/);
+  assert.match(source, /deepCaptureActivationMode/);
+  assert.match(source, /consentMode/);
+  assert.match(source, /legacyPayload/);
+  assert.match(source, /classification/);
+  assert.match(source, /sectionMap/);
+  assert.match(source, /candidateScores/);
+  assert.match(source, /safeExpansion/);
+  assert.match(source, /networkEvidence/);
+  assert.match(source, /readinessSummary/);
+  assert.match(source, /buildReadinessSummary/);
+  assert.match(source, /outcomeEvidence/);
+  assert.match(source, /debug/);
   assert.match(contentScript, /basic DOM extraction may miss VIN\/Carfax/);
   assert.match(contentScript, /Future installer consent UI pending/);
   assert.match(contentScript, /Network observer running/);
@@ -211,8 +216,58 @@ test("Market Snap copy JSON includes normalized extraction, runtime evidence, an
   assert.match(contentScript, /media filtering stats/);
   assert.match(contentScript, /backendResponse/);
   assert.match(contentScript, /captureResponse/);
-  assert.match(contentScript, /buildCopyPayload/);
-  assert.match(contentScript, /sanitizeDebugValue/);
+  assert.match(source, /buildCopyPayload/);
+  assert.match(source, /sanitizeDebugValue/);
+});
+
+test("Market Snap copy payload builder returns sanitized readiness and debug evidence", () => {
+  const copyPayload = require("../browser-extension/src/copy-payload.js") as {
+    buildCopyPayload: (listing: Record<string, unknown>, state?: Record<string, unknown>) => Record<string, unknown>;
+  };
+  const payload = copyPayload.buildCopyPayload({
+    pageType: "active_listing",
+    captureKind: "observation",
+    captureLevel: "deep_capture",
+    vin: "KM8J3CA46HU123456",
+    carfaxUrl: "https://www.carfax.ca/report/TUCSON123",
+    carfaxUrlStatus: "url_found",
+    extractionConfidenceScore: 92,
+    fieldEvidence: { vin: [{ sourceType: "header_chip", sourceText: "VIN KM8J3CA46HU123456" }] },
+    extractedFields: {
+      debug: {
+        vinCandidates: [{ vin: "KM8J3CA46HU123456", sourceText: "VIN KM8J3CA46HU123456" }],
+        titleCandidates: [{ text: "2017 Hyundai Tucson", score: 85 }],
+        apiToken: "Bearer should-not-copy",
+      },
+    },
+    openlaneMetadata: {
+      stableCaptureReadiness: {
+        readyToCapture: true,
+        state: "ready_to_capture",
+        vinStatus: "found",
+        carfaxStatus: "url_found",
+        missingData: [],
+      },
+      deepCaptureRuntime: {
+        active: true,
+        networkEvidenceCount: 1,
+        networkObserver: { enabled: true, reason: "observing_page_generated_responses" },
+      },
+      networkEvidence: [{ endpointPattern: "app.openlane.ca/api/vdp/:id", token: "secret-token" }],
+      carfaxEvidence: [{ source: "network_json" }],
+    },
+  }, {
+    valuation: { confidenceScore: 88 },
+    backendResponse: { ok: true },
+    captureResponse: { skipped: false },
+  });
+
+  assert.equal((payload.readinessSummary as { readyToCapture?: boolean }).readyToCapture, true);
+  assert.equal((payload.readinessSummary as { vinEvidenceSource?: string }).vinEvidenceSource, "header_chip");
+  assert.equal((payload.readinessSummary as { carfaxEvidenceSource?: string }).carfaxEvidenceSource, "network_json");
+  assert.equal((payload.readinessSummary as { networkEvidenceCount?: number }).networkEvidenceCount, 1);
+  assert.equal((payload.valuation as { confidenceScore?: number }).confidenceScore, 88);
+  assert.doesNotMatch(JSON.stringify(payload), /should-not-copy|secret-token/i);
 });
 
 test("Market Snap no-VIN OpenLane listings stay preview-only in the content script and widget", () => {

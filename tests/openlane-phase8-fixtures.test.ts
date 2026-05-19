@@ -138,10 +138,12 @@ test("Phase 8 fixtures protect active observation and post-sale outcome semantic
 
 test("Phase 8 widget debug contract includes capture readiness state", () => {
   const contentScript = readFileSync(join(repoRoot, "browser-extension/src/content-script.js"), "utf8");
+  const copyPayload = readFileSync(join(repoRoot, "browser-extension/src/copy-payload.js"), "utf8");
   const widget = readFileSync(join(repoRoot, "browser-extension/src/market-snap-widget.js"), "utf8");
+  const debugContractSource = `${contentScript}\n${copyPayload}`;
 
   for (const marker of ["readinessSummary", "readyToCapture", "readinessState", "blockedReason", "vinStatus", "carfaxStatus"]) {
-    assert.match(contentScript, new RegExp(marker));
+    assert.match(debugContractSource, new RegExp(marker));
   }
   for (const marker of ["Readiness", "Capture blocked reason", "VIN status", "Carfax status"]) {
     assert.match(widget, new RegExp(marker));

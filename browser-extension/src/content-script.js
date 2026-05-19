@@ -485,64 +485,11 @@
   }
 
   function buildCopyPayload(listing) {
-    const classification = listing.openlaneMetadata?.classification || null;
-    const outcomeEvidence = listing.outcomeEvidence || classification?.evidence || [];
-    const debug = listing.extractedFields?.debug || {};
-    const normalizedExtraction = {
-      pageContext: listing.pageContext || null,
-      identity: listing.identity || null,
-      auctionObservation: listing.auctionObservation || null,
-      purchaseOutcome: listing.purchaseOutcome || null,
-      condition: listing.condition || null,
-      media: listing.media || null,
-      carfax: listing.carfax || null,
-      debug: listing.debug || null,
-    };
-    const readinessSummary = buildReadinessSummary(listing);
-    const sectionMap = {
-      summary: listing.openlaneMetadata?.sectionMapSummary || listing.debug?.sectionMapSummary || null,
-      textRegions: listing.openlaneMetadata?.textRegions || null,
-      ignoredEvidence: classification?.ignoredEvidence || debug.ignoredEvidence || [],
-    };
-    return sanitizeDebugValue({
-      normalizedExtraction,
-      legacyPayload: listing,
-      valuation: STATE.valuation || null,
-      classification,
-      sectionMap,
-      candidateScores: debug.candidateScores || debug.titleCandidates || [],
-      safeExpansion: listing.openlaneMetadata?.safeExpansion || STATE.safeExpansion || null,
-      networkEvidence: listing.openlaneMetadata?.networkEvidence || [],
-      readinessSummary,
-      outcomeEvidence,
-      debug,
+    return window.DealerFlowMarketSnapCopyPayload.buildCopyPayload(listing, {
+      valuation: STATE.valuation,
+      safeExpansion: STATE.safeExpansion,
       backendResponse: STATE.backendResponse,
       captureResponse: STATE.captureResponse,
-    });
-  }
-
-  function buildReadinessSummary(listing = {}) {
-    const readiness = listing.openlaneMetadata?.stableCaptureReadiness || {};
-    const runtime = listing.openlaneMetadata?.deepCaptureRuntime || {};
-    return sanitizeDebugValue({
-      pageType: listing.pageType,
-      captureKind: listing.captureKind,
-      captureLevel: listing.captureLevel,
-      readyToCapture: Boolean(readiness.readyToCapture),
-      readinessState: readiness.state || "",
-      blockedReason: readiness.blockedReason || "",
-      vin: listing.vin || "",
-      vinStatus: readiness.vinStatus || (!listing.vin ? "missing" : /^[A-HJ-NPR-Z0-9]{17}$/i.test(String(listing.vin)) ? "found" : "invalid"),
-      vinEvidenceSource: listing.fieldEvidence?.vin?.[0]?.sourceType || listing.extractedFields?.vinEvidence?.matchedLabel || "",
-      vinCandidateCount: listing.extractedFields?.debug?.vinCandidates?.length || 0,
-      carfaxStatus: readiness.carfaxStatus || listing.carfaxUrlStatus || "missing",
-      carfaxUrl: listing.carfaxUrl || "",
-      carfaxEvidenceSource: listing.openlaneMetadata?.carfaxEvidence?.[0]?.source || listing.carfax?.evidence?.[0]?.source || "",
-      networkObserver: runtime.networkObserver || null,
-      networkEvidenceCount: runtime.networkEvidenceCount ?? listing.openlaneMetadata?.networkEvidence?.length ?? 0,
-      safeExpansion: listing.openlaneMetadata?.safeExpansion || null,
-      missingData: readiness.missingData || listing.missingData || [],
-      extractionConfidence: listing.extractionConfidenceScore,
     });
   }
 
