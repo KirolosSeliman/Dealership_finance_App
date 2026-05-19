@@ -114,6 +114,30 @@ test("Market Snap extension deployment guide covers Vercel origin configuration"
   }
 });
 
+test("Market Snap hybrid final validation report captures automated and manual release gates", () => {
+  const report = readFileSync(join(repoRoot, "docs/market-snap-hybrid-extraction-final-validation.md"), "utf8");
+
+  for (const section of [
+    "## Summary",
+    "## Deep Capture Default-On Validation",
+    "## VIN Validation",
+    "## Carfax Validation",
+    "## Network Evidence Validation",
+    "## Widget/Button Validation",
+    "## Security Validation",
+    "## Test Results",
+    "## Manual Browser Results",
+    "## Deployment Status",
+    "## Remaining Risks",
+    "## Rollback Plan",
+    "## Final Go/No-Go",
+  ]) {
+    assert.ok(report.includes(section), `final validation report missing ${section}`);
+  }
+  assert.match(report, /Manual live Chrome\/OpenLane validation: not completed in this environment/);
+  assert.match(report, /NO-GO for production private beta until live browser validation is completed/);
+});
+
 test("release verification workflow is CI-ready without production credentials", () => {
   const workflowPath = join(repoRoot, ".github/workflows/release-verification.yml");
   assert.equal(existsSync(workflowPath), true);
