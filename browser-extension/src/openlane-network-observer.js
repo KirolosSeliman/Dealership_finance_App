@@ -12,22 +12,45 @@
   function startOpenLaneNetworkObserver(settings = {}, context = {}) {
     const activation = isDeepCaptureAllowed(settings, context);
     if (!activation.active) {
-      observerStatus = { enabled: false, reason: activation.reason || "deep_capture_not_allowed", activationMode: activation.deepCaptureActivationMode, observationCount: observations.length };
+      root.removeEventListener?.("message", onPageMessage);
+      observerStatus = {
+        ...observerStatus,
+        enabled: false,
+        reason: activation.reason || "deep_capture_not_allowed",
+        activationMode: activation.deepCaptureActivationMode,
+        consentMode: activation.consentMode,
+        observationCount: observations.length,
+      };
       return getOpenLaneNetworkObserverStatus();
     }
     if (activation.observePageNetworkData !== true) {
-      observerStatus = { enabled: false, reason: "disabled", activationMode: activation.deepCaptureActivationMode, observationCount: observations.length };
+      root.removeEventListener?.("message", onPageMessage);
+      observerStatus = {
+        ...observerStatus,
+        enabled: false,
+        reason: "disabled",
+        activationMode: activation.deepCaptureActivationMode,
+        consentMode: activation.consentMode,
+        observationCount: observations.length,
+      };
       return getOpenLaneNetworkObserverStatus();
     }
     injectPageHook();
     root.addEventListener?.("message", onPageMessage);
-    observerStatus = { enabled: true, reason: "observing_page_generated_responses", activationMode: activation.deepCaptureActivationMode, consentMode: activation.consentMode, observationCount: observations.length };
+    observerStatus = {
+      ...observerStatus,
+      enabled: true,
+      reason: "observing_page_generated_responses",
+      activationMode: activation.deepCaptureActivationMode,
+      consentMode: activation.consentMode,
+      observationCount: observations.length,
+    };
     return getOpenLaneNetworkObserverStatus();
   }
 
   function stopOpenLaneNetworkObserver() {
     root.removeEventListener?.("message", onPageMessage);
-    observerStatus = { enabled: false, reason: "stopped", observationCount: observations.length };
+    observerStatus = { ...observerStatus, enabled: false, reason: "stopped", observationCount: observations.length };
   }
 
   function isDeepCaptureAllowed(settings = {}, context = {}) {
@@ -45,7 +68,21 @@
   }
 
   function rememberNetworkPayload(body, url = "", contentType = "") {
-    if (!isAllowedEndpoint(url)) return undefined;
+    const decision = endpointDecision(url);
+    if (!decision.allowed) {
+      observerStatus = {
+        ...observerStatus,
+        lastDeniedEndpointPattern: decision.endpointPattern,
+        lastDeniedEndpointReason: decision.reason,
+        observationCount: observations.length,
+      };
+      return undefined;
+    }
+    observerStatus = {
+      ...observerStatus,
+      lastAllowedEndpointPattern: decision.endpointPattern,
+      observationCount: observations.length,
+    };
     const parsed = parseJsonBody(body);
     if (!parsed) return undefined;
     const candidates = extractCandidatesFromNetworkPayload(parsed, url);
@@ -59,7 +96,12 @@
     };
     observations.unshift(observation);
     observations.splice(MAX_OBSERVATIONS);
-    observerStatus = { ...observerStatus, observationCount: observations.length };
+    observerStatus = {
+      ...observerStatus,
+      observationCount: observations.length,
+      candidateCounts: candidateCounts(candidates),
+      lastAllowedEndpointPattern: decision.endpointPattern,
+    };
     return observation;
   }
 
@@ -148,6 +190,17 @@
 
   function countCarfaxCandidates(fieldCandidates = []) {
     return fieldCandidates.filter((candidate) => candidate.field === "carfaxUrl" || candidate.field === "carfaxUrlStatus").length;
+  }
+
+  function candidateCounts(candidates = {}) {
+    return {
+      vin: candidates.vinCandidates?.length || 0,
+      carfax: countCarfaxCandidates(candidates.fieldCandidates || []),
+      media: candidates.mediaCandidates?.length || 0,
+      condition: candidates.conditionCandidates?.length || 0,
+      price: candidates.priceCandidates?.length || 0,
+      transport: candidates.transportCandidates?.length || 0,
+    };
   }
 
   function shouldUseNetworkVin(listing = {}, candidate = {}) {
@@ -308,17 +361,19 @@
     return Boolean(candidates.fieldCandidates.length || candidates.vinCandidates.length || candidates.mediaCandidates.length || candidates.conditionCandidates.length || candidates.priceCandidates.length || candidates.transportCandidates.length);
   }
 
-  function isAllowedEndpoint(url) {
+  function endpointDecision(url) {
     let parsed;
     try {
       parsed = new URL(String(url || ""), root.location?.href || "https://app.openlane.ca/");
     } catch {
-      return false;
+      return { allowed: false, reason: "invalid_url", endpointPattern: "unknown" };
     }
     const target = `${parsed.hostname}${parsed.pathname}`.toLowerCase();
-    if (!/(^|\.)openlane\.(ca|com)$|kar-media\.com$/i.test(parsed.hostname)) return false;
-    if (DENY_ENDPOINT.test(target)) return false;
-    return ALLOW_ENDPOINT.test(target);
+    const pattern = endpointPattern(url);
+    if (!/(^|\.)openlane\.(ca|com)$|kar-media\.com$/i.test(parsed.hostname)) return { allowed: false, reason: "unsupported_host", endpointPattern: pattern };
+    if (DENY_ENDPOINT.test(target)) return { allowed: false, reason: "denied_sensitive_endpoint", endpointPattern: pattern };
+    if (!ALLOW_ENDPOINT.test(target)) return { allowed: false, reason: "not_vehicle_listing_endpoint", endpointPattern: pattern };
+    return { allowed: true, reason: "allowed", endpointPattern: pattern };
   }
 
   function endpointPattern(url) {

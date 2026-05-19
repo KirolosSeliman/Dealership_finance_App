@@ -6,7 +6,14 @@ const require = createRequire(import.meta.url);
 require("../browser-extension/src/deep-capture-activation.js");
 const networkObserver = require("../browser-extension/src/openlane-network-observer.js") as {
   startOpenLaneNetworkObserver: (settings: Record<string, unknown>, context?: Record<string, unknown>) => { enabled: boolean; reason: string; observationCount?: number; activationMode?: string };
-  getOpenLaneNetworkObserverStatus: () => { enabled: boolean; reason: string; observationCount: number };
+  getOpenLaneNetworkObserverStatus: () => {
+    enabled: boolean;
+    reason: string;
+    observationCount: number;
+    lastAllowedEndpointPattern?: string;
+    lastDeniedEndpointReason?: string;
+    candidateCounts?: { vin: number; carfax: number; media: number; condition: number; price: number; transport: number };
+  };
   stopOpenLaneNetworkObserver: () => void;
   rememberNetworkPayload: (body: unknown, url?: string, contentType?: string) => unknown;
   extractCandidatesFromNetworkPayload: (payload: unknown, url?: string) => {
@@ -72,6 +79,8 @@ test("OpenLane network observer status reports current evidence count", () => {
 
   assert.equal(after.enabled, true);
   assert.equal(after.observationCount, before + 1);
+  assert.equal(after.lastAllowedEndpointPattern, "app.openlane.ca/api/vdp/:id");
+  assert.equal(after.candidateCounts?.vin, 1);
   networkObserver.stopOpenLaneNetworkObserver();
 });
 
@@ -79,9 +88,28 @@ test("OpenLane network observer ignores irrelevant and auth/session endpoints", 
   const body = JSON.stringify({ vehicle: { vin: "2T3R1RFV5MW123456" } });
 
   assert.equal(networkObserver.rememberNetworkPayload(body, "https://app.openlane.ca/api/profile/me", "application/json"), undefined);
+  assert.equal(networkObserver.getOpenLaneNetworkObserverStatus().lastDeniedEndpointReason, "denied_sensitive_endpoint");
   assert.equal(networkObserver.rememberNetworkPayload(body, "https://app.openlane.ca/oauth/session", "application/json"), undefined);
   assert.equal(networkObserver.rememberNetworkPayload(body, "https://app.openlane.ca/api/user/vehicles/123", "application/json"), undefined);
   assert.equal(networkObserver.rememberNetworkPayload(body, "https://app.openlane.ca/api/vdp/123", "application/json") !== undefined, true);
+});
+
+test("OpenLane network observer stops when Deep Capture or network observation is disabled", () => {
+  const settings = {
+    dealerFlowBaseUrl: "https://dealer-flow.example",
+    organizationId: "63c47786-fb41-40c1-a573-71346969b9e0",
+    observePageNetworkData: true,
+    deepCaptureEnabled: true,
+  };
+  assert.equal(networkObserver.startOpenLaneNetworkObserver(settings, { href: "https://app.openlane.ca/vdp/123" }).enabled, true);
+  const deepCaptureOff = networkObserver.startOpenLaneNetworkObserver({ ...settings, deepCaptureEnabled: false }, { href: "https://app.openlane.ca/vdp/123" });
+  assert.equal(deepCaptureOff.enabled, false);
+  assert.equal(deepCaptureOff.reason, "deep_capture_disabled_by_user");
+
+  assert.equal(networkObserver.startOpenLaneNetworkObserver(settings, { href: "https://app.openlane.ca/vdp/123" }).enabled, true);
+  const networkOff = networkObserver.startOpenLaneNetworkObserver({ ...settings, observePageNetworkData: false }, { href: "https://app.openlane.ca/vdp/123" });
+  assert.equal(networkOff.enabled, false);
+  assert.equal(networkOff.reason, "disabled");
 });
 
 test("OpenLane network observer redacts token, cookie, email, and phone values", () => {
