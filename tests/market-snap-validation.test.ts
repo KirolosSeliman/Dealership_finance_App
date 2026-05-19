@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
 import { authorizedExtractionRequestSchema, authorizedExtractionResponseSchema, importPayloadSchema, marketListingPayloadSchema, saveListingSchema } from "../src/lib/market-snap/validation";
 
@@ -275,6 +277,7 @@ test("Market Snap validation accepts currentBid as observation without treating 
 });
 
 test("Market Snap validation rejects bid-count evidence as canonical OpenLane price data", () => {
+  const badPriceFixture = JSON.parse(readFileSync(join(process.cwd(), "tests/fixtures/openlane/openlane-backend-bad-price-evidence.json"), "utf8"));
   const currentBidCount = marketListingPayloadSchema.safeParse({
     organizationId,
     sourceName: "OpenLane",
@@ -296,7 +299,7 @@ test("Market Snap validation rejects bid-count evidence as canonical OpenLane pr
         normalizedValue: 4,
         sourceType: "section_map",
         sourceName: "OpenLane bid panel",
-        sourceText: "Current bid 4 Bids",
+        sourceText: badPriceFixture.bidCountEvidence.sourceText,
         confidenceScore: 72,
         capturedAt: "2026-05-18T12:00:00.000Z",
       }],
@@ -323,7 +326,7 @@ test("Market Snap validation rejects bid-count evidence as canonical OpenLane pr
         normalizedValue: 4,
         sourceType: "section_map",
         sourceName: "OpenLane bid panel",
-        sourceText: "Current bid 4 Bids",
+        sourceText: badPriceFixture.bidCountEvidence.sourceText,
         confidenceScore: 72,
         capturedAt: "2026-05-18T12:00:00.000Z",
       }],
@@ -368,6 +371,7 @@ test("Market Snap validation preserves valid low OpenLane current bids with stro
 });
 
 test("Market Snap validation rejects transport evidence as canonical OpenLane price data", () => {
+  const badPriceFixture = JSON.parse(readFileSync(join(process.cwd(), "tests/fixtures/openlane/openlane-backend-bad-price-evidence.json"), "utf8"));
   for (const field of ["currentBid", "listedPrice", "soldPriceCandidate"] as const) {
     const result = marketListingPayloadSchema.safeParse({
       organizationId,
@@ -379,23 +383,23 @@ test("Market Snap validation rejects transport evidence as canonical OpenLane pr
       year: 2017,
       make: "Hyundai",
       model: "Tucson",
-      [field]: 428,
+      [field]: badPriceFixture.transportEstimateEvidence.value,
       priceSemantics: {
         [field]: field === "soldPriceCandidate" ? "candidate_wholesale_label" : "observation",
       },
       outcomeEvidence: field === "soldPriceCandidate" ? [{
         evidenceType: "visible_page_text",
-        sourceText: "Transport estimate CAD $428 / 185km",
+        sourceText: badPriceFixture.transportEstimateEvidence.sourceText,
         capturedAt: "2026-05-18T12:00:00.000Z",
       }] : undefined,
       fieldEvidence: {
         [field]: [{
           field,
-          value: 428,
-          normalizedValue: 428,
+          value: badPriceFixture.transportEstimateEvidence.value,
+          normalizedValue: badPriceFixture.transportEstimateEvidence.value,
           sourceType: "section_map",
           sourceName: "OpenLane sidebar",
-          sourceText: "Transport estimate CAD $428 / 185km pickup to delivery",
+          sourceText: badPriceFixture.transportEstimateEvidence.sourceText,
           confidenceScore: 70,
           capturedAt: "2026-05-18T12:00:00.000Z",
         }],

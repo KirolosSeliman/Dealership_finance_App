@@ -1,0 +1,10 @@
+{
+  "bidCountEvidence": {
+    "sourceText": "Current bid 4 Bids",
+    "value": 4
+  },
+  "transportEstimateEvidence": {
+    "sourceText": "Transport estimate CAD $378 / 194km",
+    "value": 378
+  }
+}

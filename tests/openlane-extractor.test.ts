@@ -1157,7 +1157,7 @@ test("OpenLane active VDP keeps current bid observational and rejects transport 
 
 test("OpenLane active current bid resolver rejects bid counts and selects the bid-panel money amount", () => {
   const listing = extractor.extractOpenLaneFixture(
-    fixture("openlane-vdp-active-current-bid-before-label-4-bids.html"),
+    fixture("openlane-vdp-active-current-bid-with-bid-count.html"),
     "https://app.openlane.ca/vdp/KNAE55LC7J6040713",
   );
   const fields = listing.extractedFields as {
@@ -1175,20 +1175,28 @@ test("OpenLane active current bid resolver rejects bid counts and selects the bi
   assert.ok(fields.debug?.priceCandidates?.some((item) => item.field === "currentBid" && item.value === 4 && item.rejectedReason === "bid_count_not_money"));
 });
 
+test("OpenLane active current bid resolver supports sticky footer fallback and still rejects bid count", () => {
+  const listing = extractor.extractOpenLaneFixture(
+    fixture("openlane-vdp-active-current-bid-footer-fallback.html"),
+    "https://app.openlane.ca/vdp/3KPFK4A77HE123456",
+  );
+  const fields = listing.extractedFields as {
+    currentBidEvidence?: { sourceText?: string };
+    debug?: { priceCandidates?: Array<{ field?: string; value?: number; rejectedReason?: string; sourceText?: string }> };
+  };
+
+  assert.equal(listing.currentBid, 8_450);
+  assert.equal(listing.listedPrice, 8_450);
+  assert.notEqual(listing.currentBid, 4);
+  assert.match(String(fields.currentBidEvidence?.sourceText), /\$8,450/);
+  assert.ok(fields.debug?.priceCandidates?.some((item) => item.field === "currentBid" && item.value === 4 && item.rejectedReason === "bid_count_not_money"));
+});
+
 test("OpenLane active current bid resolver does not fall back to bid count without money context", () => {
-  const listing = extractor.extractOpenLaneFixture(`
-    <main data-testid="vehicle-detail-page">
-      <section class="vehicle-hero" data-vin="KNAE55LC7J6040713">
-        <h1>2018 Kia Stinger</h1>
-        <p>VIN KNAE55LC7J6040713</p>
-        <p>Odometer 111,486 KM</p>
-      </section>
-      <section class="bid-panel">
-        <h2>Current bid</h2>
-        <p>4 Bids</p>
-      </section>
-    </main>
-  `, "https://app.openlane.ca/vdp/KNAE55LC7J6040713");
+  const listing = extractor.extractOpenLaneFixture(
+    fixture("openlane-vdp-active-current-bid-no-money.html"),
+    "https://app.openlane.ca/vdp/KNAE55LC7J6040713",
+  );
   const fields = listing.extractedFields as {
     debug?: { priceCandidates?: Array<{ field?: string; value?: number; rejectedReason?: string }> };
   };
@@ -1196,6 +1204,23 @@ test("OpenLane active current bid resolver does not fall back to bid count witho
   assert.equal(listing.currentBid, undefined);
   assert.equal(listing.listedPrice, undefined);
   assert.ok(fields.debug?.priceCandidates?.some((item) => item.field === "currentBid" && item.value === 4 && item.rejectedReason === "bid_count_not_money"));
+});
+
+test("OpenLane Phase 7 CARFAX fixtures keep text-only and router URL behavior truthful", () => {
+  const textOnly = extractor.extractOpenLaneFixture(
+    fixture("openlane-vdp-carfax-text-only.html"),
+    "https://app.openlane.ca/vdp/3KPFK4A77HE123456",
+  );
+  const router = extractor.extractOpenLaneFixture(
+    fixture("openlane-router-carfax-url.html"),
+    "https://app.openlane.ca/vdp/KNAE55LC7J6040713",
+  );
+
+  assert.equal(textOnly.carfaxAvailable, true);
+  assert.equal(textOnly.carfaxUrl, undefined);
+  assert.equal(textOnly.carfaxUrlStatus, "text_only");
+  assert.equal(router.carfaxUrl, "https://app.openlane.ca/vehicle-history/carfax/STINGER123");
+  assert.equal(router.carfaxUrlStatus, "url_found");
 });
 
 test("OpenLane network current bid fills missing DOM current bid from safe JSON evidence", () => {

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
+import { join } from "node:path";
 import test from "node:test";
 
 const require = createRequire(import.meta.url);
@@ -230,6 +232,15 @@ test("OpenLane network observer maps Carfax URL evidence and strips sensitive qu
 
   assert.equal(candidate?.value, "https://app.openlane.ca/vehicle-history/carfax/RAV4");
   assert.doesNotMatch(JSON.stringify(candidates), /secret-token|token=/i);
+});
+
+test("OpenLane network observer maps Phase 7 fixture CARFAX URL evidence", () => {
+  const payload = JSON.parse(readFileSync(join(process.cwd(), "tests/fixtures/openlane/openlane-network-carfax-url.json"), "utf8"));
+  const candidates = networkObserver.extractCandidatesFromNetworkPayload(payload, "https://app.openlane.ca/api/vdp/3KPFK4A77HE123456");
+  const candidate = candidates.fieldCandidates.find((item) => item.field === "carfaxUrl");
+
+  assert.equal(candidate?.value, "https://app.openlane.ca/vehicle-history/carfax/FORTE123");
+  assert.ok(candidate?.sourceText.includes("vehicle-history/carfax/FORTE123"));
 });
 
 test("OpenLane network merge fills missing fields but preserves verified fee outcomes", () => {
