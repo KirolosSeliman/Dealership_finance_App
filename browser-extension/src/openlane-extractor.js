@@ -1064,10 +1064,11 @@
       const raw = String(value || "");
       if (!/carfax/i.test(raw)) return;
       const url = carfaxUrlCandidate(raw);
+      const safeRaw = sanitizeCarfaxEvidenceText(raw);
       candidates.push(compact({
         source,
-        sourceText: raw.slice(0, 240),
-        text: raw.slice(0, 240),
+        sourceText: safeRaw.slice(0, 240),
+        text: safeRaw.slice(0, 240),
         url,
         urlStatus: url ? "url_found" : "text_only",
         rejectedReason: url ? undefined : rejectedCarfaxReason(raw),
@@ -1142,10 +1143,34 @@
     const raw = String(value || "");
     const absolute = raw.match(/https?:\/\/[^\s"'<>)]*(?:carfax|report|history)[^\s"'<>)]*/i)?.[0];
     if (absolute && /\.(?:svg|png|jpe?g|webp|avif|css|js)(?:$|[?#])/i.test(absolute)) return undefined;
-    if (absolute) return absolute;
+    if (absolute) return sanitizeCarfaxUrl(absolute);
     const relative = raw.match(/\/[A-Za-z0-9._~:/?#[\]@!$&()*+,;=%-]*(?:carfax|report|history)[A-Za-z0-9._~:/?#[\]@!$&()*+,;=%-]*/i)?.[0];
-    if (relative && !/\.(?:svg|png|jpe?g|webp|avif|css|js)(?:$|[?#])/i.test(relative)) return relative;
+    if (relative && !/\.(?:svg|png|jpe?g|webp|avif|css|js)(?:$|[?#])/i.test(relative)) return sanitizeCarfaxUrl(relative);
     return undefined;
+  }
+
+  function sanitizeCarfaxUrl(value) {
+    const raw = String(value || "");
+    if (!raw || /^\s*(javascript|data|vbscript):/i.test(raw)) return undefined;
+    try {
+      const url = new URL(raw, "https://app.openlane.ca");
+      if (!/^https?:$/i.test(url.protocol)) return undefined;
+      for (const key of Array.from(url.searchParams.keys())) {
+        const paramValue = url.searchParams.get(key) || "";
+        if (isSensitiveText(`${key} ${paramValue}`) || /\[redacted/i.test(`${key} ${paramValue}`)) url.searchParams.delete(key);
+      }
+      return /^https?:\/\//i.test(raw) ? `${url.origin}${url.pathname}${url.search}` : `${url.pathname}${url.search}`;
+    } catch {
+      return undefined;
+    }
+  }
+
+  function sanitizeCarfaxEvidenceText(value) {
+    return String(value || "")
+      .replace(/\b(?:auth|authorization|cookie|token|secret|credential|session|password|csrf|jwt|bearer)\s*[:=]\s*[^,\s"'<>]+/gi, "[redacted]")
+      .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, "[redacted]")
+      .replace(/\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b/g, "[redacted]")
+      .slice(0, 1000);
   }
 
   function extractCarfaxEvidenceFromHtml(html) {

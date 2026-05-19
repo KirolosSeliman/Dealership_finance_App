@@ -219,6 +219,19 @@ test("OpenLane network observer creates structured candidates for vehicle JSON",
   assert.ok(candidates.conditionCandidates.some((item) => /Check engine/i.test(item.text)));
 });
 
+test("OpenLane network observer maps Carfax URL evidence and strips sensitive query params", () => {
+  const candidates = networkObserver.extractCandidatesFromNetworkPayload({
+    vehicle: {
+      vin: "2T3R1RFV5MW123456",
+      carfaxReportUrl: "/vehicle-history/carfax/RAV4?token=secret-token&view=summary",
+    },
+  }, "https://app.openlane.ca/api/vdp/123");
+  const candidate = candidates.fieldCandidates.find((item) => item.field === "carfaxUrl");
+
+  assert.equal(candidate?.value, "https://app.openlane.ca/vehicle-history/carfax/RAV4");
+  assert.doesNotMatch(JSON.stringify(candidates), /secret-token|token=/i);
+});
+
 test("OpenLane network merge fills missing fields but preserves verified fee outcomes", () => {
   const candidates = networkObserver.extractCandidatesFromNetworkPayload({
     vehicle: {

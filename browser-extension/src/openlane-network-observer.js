@@ -522,7 +522,7 @@
       source,
       endpointPattern: endpoint,
       confidence,
-      sourceText: String(sourceText || "").slice(0, 240),
+      sourceText: sanitizeString(sourceText || "").slice(0, 240),
       capturedAt,
     };
   }
@@ -594,7 +594,13 @@
     const candidate = absolute || relative;
     if (!candidate || /\.(?:svg|png|jpe?g|webp|avif|css|js)(?:$|[?#])/i.test(candidate)) return "";
     try {
-      return new URL(candidate, String(baseUrl || root.location?.href || "https://app.openlane.ca/")).href;
+      const url = new URL(candidate, String(baseUrl || root.location?.href || "https://app.openlane.ca/"));
+      if (!/^https?:$/i.test(url.protocol)) return "";
+      for (const key of Array.from(url.searchParams.keys())) {
+        const paramValue = url.searchParams.get(key) || "";
+        if (SENSITIVE_KEY.test(`${key} ${paramValue}`) || /\[redacted/i.test(`${key} ${paramValue}`)) url.searchParams.delete(key);
+      }
+      return url.href;
     } catch {
       return "";
     }

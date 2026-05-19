@@ -385,6 +385,28 @@ test("OpenLane CARFAX resolver scans safe generic attributes and rejects asset U
   assert.equal((logoOnly.openlaneMetadata as { carfaxDiagnostics?: { carfaxLinkCandidateCount?: number } }).carfaxDiagnostics?.carfaxLinkCandidateCount, 0);
 });
 
+test("OpenLane CARFAX resolver recovers router metadata and strips sensitive query params", () => {
+  const router = extractor.extractOpenLaneFixture(
+    fixture("openlane-vdp-carfax-router-metadata.html"),
+    "https://app.openlane.ca/vdp/KNAE55LC7J6040713",
+  );
+  const sensitiveQuery = extractor.extractOpenLaneFixture(`
+    <main class="vdp-page">
+      <h1>2018 Kia Stinger</h1>
+      <p>VIN KNAE55LC7J6040713</p>
+      <p>Odometer 111,486 KM</p>
+      <a href="/vehicle-history/carfax/STINGER123?token=secret-token&safe=1">CARFAX Canada report</a>
+      <section class="bid-panel">Current bid $13,700</section>
+    </main>
+  `, "https://app.openlane.ca/vdp/KNAE55LC7J6040713");
+
+  assert.equal(router.carfaxUrl, "https://app.openlane.ca/vehicle-history/carfax/STINGER123");
+  assert.equal(router.carfaxUrlStatus, "url_found");
+  assert.ok((router.openlaneMetadata as { carfaxEvidence?: Array<{ source?: string }> }).carfaxEvidence?.some((item) => /html_|safe_dom_attributes/.test(String(item.source))));
+  assert.equal(sensitiveQuery.carfaxUrl, "https://app.openlane.ca/vehicle-history/carfax/STINGER123?safe=1");
+  assert.doesNotMatch(String(sensitiveQuery.carfaxUrl), /secret-token|token=/i);
+});
+
 test("OpenLane CARFAX status is explicit for button text and missing pages", () => {
   const textOnly = extractor.extractOpenLaneFixture(`
     <main class="vdp-page">
