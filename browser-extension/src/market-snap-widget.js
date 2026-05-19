@@ -169,13 +169,14 @@
     const safeListing = listing || {};
     if (!listing) return "";
     return [
-      metric("Current bid", money(safeListing.currentBid || safeListing.listedPrice)),
-      metric("Current offer", money(safeListing.currentOffer)),
-      metric("Best offer", money(safeListing.bestOffer)),
-      metric("Buy now", money(safeListing.buyNowPrice)),
-      metric("Sold candidate", money(safeListing.soldPriceCandidate)),
-      metric("Buy price auction", money(safeListing.buyPriceAuction)),
-      metric("Invoice total", money(safeListing.totalInvoiceAmount || safeListing.finalAcquisitionCost)),
+      metric("Current bid", moneyOrDash(safeListing.currentBid || safeListing.listedPrice)),
+      metric("Current offer", moneyOrDash(safeListing.currentOffer)),
+      metric("Best offer", moneyOrDash(safeListing.bestOffer)),
+      metric("Buy now", moneyOrDash(safeListing.buyNowPrice)),
+      metric("Sold candidate", moneyOrDash(safeListing.soldPriceCandidate)),
+      metric("Buy price auction", moneyOrDash(safeListing.buyPriceAuction)),
+      metric("Final bid amount", moneyOrDash(safeListing.finalBidAmount)),
+      metric("Invoice total", moneyOrDash(safeListing.totalInvoiceAmount || safeListing.finalAcquisitionCost)),
       metric("Price state", priceStateLabel(safeListing)),
       metric("pageType", safeListing.pageType || "-"),
       metric("captureKind", safeListing.captureKind || "-"),
@@ -203,6 +204,7 @@
     const items = [
       message,
       readiness.blockedReason ? `Capture blocked: ${readiness.blockedReason}` : "",
+      ...diagnosticMessages(safeListing),
       safeListing.carfaxUrlStatus === "text_only" ? "Carfax text found, but no URL is visible." : "",
       listing && safeListing.captureLevel !== "deep_capture" ? "Deep Capture disabled: missing Dealer Flow URL or Organization ID, or disabled by user." : "",
       savedResultLabel(saveResult),
@@ -236,9 +238,11 @@
     const deepCaptureRuntime = safeListing.openlaneMetadata?.deepCaptureRuntime || {};
     const readiness = readinessSummary(safeListing);
     const vinCandidates = debug.vinCandidates || [];
+    const rejectedFieldCandidates = rejectedFieldCandidateItems(safeListing);
     return [
       `<p>Page type: ${safeHtml(safeListing.pageType || "-")}</p>`,
       `<p>Capture kind: ${safeHtml(safeListing.captureKind || "-")}</p>`,
+      `<p>Outcome confidence: ${safeHtml(safeListing.outcomeConfidence || "-")}</p>`,
       `<p>Capture level: ${safeHtml(safeListing.captureLevel || "basic_dom")}</p>`,
       `<p>Deep Capture active: ${safeHtml(String(Boolean(deepCaptureRuntime.active || safeListing.captureLevel === "deep_capture")))}</p>`,
       `<p>Deep Capture activation mode: ${safeHtml(safeListing.deepCaptureActivationMode || deepCaptureRuntime.deepCaptureActivationMode || "-")}</p>`,
@@ -257,6 +261,13 @@
       `<p>Network observer: ${safeHtml(networkObserverLabel(deepCaptureRuntime))}</p>`,
       `<p>Network evidence count: ${safeHtml(String(networkEvidenceCount(safeListing, deepCaptureRuntime)))}</p>`,
       networkObserverDiagnosticMessage(safeListing, deepCaptureRuntime) ? `<p>Network diagnostic: ${safeHtml(networkObserverDiagnosticMessage(safeListing, deepCaptureRuntime))}</p>` : "",
+      `<p>Price state: ${safeHtml(priceStateLabel(safeListing))}</p>`,
+      `<p>Current bid: ${safeHtml(moneyOrDash(safeListing.currentBid))}</p>`,
+      `<p>Sold price candidate: ${safeHtml(moneyOrDash(safeListing.soldPriceCandidate))}</p>`,
+      `<p>Buy price auction: ${safeHtml(moneyOrDash(safeListing.buyPriceAuction))}</p>`,
+      `<p>Final bid amount: ${safeHtml(moneyOrDash(safeListing.finalBidAmount))}</p>`,
+      `<p>Purchase evidence source: ${safeHtml(purchaseEvidenceSource(safeListing))}</p>`,
+      `<p>Ignored noisy zones: ${safeHtml(ignoredNoisyZonesLabel(safeListing))}</p>`,
       `<p>Safe expansion: ${safeHtml(safeExpansion ? `${safeExpansion.clicked?.length || 0} opened / ${safeExpansion.skipped?.length || 0} skipped` : "-")}</p>`,
       `<p>Missing data: ${safeHtml(missing.join(", ") || "-")}</p>`,
       `<p>Extraction confidence: ${safeHtml(valuation?.confidenceScore ?? safeListing.extractionConfidenceScore ?? "-")}</p>`,
@@ -266,6 +277,8 @@
       `<p>Condition warnings: ${safeHtml(conditionWarningItems(safeListing).length)}</p>`,
       `<p>Dealer notes: ${safeHtml(condition.dealerNotes ? "visible" : "-")}</p>`,
       `<p>Rejected candidates: ${safeHtml(rejectedCandidates)}</p>`,
+      `<p>Rejected field candidates: ${safeHtml(rejectedFieldCandidates.length || "-")}</p>`,
+      rejectedFieldCandidates.length ? `<ul>${rejectedFieldCandidates.slice(0, 5).map((item) => `<li>${safeHtml(item)}</li>`).join("")}</ul>` : "",
       `<p>Network candidates: ${safeHtml(networkCandidateCount(networkCandidates))}</p>`,
       `<p>Deep Capture runtime: ${safeHtml(deepCaptureRuntimeLabel(deepCaptureRuntime))}</p>`,
       `<p>Evidence</p>`,
@@ -303,6 +316,92 @@
     if (title?.text) return `${title.source || "title"} (${title.score || 0})`;
     const first = evidence?.[0];
     return first?.sourceText || first?.marker || first?.evidenceType || "-";
+  }
+
+  function diagnosticMessages(listing = {}) {
+    const safeListing = listing || {};
+    return [
+      classificationMessage(safeListing),
+      priceDiagnosticMessage(safeListing),
+      transportIgnoredMessage(safeListing),
+      safeListing.carfaxUrlStatus === "text_only" ? "Carfax text found, but no URL is exposed." : "",
+      networkObserverDiagnosticMessage(safeListing, safeListing.openlaneMetadata?.deepCaptureRuntime || {}),
+      ignoredNoisyZones(safeListing).length ? "Q&A/sidebar/market-guide text ignored for canonical fields." : "",
+    ].filter(Boolean);
+  }
+
+  function classificationMessage(listing = {}) {
+    const safeListing = listing || {};
+    if (safeListing.pageType === "purchase_detail" || safeListing.captureKind === "verified_outcome") {
+      return `Purchased VDP detected from ${purchaseEvidenceSource(safeListing)}.`;
+    }
+    if (safeListing.pageType === "active_listing" || safeListing.captureKind === "observation") {
+      return "Active listing detected. Current bid is observation-only.";
+    }
+    return "";
+  }
+
+  function priceDiagnosticMessage(listing = {}) {
+    const safeListing = listing || {};
+    if (safeListing.soldPriceCandidate || safeListing.buyPriceAuction) return "Sold price extracted from purchase panel.";
+    if (safeListing.currentBid && !safeListing.soldPriceCandidate) return "Current bid is observation-only and is not saved as a final sale label.";
+    return "";
+  }
+
+  function transportIgnoredMessage(listing = {}) {
+    const safeListing = listing || {};
+    const debug = safeListing.extractedFields?.debug || {};
+    const rejectedMileage = (debug.mileageCandidates || []).some((candidate) => /transport|distance|rate|delivery|pickup/i.test(candidate.rejectedReason || candidate.sourceText || ""));
+    const visibleTransport = /\btransport\b[\s\S]{0,80}\b(CAD|\$|km)\b/i.test(String(safeListing.rawVisibleText || safeListing.openlaneMetadata?.textRegions?.mainTextSample || ""));
+    if ((rejectedMileage || visibleTransport) && !safeListing.buyNowPrice && !safeListing.soldPriceCandidate) return "Transport estimate ignored as listing price.";
+    return "";
+  }
+
+  function purchaseEvidenceSource(listing = {}) {
+    const safeListing = listing || {};
+    const evidence = safeListing.outcomeEvidence || safeListing.openlaneMetadata?.classification?.evidence || [];
+    const first = evidence.find((item) => item.sourceText || item.marker || item.evidenceType) || {};
+    if (first.sourceText) return first.sourceText;
+    if (first.marker) return first.marker;
+    if (first.evidenceType) return first.evidenceType;
+    if (safeListing.buyPriceAuction || safeListing.soldPriceCandidate) return "purchase panel";
+    return "classification evidence";
+  }
+
+  function ignoredNoisyZones(listing = {}) {
+    const safeListing = listing || {};
+    const summary = safeListing.openlaneMetadata?.sectionMapSummary?.summary || {};
+    const fromSummary = Object.entries(summary)
+      .filter(([, value]) => value?.ignored && Number(value.textLength || 0) > 0)
+      .map(([name]) => name);
+    const fromEvidence = (safeListing.openlaneMetadata?.classification?.ignoredEvidence || [])
+      .map((item) => item.zone || String(item.marker || "").replace(/_text$/, ""))
+      .filter(Boolean);
+    return [...new Set([...fromSummary, ...fromEvidence])].slice(0, 8);
+  }
+
+  function ignoredNoisyZonesLabel(listing = {}) {
+    return ignoredNoisyZones(listing).join(", ") || "-";
+  }
+
+  function rejectedFieldCandidateItems(listing = {}) {
+    const debug = listing.extractedFields?.debug || {};
+    const items = [];
+    for (const [field, candidates] of Object.entries({
+      vin: debug.vinCandidates || [],
+      mileage: debug.mileageCandidates || [],
+      title: debug.titleCandidates || [],
+      carfax: debug.carfaxCandidates || [],
+    })) {
+      for (const candidate of candidates || []) {
+        const reason = candidate.rejectedReason || candidate.rejectionReason;
+        if (reason) items.push(`${field}: ${reason}`);
+      }
+    }
+    for (const item of debug.mediaRejected || []) {
+      if (item.reason || item.rejectedReason) items.push(`media: ${item.reason || item.rejectedReason}`);
+    }
+    return items.slice(0, 12);
   }
 
   function carfaxStatusLabel(listing) {
@@ -536,6 +635,11 @@
 
   function money(value) {
     return new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 }).format(Number(value || 0));
+  }
+
+  function moneyOrDash(value) {
+    if (value === undefined || value === null || value === "") return "-";
+    return money(value);
   }
 
   function number(value) {

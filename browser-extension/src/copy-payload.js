@@ -27,6 +27,7 @@
       classification,
       sectionMap,
       candidateScores: debug.candidateScores || debug.titleCandidates || [],
+      debugSummary: buildDebugSummary(safeListing),
       safeExpansion: safeListing.openlaneMetadata?.safeExpansion || state.safeExpansion || null,
       networkEvidence: safeListing.openlaneMetadata?.networkEvidence || [],
       readinessSummary,
@@ -59,10 +60,46 @@
       networkObserver: runtime.networkObserver || null,
       networkEvidenceCount: runtime.networkEvidenceCount ?? safeListing.openlaneMetadata?.networkEvidence?.length ?? 0,
       networkObserverMessage: networkObserverMessage(runtime, safeListing),
+      priceState: priceStateLabel(safeListing),
+      currentBid: safeListing.currentBid ?? null,
+      soldPriceCandidate: safeListing.soldPriceCandidate ?? null,
+      buyPriceAuction: safeListing.buyPriceAuction ?? null,
+      finalBidAmount: safeListing.finalBidAmount ?? null,
+      outcomeConfidence: safeListing.outcomeConfidence || "",
+      purchaseEvidenceSource: purchaseEvidenceSource(safeListing),
+      ignoredNoisyZones: ignoredNoisyZones(safeListing),
+      rejectedFieldCandidateCount: rejectedFieldCandidateItems(safeListing).length,
       safeExpansion: safeListing.openlaneMetadata?.safeExpansion || null,
       missingData: readiness.missingData || safeListing.missingData || [],
       extractionConfidence: safeListing.extractionConfidenceScore,
     });
+  }
+
+  function buildDebugSummary(listing = {}) {
+    const safeListing = listing || {};
+    const runtime = safeListing.openlaneMetadata?.deepCaptureRuntime || {};
+    return {
+      pageType: safeListing.pageType || "",
+      captureKind: safeListing.captureKind || "",
+      outcomeConfidence: safeListing.outcomeConfidence || "",
+      priceState: priceStateLabel(safeListing),
+      currentBid: safeListing.currentBid ?? null,
+      soldPriceCandidate: safeListing.soldPriceCandidate ?? null,
+      buyPriceAuction: safeListing.buyPriceAuction ?? null,
+      finalBidAmount: safeListing.finalBidAmount ?? null,
+      purchaseEvidenceSource: purchaseEvidenceSource(safeListing),
+      deepCaptureActive: Boolean(runtime.active || safeListing.captureLevel === "deep_capture"),
+      networkObserverEnabled: Boolean(runtime.networkObserver?.enabled),
+      networkEvidenceCount: runtime.networkEvidenceCount ?? safeListing.openlaneMetadata?.networkEvidence?.length ?? 0,
+      networkObserverMessage: networkObserverMessage(runtime, safeListing),
+      carfaxStatus: safeListing.carfaxUrlStatus || "missing",
+      carfaxDiagnostics: safeListing.openlaneMetadata?.carfaxDiagnostics || {},
+      vinStatus: !safeListing.vin ? "missing" : /^[A-HJ-NPR-Z0-9]{17}$/i.test(String(safeListing.vin)) ? "found" : "invalid",
+      vinEvidenceSource: safeListing.fieldEvidence?.vin?.[0]?.sourceType || safeListing.extractedFields?.vinEvidence?.matchedLabel || "",
+      ignoredNoisyZones: ignoredNoisyZones(safeListing),
+      rejectedFieldCandidates: rejectedFieldCandidateItems(safeListing),
+      diagnosticMessages: diagnosticMessages(safeListing),
+    };
   }
 
   function networkObserverMessage(runtime = {}, listing = {}) {
@@ -71,6 +108,90 @@
     if (observer.enabled && count === 0) {
       return "Network observer is enabled but no OpenLane vehicle JSON has been observed yet. Reload the VDP or check early hook/endpoint allowlist.";
     }
+    return "";
+  }
+
+  function priceStateLabel(listing = {}) {
+    const semantics = listing.priceSemantics || {};
+    if (semantics.finalBidAmount || semantics.acceptedAmount || semantics.buyPriceAuction || semantics.totalInvoiceAmount) return "verified outcome";
+    if (semantics.soldPriceCandidate || listing.captureKind === "candidate_outcome") return "candidate outcome";
+    if (semantics.currentBid || listing.captureKind === "observation") return "observation";
+    return "unknown";
+  }
+
+  function purchaseEvidenceSource(listing = {}) {
+    const evidence = listing.outcomeEvidence || listing.openlaneMetadata?.classification?.evidence || [];
+    const first = evidence.find((item) => item.sourceText || item.marker || item.evidenceType) || {};
+    if (first.sourceText) return first.sourceText;
+    if (first.marker) return first.marker;
+    if (first.evidenceType) return first.evidenceType;
+    if (listing.buyPriceAuction || listing.soldPriceCandidate) return "purchase panel";
+    return "";
+  }
+
+  function ignoredNoisyZones(listing = {}) {
+    const summary = listing.openlaneMetadata?.sectionMapSummary?.summary || {};
+    const fromSummary = Object.entries(summary)
+      .filter(([, value]) => value?.ignored && Number(value.textLength || 0) > 0)
+      .map(([name]) => name);
+    const fromEvidence = (listing.openlaneMetadata?.classification?.ignoredEvidence || [])
+      .map((item) => item.zone || String(item.marker || "").replace(/_text$/, ""))
+      .filter(Boolean);
+    return [...new Set([...fromSummary, ...fromEvidence])].slice(0, 8);
+  }
+
+  function rejectedFieldCandidateItems(listing = {}) {
+    const debug = listing.extractedFields?.debug || {};
+    const items = [];
+    for (const [field, candidates] of Object.entries({
+      vin: debug.vinCandidates || [],
+      mileage: debug.mileageCandidates || [],
+      title: debug.titleCandidates || [],
+      carfax: debug.carfaxCandidates || [],
+    })) {
+      for (const candidate of candidates || []) {
+        const reason = candidate.rejectedReason || candidate.rejectionReason;
+        if (reason) items.push({ field, rejectionReason: reason, sourceType: candidate.source || candidate.sourceType || "" });
+      }
+    }
+    for (const item of debug.mediaRejected || []) {
+      if (item.reason || item.rejectedReason) items.push({ field: "media", rejectionReason: item.reason || item.rejectedReason, sourceType: item.source || "" });
+    }
+    return items.slice(0, 12);
+  }
+
+  function diagnosticMessages(listing = {}) {
+    return [
+      classificationMessage(listing),
+      priceDiagnosticMessage(listing),
+      transportIgnoredMessage(listing),
+      listing.carfaxUrlStatus === "text_only" ? "Carfax text found, but no URL is exposed." : "",
+      networkObserverMessage(listing.openlaneMetadata?.deepCaptureRuntime || {}, listing),
+      ignoredNoisyZones(listing).length ? "Q&A/sidebar/market-guide text ignored for canonical fields." : "",
+    ].filter(Boolean);
+  }
+
+  function classificationMessage(listing = {}) {
+    if (listing.pageType === "purchase_detail" || listing.captureKind === "verified_outcome") {
+      return `Purchased VDP detected from ${purchaseEvidenceSource(listing) || "classification evidence"}.`;
+    }
+    if (listing.pageType === "active_listing" || listing.captureKind === "observation") {
+      return "Active listing detected. Current bid is observation-only.";
+    }
+    return "";
+  }
+
+  function priceDiagnosticMessage(listing = {}) {
+    if (listing.soldPriceCandidate || listing.buyPriceAuction) return "Sold price extracted from purchase panel.";
+    if (listing.currentBid && !listing.soldPriceCandidate) return "Current bid is observation-only and is not saved as a final sale label.";
+    return "";
+  }
+
+  function transportIgnoredMessage(listing = {}) {
+    const debug = listing.extractedFields?.debug || {};
+    const rejectedMileage = (debug.mileageCandidates || []).some((candidate) => /transport|distance|rate|delivery|pickup/i.test(candidate.rejectedReason || candidate.sourceText || ""));
+    const visibleTransport = /\btransport\b[\s\S]{0,80}\b(CAD|\$|km)\b/i.test(String(listing.rawVisibleText || listing.openlaneMetadata?.textRegions?.mainTextSample || ""));
+    if ((rejectedMileage || visibleTransport) && !listing.buyNowPrice && !listing.soldPriceCandidate) return "Transport estimate ignored as listing price.";
     return "";
   }
 

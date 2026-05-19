@@ -155,6 +155,7 @@ test("Market Snap widget exposes draggable, settings, and data-quality controls"
     "Capture debug",
     "Page type",
     "Capture kind",
+    "Outcome confidence",
     "Capture level",
     "Deep Capture active",
     "Deep Capture activation mode",
@@ -167,6 +168,10 @@ test("Market Snap widget exposes draggable, settings, and data-quality controls"
     "Price state",
     "Current offer",
     "Best offer",
+    "Final bid amount",
+    "Sold price candidate",
+    "Purchase evidence source",
+    "Ignored noisy zones",
     "pageType",
     "captureKind",
     "carfaxUrlStatus",
@@ -183,6 +188,7 @@ test("Market Snap widget exposes draggable, settings, and data-quality controls"
     "Condition warnings",
     "Dealer notes",
     "Rejected candidates",
+    "Rejected field candidates",
     "Network candidates",
     "Safe expansion",
     "Sold candidate",
@@ -216,6 +222,7 @@ test("Market Snap copy JSON includes normalized extraction, runtime evidence, an
   assert.match(source, /classification/);
   assert.match(source, /sectionMap/);
   assert.match(source, /candidateScores/);
+  assert.match(source, /debugSummary/);
   assert.match(source, /safeExpansion/);
   assert.match(source, /networkEvidence/);
   assert.match(source, /readinessSummary/);
@@ -256,7 +263,8 @@ test("Market Snap copy payload builder returns sanitized readiness and debug evi
     extractedFields: {
       debug: {
         vinCandidates: [{ vin: "KM8J3CA46HU123456", sourceText: "VIN KM8J3CA46HU123456" }],
-        titleCandidates: [{ text: "2017 Hyundai Tucson", score: 85 }],
+        titleCandidates: [{ text: "2017 Hyundai Tucson", score: 85 }, { text: "OpenLane Auction", rejectedReason: "non_vehicle_title" }],
+        mileageCandidates: [{ mileageKm: 185, sourceText: "Transport CAD $428 / 185km", rejectedReason: "transport_distance_not_odometer" }],
         apiToken: "Bearer should-not-copy",
       },
     },
@@ -279,6 +287,15 @@ test("Market Snap copy payload builder returns sanitized readiness and debug evi
         carfaxNetworkCandidateCount: 0,
         carfaxTextOnlyCandidateCount: 1,
       },
+      sectionMapSummary: {
+        summary: {
+          sidebar: { ignored: true, textLength: 24 },
+          marketGuide: { ignored: true, textLength: 19 },
+        },
+      },
+      classification: {
+        ignoredEvidence: [{ zone: "qaSection", sourceText: "Q&A" }],
+      },
     },
   }, {
     valuation: { confidenceScore: 88 },
@@ -292,8 +309,35 @@ test("Market Snap copy payload builder returns sanitized readiness and debug evi
   assert.equal((payload.readinessSummary as { networkEvidenceCount?: number }).networkEvidenceCount, 0);
   assert.equal((payload.readinessSummary as { carfaxDiagnostics?: { carfaxTextOnlyCandidateCount?: number } }).carfaxDiagnostics?.carfaxTextOnlyCandidateCount, 1);
   assert.match(String((payload.readinessSummary as { networkObserverMessage?: string }).networkObserverMessage), /enabled but no OpenLane vehicle JSON/i);
+  assert.equal((payload.readinessSummary as { priceState?: string }).priceState, "observation");
+  assert.deepEqual((payload.readinessSummary as { ignoredNoisyZones?: string[] }).ignoredNoisyZones, ["sidebar", "marketGuide", "qaSection"]);
+  assert.equal((payload.readinessSummary as { rejectedFieldCandidateCount?: number }).rejectedFieldCandidateCount, 2);
+  assert.match(JSON.stringify(payload.debugSummary), /Network observer is enabled but no OpenLane vehicle JSON/i);
+  assert.match(JSON.stringify(payload.debugSummary), /Q&A\/sidebar\/market-guide text ignored/i);
   assert.equal((payload.valuation as { confidenceScore?: number }).confidenceScore, 88);
   assert.doesNotMatch(JSON.stringify(payload), /should-not-copy|secret-token/i);
+});
+
+test("Market Snap widget debug UX explains purchased, active, Carfax, network, and noisy fields", () => {
+  const widget = readFileSync(join(repoRoot, "browser-extension/src/market-snap-widget.js"), "utf8");
+
+  for (const marker of [
+    "Purchased VDP detected from",
+    "Active listing detected. Current bid is observation-only.",
+    "Sold price extracted from purchase panel.",
+    "Transport estimate ignored as listing price.",
+    "Carfax text found, but no URL is exposed.",
+    "Network observer is enabled but no OpenLane vehicle JSON has been observed yet",
+    "Q&A/sidebar/market-guide text ignored for canonical fields.",
+    "purchaseEvidenceSource",
+    "ignoredNoisyZones",
+    "rejectedFieldCandidateItems",
+    "redactSensitiveText",
+  ]) {
+    assert.match(widget, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+
+  assert.doesNotMatch(widget, /requestHeaders|Authorization header|Cookie header/i);
 });
 
 test("Market Snap no-VIN OpenLane listings stay preview-only in the content script and widget", () => {
