@@ -21,3 +21,7 @@ Fixtures in this folder must be sanitized snapshots of visible page structure on
 - `openlane-network-vdp-response.json`, `openlane-network-carfax-response.json` — synthetic allowed vehicle JSON fixtures with secrets included only to verify redaction.
 - `openlane-route-change-a.html`, `openlane-route-change-b.html` — synthetic VDP route-change pair.
 - `openlane-post-sale-accepted.html`, `openlane-post-sale-pending.html`, `openlane-post-sale-rejected.html` — sanitized outcome fixtures for verified, pending, and rejected post-sale states.
+- `openlane-vdp-purchased-sold-price-picked-up.html` — sanitized purchased VDP variant with `Sold price`, `Order history`, and `Mark as picked up` text.
+- `openlane-vdp-active-current-bid-control.html` — active VDP control with current bid and transport estimate noise.
+- `openlane-vdp-noisy-qa-sidebar-market-guide.html` — Q&A/sidebar/market-guide pollution fixture for canonical-field zone tests.
+- `openlane-vdp-carfax-text-only-control.html` — CARFAX visible text without an exposed URL.
