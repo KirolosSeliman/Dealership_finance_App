@@ -73,6 +73,8 @@ const longerTextList = z.array(z.string().trim().min(1).max(240)).max(50).option
 const unsafeJsonKey = /(auth|authorization|cookie|token|secret|credential|session|password|csrf|jwt|bearer)/i;
 const unsafeUrlProtocol = /^\s*(javascript|data|vbscript):/i;
 const urlLikeKey = /\b(url|href|src|thumbnail|poster)\b/i;
+const noisyPriceEvidencePattern = /\b(bids|outbid|watchlist|photos?|disclosures?|videos?|transport\s+estimate|transport|delivery|pickup|distance|shipping|livraison|ramassage)\b|\/\s*km\b/i;
+const strongMoneyEvidencePattern = /(?:[$]|CAD|CA\$|USD|US\$)\s*\d|\d[\d,. ]*\s*(?:CAD|CA\$|USD|US\$)\b/i;
 
 const safeDeepRecord = (maxBytes: number, maxArrayLength = 120) => z.record(z.string(), z.unknown()).superRefine((value, context) => {
   const size = jsonByteLength(value);
@@ -439,6 +441,21 @@ function enforceCaptureContract(value: Partial<z.infer<typeof marketListingPaylo
   ] as const;
   const hasOutcomePrice = outcomePriceFields.some((field) => value[field] !== undefined);
   const hasVerifiedOutcomePrice = verifiedOutcomeFields.some((field) => value[field] !== undefined);
+  const canonicalPriceFields = [
+    "listedPrice",
+    "currentBid",
+    "currentOffer",
+    "bestOffer",
+    "buyNowPrice",
+    "reservePrice",
+    "soldPriceCandidate",
+    "finalBidAmount",
+    "negotiatedAmount",
+    "counterOfferAmount",
+    "acceptedAmount",
+    "buyPriceAuction",
+    "auctionHammerPrice",
+  ] as const;
 
   if (activeObservationPages.has(value.pageType ?? "") && value.captureKind && value.captureKind !== "observation") {
     context.addIssue({
@@ -496,6 +513,43 @@ function enforceCaptureContract(value: Partial<z.infer<typeof marketListingPaylo
     });
   }
 
+  for (const field of canonicalPriceFields) {
+    if (value[field] === undefined) continue;
+    const evidence = priceEvidenceForField(value, field);
+    const noisyEvidence = evidence.find((item) => isNoisyPriceEvidenceText(item.sourceText));
+    if (noisyEvidence) {
+      context.addIssue({
+        code: "custom",
+        path: ["fieldEvidence", field],
+        message: `${field} evidence appears to be a bid count, transport estimate, or non-price UI text.`,
+      });
+    }
+    if (isOpenLanePricePayload(value) && Number(value[field]) > 0 && Number(value[field]) < 100 && evidence.length > 0 && !hasStrongMoneyEvidence(evidence)) {
+      context.addIssue({
+        code: "custom",
+        path: ["fieldEvidence", field],
+        message: `${field} is unusually low and requires explicit money evidence, not count-like page text.`,
+      });
+    }
+  }
+
+  if (value.listedPrice !== undefined && activeObservationPages.has(value.pageType ?? "")) {
+    if (!value.priceSemantics?.listedPrice) {
+      context.addIssue({
+        code: "custom",
+        path: ["priceSemantics", "listedPrice"],
+        message: "OpenLane active listedPrice requires explicit price semantics.",
+      });
+    }
+    if (value.priceSemantics?.listedPrice && !["observation_alias_current_bid", "retail_label"].includes(value.priceSemantics.listedPrice)) {
+      context.addIssue({
+        code: "custom",
+        path: ["priceSemantics", "listedPrice"],
+        message: "OpenLane active listedPrice cannot be treated as an outcome or acquisition label.",
+      });
+    }
+  }
+
   for (const field of ["currentBid", "currentOffer", "bestOffer"] as const) {
     if (value.priceSemantics?.[field] && value.priceSemantics[field] !== "observation") {
       context.addIssue({
@@ -516,6 +570,39 @@ function enforceCaptureContract(value: Partial<z.infer<typeof marketListingPaylo
       });
     }
   }
+}
+
+function isOpenLanePricePayload(value: Partial<z.infer<typeof marketListingPayloadBaseSchema>>) {
+  return String(value.sourceName ?? "").toLowerCase().includes("openlane") || Boolean(value.pageType);
+}
+
+function priceEvidenceForField(
+  value: Partial<z.infer<typeof marketListingPayloadBaseSchema>>,
+  field: string,
+): Array<{ sourceText?: string; rejectionReason?: string }> {
+  const direct = value.fieldEvidence?.[field] ?? [];
+  const outcome = outcomeEvidenceFields.has(field)
+    ? (value.outcomeEvidence ?? []).map((item): { sourceText?: string; rejectionReason?: string } => ({ sourceText: item.sourceText }))
+    : [];
+  return [...direct, ...outcome].filter((item) => !item.rejectionReason);
+}
+
+const outcomeEvidenceFields = new Set([
+  "soldPriceCandidate",
+  "finalBidAmount",
+  "negotiatedAmount",
+  "counterOfferAmount",
+  "acceptedAmount",
+  "buyPriceAuction",
+  "auctionHammerPrice",
+]);
+
+function isNoisyPriceEvidenceText(value: unknown) {
+  return noisyPriceEvidencePattern.test(String(value ?? ""));
+}
+
+function hasStrongMoneyEvidence(evidence: Array<{ sourceText?: string }>) {
+  return evidence.some((item) => strongMoneyEvidencePattern.test(String(item.sourceText ?? "")) && !isNoisyPriceEvidenceText(item.sourceText));
 }
 
 function hasOutcomePriceEvidence(

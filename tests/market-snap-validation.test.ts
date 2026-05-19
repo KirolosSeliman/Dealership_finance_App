@@ -274,6 +274,138 @@ test("Market Snap validation accepts currentBid as observation without treating 
   assert.equal(result.data?.finalBidAmount, undefined);
 });
 
+test("Market Snap validation rejects bid-count evidence as canonical OpenLane price data", () => {
+  const currentBidCount = marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "active_listing",
+    captureKind: "observation",
+    title: "2018 Kia Stinger GT",
+    year: 2018,
+    make: "Kia",
+    model: "Stinger",
+    currentBid: 4,
+    priceSemantics: {
+      currentBid: "observation",
+    },
+    fieldEvidence: {
+      currentBid: [{
+        field: "currentBid",
+        value: 4,
+        normalizedValue: 4,
+        sourceType: "section_map",
+        sourceName: "OpenLane bid panel",
+        sourceText: "Current bid 4 Bids",
+        confidenceScore: 72,
+        capturedAt: "2026-05-18T12:00:00.000Z",
+      }],
+    },
+  });
+  const listedBidCount = marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "active_listing",
+    captureKind: "observation",
+    title: "2018 Kia Stinger GT",
+    year: 2018,
+    make: "Kia",
+    model: "Stinger",
+    listedPrice: 4,
+    priceSemantics: {
+      listedPrice: "observation_alias_current_bid",
+    },
+    fieldEvidence: {
+      listedPrice: [{
+        field: "listedPrice",
+        value: 4,
+        normalizedValue: 4,
+        sourceType: "section_map",
+        sourceName: "OpenLane bid panel",
+        sourceText: "Current bid 4 Bids",
+        confidenceScore: 72,
+        capturedAt: "2026-05-18T12:00:00.000Z",
+      }],
+    },
+  });
+
+  assert.equal(currentBidCount.success, false);
+  assert.equal(listedBidCount.success, false);
+});
+
+test("Market Snap validation preserves valid low OpenLane current bids with strong money evidence", () => {
+  const result = marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "active_listing",
+    captureKind: "observation",
+    title: "2018 Kia Stinger GT",
+    year: 2018,
+    make: "Kia",
+    model: "Stinger",
+    currentBid: 4,
+    priceSemantics: {
+      currentBid: "observation",
+    },
+    fieldEvidence: {
+      currentBid: [{
+        field: "currentBid",
+        value: 4,
+        normalizedValue: 4,
+        sourceType: "section_map",
+        sourceName: "OpenLane bid panel",
+        sourceText: "Current bid $4",
+        confidenceScore: 92,
+        capturedAt: "2026-05-18T12:00:00.000Z",
+      }],
+    },
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.data?.currentBid, 4);
+});
+
+test("Market Snap validation rejects transport evidence as canonical OpenLane price data", () => {
+  for (const field of ["currentBid", "listedPrice", "soldPriceCandidate"] as const) {
+    const result = marketListingPayloadSchema.safeParse({
+      organizationId,
+      sourceName: "OpenLane",
+      sourceType: "auction",
+      pageType: field === "soldPriceCandidate" ? "purchase_detail" : "active_listing",
+      captureKind: field === "soldPriceCandidate" ? "candidate_outcome" : "observation",
+      title: "2017 Hyundai Tucson",
+      year: 2017,
+      make: "Hyundai",
+      model: "Tucson",
+      [field]: 428,
+      priceSemantics: {
+        [field]: field === "soldPriceCandidate" ? "candidate_wholesale_label" : "observation",
+      },
+      outcomeEvidence: field === "soldPriceCandidate" ? [{
+        evidenceType: "visible_page_text",
+        sourceText: "Transport estimate CAD $428 / 185km",
+        capturedAt: "2026-05-18T12:00:00.000Z",
+      }] : undefined,
+      fieldEvidence: {
+        [field]: [{
+          field,
+          value: 428,
+          normalizedValue: 428,
+          sourceType: "section_map",
+          sourceName: "OpenLane sidebar",
+          sourceText: "Transport estimate CAD $428 / 185km pickup to delivery",
+          confidenceScore: 70,
+          capturedAt: "2026-05-18T12:00:00.000Z",
+        }],
+      },
+    });
+
+    assert.equal(result.success, false, `${field} should reject transport evidence`);
+  }
+});
+
 test("Market Snap validation treats active offers as observation-only price fields", () => {
   const result = marketListingPayloadSchema.safeParse({
     organizationId,
