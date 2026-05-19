@@ -4,6 +4,7 @@
     "vehicleHero",
     "gallery",
     "bidPanel",
+    "activeBidBar",
     "vehicleSpecs",
     "transportBlock",
     "knownHistory",
@@ -34,6 +35,21 @@
       selectors: ["[class*='bid' i]", "[class*='offer' i]", "[class*='auction-panel' i]", "[data-testid*='bid' i]", "[data-testid*='offer' i]"],
       attr: ["bid-panel", "auction-panel", "offer-panel", "bid", "offer"],
       markers: [/\b(current bid|current offer|best offer|my offer|top bid|offre actuelle|meilleure offre|mise actuelle|enchere actuelle|ench\u00e8re actuelle)\b/i],
+    },
+    activeBidBar: {
+      selectors: [
+        "[class*='active-bid' i]",
+        "[class*='sticky-bid' i]",
+        "[class*='sticky-current-bid' i]",
+        "[class*='current-bid' i]",
+        "[data-testid*='active-current-bid' i]",
+        "[data-testid*='sticky-current-bid' i]",
+        "[data-testid*='current-bid' i]",
+      ],
+      attr: ["active-bid", "sticky-bid", "sticky-current-bid", "current-bid", "bid-footer", "proxy"],
+      markers: [
+        /\b(active|floor set|highest proxy applied|current bid|top bid|mise actuelle|enchere actuelle|ench\u00e8re actuelle|place bid|full bid history|min \$)\b/i,
+      ],
     },
     vehicleSpecs: {
       selectors: ["[class*='spec' i]", "[class*='detail' i]", "[data-testid*='spec' i]"],
@@ -114,9 +130,11 @@
       const spec = ZONES[zoneName];
       zones[zoneName] = buildDomZone(doc, zoneName, spec, allText);
     }
+    zones.activeBidBar = buildActiveBidBarDomZone(doc, allText, zones.footer?.text);
 
     const allTextWithoutIgnored = removeKnownNoise(allText, ignoredZoneTexts(zones));
     for (const zoneName of ZONE_ORDER.filter((name) => name !== "unknownMain" && !ZONES[name]?.ignored)) {
+      if (zoneName === "activeBidBar") continue;
       const spec = ZONES[zoneName];
       zones[zoneName] = buildDomZone(doc, zoneName, spec, allTextWithoutIgnored);
     }
@@ -159,10 +177,12 @@
       const spec = ZONES[zoneName];
       zones[zoneName] = buildHtmlZone(source, zoneName, spec, allText);
     }
+    zones.activeBidBar = buildActiveBidBarHtmlZone(source, allText, zones.footer?.text);
 
     const sourceWithoutIgnored = removeHtmlBlocks(source, ignoredBlocks);
     const allTextWithoutIgnored = normalizeSpace(`${stripTags(sourceWithoutIgnored)}\n${extractAttributeText(sourceWithoutIgnored)}`).slice(0, RAW_TEXT_LIMIT);
     for (const zoneName of ZONE_ORDER.filter((name) => name !== "unknownMain" && !ZONES[name]?.ignored)) {
+      if (zoneName === "activeBidBar") continue;
       const spec = ZONES[zoneName];
       zones[zoneName] = buildHtmlZone(sourceWithoutIgnored, zoneName, spec, allTextWithoutIgnored);
     }
@@ -188,6 +208,48 @@
     const markerText = textAroundMarkers(allText, spec.markers || []);
     const text = combineText([attrText, markerText]);
     return zone(zoneName, text, evidenceFor(zoneName, text, attrText ? "attribute" : markerText ? "marker" : ""), Boolean(spec.ignored));
+  }
+
+  function buildActiveBidBarDomZone(doc, allText = "", footerText = "") {
+    const spec = ZONES.activeBidBar;
+    const selectorText = textFromNodes(queryAll(doc, spec.selectors || []));
+    const selectorBidText = activeBidBarTextFromSource(selectorText);
+    const footerBidText = activeBidBarTextFromSource(footerText);
+    const text = selectorBidText || footerBidText || activeBidBarTextFromSource(allText);
+    return zone("activeBidBar", text, evidenceFor("activeBidBar", text, selectorText ? "selector" : text ? "marker" : ""), false);
+  }
+
+  function buildActiveBidBarHtmlZone(source, allText = "", footerText = "") {
+    const spec = ZONES.activeBidBar;
+    const attrText = stripTags(blocksByAttr(source, spec.attr || []).join("\n"));
+    const attrBidText = activeBidBarTextFromSource(attrText);
+    const footerBidText = activeBidBarTextFromSource(footerText);
+    const text = attrBidText || footerBidText || activeBidBarTextFromSource(allText);
+    return zone("activeBidBar", text, evidenceFor("activeBidBar", text, attrText ? "attribute" : text ? "marker" : ""), false);
+  }
+
+  function activeBidBarTextFromSource(source) {
+    const text = String(source || "");
+    if (!text) return "";
+    const snippets = [];
+    const marker = /\b(highest proxy applied|current bid|top bid|mise actuelle|enchere actuelle|ench\u00e8re actuelle)\b/ig;
+    for (const match of text.matchAll(marker)) {
+      const index = match.index || 0;
+      const snippet = normalizeSpace(text.slice(Math.max(0, index - 120), index + 360));
+      if (!looksLikeActiveBidBar(snippet)) continue;
+      snippets.push(snippet);
+      if (snippets.length >= 4) break;
+    }
+    return combineText(snippets).slice(0, RAW_TEXT_LIMIT);
+  }
+
+  function looksLikeActiveBidBar(text) {
+    const value = String(text || "");
+    if (!/\b(current bid|top bid|highest proxy applied|mise actuelle|enchere actuelle|ench\u00e8re actuelle)\b/i.test(value)) return false;
+    if (!/(?:CA\$|CAD|\$|\d[\d,.\s]*\$)/i.test(value)) return false;
+    if (!/\b(active|floor set|bids?|full bid history|place bid|proxy|min\s*\$|current bid|top bid|highest proxy applied)\b/i.test(value)) return false;
+    if (/\b(privacy|terms|legal footer|conditions d'utilisation|billing|account settings)\b/i.test(value)) return false;
+    return true;
   }
 
   function zone(name, text, evidence = [], ignored = false) {

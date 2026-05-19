@@ -456,6 +456,44 @@ test("OpenLane section map isolates noisy English VDP regions", () => {
   assert.notEqual(classification.pageType, "purchase_list");
 });
 
+test("OpenLane section map exposes a narrow active bid bar from sticky footer controls", () => {
+  const html = fixture("openlane-vdp-active-current-bid-proxy-history.html");
+  const map = sectionMap.buildOpenLaneSectionMapFromHtml(html, "https://app.openlane.ca/vdp/KM8J3CA46HU654321");
+
+  assert.equal(map.zones.footer.ignored, true);
+  assert.match(String(map.zones.activeBidBar?.text), /Highest proxy applied/i);
+  assert.match(String(map.zones.activeBidBar?.text), /\$21,000/);
+  assert.match(String(map.zones.activeBidBar?.text), /Current bid/i);
+  assert.match(String(map.zones.activeBidBar?.text), /2 Bids/i);
+  assert.doesNotMatch(String(map.zones.activeBidBar?.text), /Full bid history[\s\S]*Bidder 1/i);
+  assert.ok(String(map.zones.activeBidBar?.text).length <= 12000);
+});
+
+test("OpenLane section map does not promote legal footer or sidebar text to active bid bar", () => {
+  const html = `
+    <!doctype html>
+    <html>
+      <body>
+        <aside class="sidebar">Purchases Browse On hold Closing</aside>
+        <main data-testid="vehicle-detail-page">
+          <section class="vehicle-hero" data-vin="2HGFC2F59KH123456">
+            <h1>2019 Honda Civic EX</h1>
+            <p>Odometer 88,210 KM</p>
+          </section>
+        </main>
+        <footer class="legal-footer">
+          Privacy Terms Legal footer OpenLane support
+        </footer>
+      </body>
+    </html>
+  `;
+  const map = sectionMap.buildOpenLaneSectionMapFromHtml(html, "https://app.openlane.ca/vdp/2HGFC2F59KH123456");
+
+  assert.equal(map.zones.footer.ignored, true);
+  assert.equal(String(map.zones.activeBidBar?.text || "").trim(), "");
+  assert.doesNotMatch(String(map.mainText), /Privacy|Terms|Purchases Browse/i);
+});
+
 test("OpenLane section map isolates noisy French VDP regions", () => {
   const html = fixture("openlane-french-vdp-noisy-sidebar.html");
   const map = sectionMap.buildOpenLaneSectionMapFromHtml(html, "https://app.openlane.ca/vdp/fr-vehicle?tab=active");
