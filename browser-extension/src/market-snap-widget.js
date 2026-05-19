@@ -239,6 +239,7 @@
     const readiness = readinessSummary(safeListing);
     const vinCandidates = debug.vinCandidates || [];
     const rejectedFieldCandidates = rejectedFieldCandidateItems(safeListing);
+    const priceDiagnostics = buildPriceDiagnostics(safeListing);
     return [
       `<p>Page type: ${safeHtml(safeListing.pageType || "-")}</p>`,
       `<p>Capture kind: ${safeHtml(safeListing.captureKind || "-")}</p>`,
@@ -263,6 +264,13 @@
       networkObserverDiagnosticMessage(safeListing, deepCaptureRuntime) ? `<p>Network diagnostic: ${safeHtml(networkObserverDiagnosticMessage(safeListing, deepCaptureRuntime))}</p>` : "",
       `<p>Price state: ${safeHtml(priceStateLabel(safeListing))}</p>`,
       `<p>Current bid: ${safeHtml(moneyOrDash(safeListing.currentBid))}</p>`,
+      `<p>Current bid source: ${safeHtml(priceDiagnostics.currentBidSource || "-")}</p>`,
+      `<p>Current bid source text: ${safeHtml(priceDiagnostics.currentBidSourceText || "-")}</p>`,
+      `<p>Current bid confidence: ${safeHtml(priceDiagnostics.currentBidConfidence ?? "-")}</p>`,
+      priceDiagnostics.rejectedPriceCandidates?.length ? `<p>Rejected price candidates: ${safeHtml(String(priceDiagnostics.rejectedPriceCandidates.length))}</p>` : "",
+      priceDiagnostics.rejectedPriceCandidates?.length ? `<ul>${priceDiagnostics.rejectedPriceCandidates.slice(0, 5).map((item) => `<li>${safeHtml(rejectedPriceCandidateLabel(item))}</li>`).join("")}</ul>` : "",
+      `<p>Listed price source: ${safeHtml(priceDiagnostics.listedPriceSource || "-")}</p>`,
+      `<p>Listed price semantics: ${safeHtml(priceDiagnostics.listedPriceSemantics || "-")}</p>`,
       `<p>Sold price candidate: ${safeHtml(moneyOrDash(safeListing.soldPriceCandidate))}</p>`,
       `<p>Buy price auction: ${safeHtml(moneyOrDash(safeListing.buyPriceAuction))}</p>`,
       `<p>Final bid amount: ${safeHtml(moneyOrDash(safeListing.finalBidAmount))}</p>`,
@@ -273,7 +281,7 @@
       `<p>Extraction confidence: ${safeHtml(valuation?.confidenceScore ?? safeListing.extractionConfidenceScore ?? "-")}</p>`,
       `<p>Warnings: ${safeHtml(warnings.length)}</p>`,
       `<p>Top evidence: ${safeHtml(topEvidenceLabel(evidence, debug))}</p>`,
-      `<p>Price evidence: ${safeHtml(debug.priceCandidates?.[0]?.label || "-")}</p>`,
+      `<p>Price evidence: ${safeHtml(priceDiagnostics.currentBidSource || debug.priceCandidates?.[0]?.label || "-")}</p>`,
       `<p>Condition warnings: ${safeHtml(conditionWarningItems(safeListing).length)}</p>`,
       `<p>Dealer notes: ${safeHtml(condition.dealerNotes ? "visible" : "-")}</p>`,
       `<p>Rejected candidates: ${safeHtml(rejectedCandidates)}</p>`,
@@ -323,6 +331,7 @@
     return [
       classificationMessage(safeListing),
       priceDiagnosticMessage(safeListing),
+      ...priceRejectionMessages(safeListing),
       transportIgnoredMessage(safeListing),
       safeListing.carfaxUrlStatus === "text_only" ? "Carfax text found, but no URL is exposed." : "",
       networkObserverDiagnosticMessage(safeListing, safeListing.openlaneMetadata?.deepCaptureRuntime || {}),
@@ -345,7 +354,49 @@
     const safeListing = listing || {};
     if (safeListing.soldPriceCandidate || safeListing.buyPriceAuction) return "Sold price extracted from purchase panel.";
     if (safeListing.currentBid && !safeListing.soldPriceCandidate) return "Current bid is observation-only and is not saved as a final sale label.";
+    if ((safeListing.pageType === "active_listing" || safeListing.captureKind === "observation") && !safeListing.currentBid) return "Current bid not found. Active listing remains observation-only.";
     return "";
+  }
+
+  function priceRejectionMessages(listing = {}) {
+    return buildPriceDiagnostics(listing).rejectedPriceCandidates
+      .filter((candidate) => /bid_count_not_money/i.test(candidate.rejectionReason || ""))
+      .map((candidate) => `Rejected bid count as price: ${candidate.sourceText || candidate.value}`)
+      .slice(0, 3);
+  }
+
+  function buildPriceDiagnostics(listing = {}) {
+    const safeListing = listing || {};
+    const debug = safeListing.extractedFields?.debug || {};
+    const currentBidEvidence = safeListing.extractedFields?.currentBidEvidence
+      || safeListing.fieldEvidence?.currentBid?.[0]
+      || {};
+    const rejectedPriceCandidates = (debug.priceCandidates || [])
+      .filter((candidate) => candidate.rejectedReason || candidate.rejectionReason)
+      .map((candidate) => ({
+        field: candidate.field || candidate.label || "price",
+        value: candidate.value ?? null,
+        sourceType: candidate.sourceType || candidate.source || "",
+        sourceName: candidate.sourceName || candidate.label || "",
+        sourceText: redactSensitiveText(candidate.sourceText || "").slice(0, 300),
+        rejectionReason: candidate.rejectedReason || candidate.rejectionReason,
+      }))
+      .slice(0, 8);
+    return {
+      currentBid: safeListing.currentBid ?? null,
+      currentBidSource: currentBidEvidence.sourceType || currentBidEvidence.matchedLabel || "",
+      currentBidSourceText: redactSensitiveText(currentBidEvidence.sourceText || "").slice(0, 300),
+      currentBidConfidence: currentBidEvidence.confidenceScore ?? null,
+      rejectedPriceCandidates,
+      listedPrice: safeListing.listedPrice ?? null,
+      listedPriceSource: debug.listedPriceDecision?.source || "",
+      listedPriceSemantics: safeListing.priceSemantics?.listedPrice || debug.listedPriceDecision?.semantics || "",
+    };
+  }
+
+  function rejectedPriceCandidateLabel(candidate = {}) {
+    const value = candidate.value !== null && candidate.value !== undefined ? `${candidate.value}: ` : "";
+    return `${value}${candidate.sourceText || candidate.sourceName || candidate.field} (${candidate.rejectionReason || "rejected"})`;
   }
 
   function transportIgnoredMessage(listing = {}) {

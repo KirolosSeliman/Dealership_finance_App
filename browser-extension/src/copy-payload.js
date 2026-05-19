@@ -15,6 +15,7 @@
       debug: safeListing.debug || null,
     };
     const readinessSummary = buildReadinessSummary(safeListing);
+    const priceDiagnostics = buildPriceDiagnostics(safeListing);
     const sectionMap = {
       summary: safeListing.openlaneMetadata?.sectionMapSummary || safeListing.debug?.sectionMapSummary || null,
       textRegions: safeListing.openlaneMetadata?.textRegions || null,
@@ -31,6 +32,7 @@
       safeExpansion: safeListing.openlaneMetadata?.safeExpansion || state.safeExpansion || null,
       networkEvidence: safeListing.openlaneMetadata?.networkEvidence || [],
       readinessSummary,
+      priceDiagnostics,
       outcomeEvidence,
       debug,
       backendResponse: state.backendResponse,
@@ -62,6 +64,14 @@
       networkObserverMessage: networkObserverMessage(runtime, safeListing),
       priceState: priceStateLabel(safeListing),
       currentBid: safeListing.currentBid ?? null,
+      currentBidSource: buildPriceDiagnostics(safeListing).currentBidSource,
+      currentBidSourceText: buildPriceDiagnostics(safeListing).currentBidSourceText,
+      currentBidConfidence: buildPriceDiagnostics(safeListing).currentBidConfidence,
+      rejectedPriceCandidates: buildPriceDiagnostics(safeListing).rejectedPriceCandidates,
+      listedPrice: safeListing.listedPrice ?? null,
+      listedPriceSource: buildPriceDiagnostics(safeListing).listedPriceSource,
+      listedPriceSemantics: buildPriceDiagnostics(safeListing).listedPriceSemantics,
+      priceDiagnosticMessages: buildPriceDiagnostics(safeListing).priceDiagnosticMessages,
       soldPriceCandidate: safeListing.soldPriceCandidate ?? null,
       buyPriceAuction: safeListing.buyPriceAuction ?? null,
       finalBidAmount: safeListing.finalBidAmount ?? null,
@@ -84,6 +94,7 @@
       outcomeConfidence: safeListing.outcomeConfidence || "",
       priceState: priceStateLabel(safeListing),
       currentBid: safeListing.currentBid ?? null,
+      ...buildPriceDiagnostics(safeListing),
       soldPriceCandidate: safeListing.soldPriceCandidate ?? null,
       buyPriceAuction: safeListing.buyPriceAuction ?? null,
       finalBidAmount: safeListing.finalBidAmount ?? null,
@@ -109,6 +120,51 @@
       return "Network observer is enabled but no OpenLane vehicle JSON has been observed yet. Reload the VDP or check early hook/endpoint allowlist.";
     }
     return "";
+  }
+
+  function buildPriceDiagnostics(listing = {}) {
+    const debug = listing.extractedFields?.debug || {};
+    const currentBidEvidence = listing.extractedFields?.currentBidEvidence
+      || listing.fieldEvidence?.currentBid?.[0]
+      || {};
+    const rejectedPriceCandidates = (debug.priceCandidates || [])
+      .filter((candidate) => candidate.rejectedReason || candidate.rejectionReason)
+      .map((candidate) => ({
+        field: candidate.field || candidate.label || "price",
+        value: candidate.value ?? null,
+        sourceType: candidate.sourceType || candidate.source || "",
+        sourceName: candidate.sourceName || candidate.label || "",
+        sourceText: sanitizeText(candidate.sourceText || ""),
+        rejectionReason: candidate.rejectedReason || candidate.rejectionReason,
+      }))
+      .slice(0, 8);
+    return sanitizeDebugValue({
+      currentBid: listing.currentBid ?? null,
+      currentBidSource: currentBidEvidence.sourceType || currentBidEvidence.matchedLabel || "",
+      currentBidSourceText: currentBidEvidence.sourceText || "",
+      currentBidConfidence: currentBidEvidence.confidenceScore ?? null,
+      rejectedPriceCandidates,
+      listedPrice: listing.listedPrice ?? null,
+      listedPriceSource: debug.listedPriceDecision?.source || "",
+      listedPriceSemantics: listing.priceSemantics?.listedPrice || debug.listedPriceDecision?.semantics || "",
+      priceDiagnosticMessages: priceDiagnosticMessages(listing, rejectedPriceCandidates),
+    });
+  }
+
+  function priceDiagnosticMessages(listing = {}, rejectedPriceCandidates = []) {
+    return [
+      listing.currentBid ? `Current bid selected: ${moneyLabel(listing.currentBid)}.` : "Current bid not found. Active listing remains observation-only.",
+      ...rejectedPriceCandidates
+        .filter((candidate) => /bid_count_not_money/i.test(candidate.rejectionReason || ""))
+        .map((candidate) => `Rejected bid count as price: ${candidate.sourceText || candidate.value}`),
+      listing.priceSemantics?.listedPrice === "observation_alias_current_bid" ? "Listed price is an observation alias of current bid, not a final sale label." : "",
+    ].filter(Boolean);
+  }
+
+  function moneyLabel(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return "";
+    return `$${Math.round(number).toLocaleString("en-CA")}`;
   }
 
   function priceStateLabel(listing = {}) {

@@ -256,15 +256,28 @@ test("Market Snap copy payload builder returns sanitized readiness and debug evi
     captureKind: "observation",
     captureLevel: "deep_capture",
     vin: "KM8J3CA46HU123456",
+    currentBid: 13_700,
+    listedPrice: 13_700,
+    priceSemantics: { currentBid: "observation", listedPrice: "observation_alias_current_bid" },
     carfaxUrl: "https://www.carfax.ca/report/TUCSON123",
     carfaxUrlStatus: "url_found",
     extractionConfidenceScore: 92,
-    fieldEvidence: { vin: [{ sourceType: "header_chip", sourceText: "VIN KM8J3CA46HU123456" }] },
+    fieldEvidence: {
+      vin: [{ sourceType: "header_chip", sourceText: "VIN KM8J3CA46HU123456" }],
+      currentBid: [{ sourceType: "section_map", sourceText: "$13,700 token=should-not-copy", confidenceScore: 98 }],
+    },
     extractedFields: {
+      currentBidEvidence: { sourceType: "section_map", sourceText: "$13,700", confidenceScore: 98 },
       debug: {
         vinCandidates: [{ vin: "KM8J3CA46HU123456", sourceText: "VIN KM8J3CA46HU123456" }],
         titleCandidates: [{ text: "2017 Hyundai Tucson", score: 85 }, { text: "OpenLane Auction", rejectedReason: "non_vehicle_title" }],
         mileageCandidates: [{ mileageKm: 185, sourceText: "Transport CAD $428 / 185km", rejectedReason: "transport_distance_not_odometer" }],
+        priceCandidates: [
+          { field: "currentBid", value: 13_700, sourceType: "section_map", sourceText: "$13,700", confidenceScore: 98 },
+          { field: "currentBid", value: 4, sourceType: "section_map", sourceText: "Current bid 4 Bids", rejectedReason: "bid_count_not_money" },
+          { field: "currentBid", value: 9, sourceType: "section_map", sourceText: "authorization=secret-token 9 Bids", rejectedReason: "bid_count_not_money" },
+        ],
+        listedPriceDecision: { source: "current_bid", semantics: "observation_alias_current_bid" },
         apiToken: "Bearer should-not-copy",
       },
     },
@@ -310,6 +323,11 @@ test("Market Snap copy payload builder returns sanitized readiness and debug evi
   assert.equal((payload.readinessSummary as { carfaxDiagnostics?: { carfaxTextOnlyCandidateCount?: number } }).carfaxDiagnostics?.carfaxTextOnlyCandidateCount, 1);
   assert.match(String((payload.readinessSummary as { networkObserverMessage?: string }).networkObserverMessage), /enabled but no OpenLane vehicle JSON/i);
   assert.equal((payload.readinessSummary as { priceState?: string }).priceState, "observation");
+  assert.equal((payload.readinessSummary as { currentBidSource?: string }).currentBidSource, "section_map");
+  assert.match(String((payload.readinessSummary as { currentBidSourceText?: string }).currentBidSourceText), /\$13,700/);
+  assert.equal((payload.readinessSummary as { listedPriceSemantics?: string }).listedPriceSemantics, "observation_alias_current_bid");
+  assert.match(JSON.stringify((payload.priceDiagnostics as { rejectedPriceCandidates?: unknown[] }).rejectedPriceCandidates), /bid_count_not_money/);
+  assert.match(JSON.stringify((payload.priceDiagnostics as { priceDiagnosticMessages?: string[] }).priceDiagnosticMessages), /Rejected bid count as price: Current bid 4 Bids/);
   assert.deepEqual((payload.readinessSummary as { ignoredNoisyZones?: string[] }).ignoredNoisyZones, ["sidebar", "marketGuide", "qaSection"]);
   assert.equal((payload.readinessSummary as { rejectedFieldCandidateCount?: number }).rejectedFieldCandidateCount, 2);
   assert.match(JSON.stringify(payload.debugSummary), /Network observer is enabled but no OpenLane vehicle JSON/i);
@@ -329,6 +347,12 @@ test("Market Snap widget debug UX explains purchased, active, Carfax, network, a
     "Carfax text found, but no URL is exposed.",
     "Network observer is enabled but no OpenLane vehicle JSON has been observed yet",
     "Q&A/sidebar/market-guide text ignored for canonical fields.",
+    "Current bid source:",
+    "Current bid source text:",
+    "Rejected price candidates:",
+    "Listed price semantics:",
+    "Rejected bid count as price:",
+    "buildPriceDiagnostics",
     "purchaseEvidenceSource",
     "ignoredNoisyZones",
     "rejectedFieldCandidateItems",
