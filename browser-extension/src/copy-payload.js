@@ -69,6 +69,7 @@
       currentBidSourceText: buildPriceDiagnostics(safeListing).currentBidSourceText,
       currentBidConfidence: buildPriceDiagnostics(safeListing).currentBidConfidence,
       rejectedPriceCandidates: buildPriceDiagnostics(safeListing).rejectedPriceCandidates,
+      rejectedOutcomePriceCandidates: buildPriceDiagnostics(safeListing).rejectedOutcomePriceCandidates,
       listedPrice: safeListing.listedPrice ?? null,
       listedPriceSource: buildPriceDiagnostics(safeListing).listedPriceSource,
       listedPriceSemantics: buildPriceDiagnostics(safeListing).listedPriceSemantics,
@@ -184,12 +185,29 @@
       currentBidSourceText: currentBidEvidence.sourceText || "",
       currentBidConfidence: currentBidEvidence.confidenceScore ?? null,
       rejectedPriceCandidates,
+      rejectedOutcomePriceCandidates: rejectedOutcomePriceCandidates(listing, rejectedPriceCandidates),
       lowerBidCandidates,
       listedPrice: listing.listedPrice ?? null,
       listedPriceSource: debug.listedPriceDecision?.source || "",
       listedPriceSemantics: listing.priceSemantics?.listedPrice || debug.listedPriceDecision?.semantics || "",
       priceDiagnosticMessages: priceDiagnosticMessages(listing, rejectedPriceCandidates, lowerBidCandidates),
     });
+  }
+
+  function rejectedOutcomePriceCandidates(listing = {}, rejectedPriceCandidates = []) {
+    const debug = listing.extractedFields?.debug || {};
+    const explicit = Array.isArray(debug.rejectedPurchaseOutcomeCandidates) ? debug.rejectedPurchaseOutcomeCandidates : [];
+    const fallback = rejectedPriceCandidates.filter((candidate) => /outcome|purchase|transport_estimate|active_current_bid|bid_count/i.test(candidate.rejectionReason || ""));
+    return [...explicit, ...fallback]
+      .map((candidate) => ({
+        field: candidate.field || "soldPriceCandidate",
+        value: candidate.value ?? null,
+        sourceType: candidate.sourceType || candidate.source || "",
+        sourceName: candidate.sourceName || candidate.label || "",
+        sourceText: sanitizeText(candidate.sourceText || ""),
+        rejectionReason: candidate.rejectedReason || candidate.rejectionReason || "not_purchase_outcome_price",
+      }))
+      .slice(0, 8);
   }
 
   function priceDiagnosticMessages(listing = {}, rejectedPriceCandidates = [], lowerBidCandidates = []) {

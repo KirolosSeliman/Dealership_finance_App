@@ -173,7 +173,7 @@
       metric("Current offer", moneyOrDash(safeListing.currentOffer)),
       metric("Best offer", moneyOrDash(safeListing.bestOffer)),
       metric("Buy now", moneyOrDash(safeListing.buyNowPrice)),
-      metric("Sold candidate", moneyOrDash(safeListing.soldPriceCandidate)),
+      metric("Sold price", moneyOrDash(safeListing.soldPriceCandidate)),
       metric("Buy price auction", moneyOrDash(safeListing.buyPriceAuction)),
       metric("Final bid amount", moneyOrDash(safeListing.finalBidAmount)),
       metric("Invoice total", moneyOrDash(safeListing.totalInvoiceAmount || safeListing.finalAcquisitionCost)),
@@ -270,6 +270,8 @@
       `<p>Current bid confidence: ${safeHtml(priceDiagnostics.currentBidConfidence ?? "-")}</p>`,
       priceDiagnostics.rejectedPriceCandidates?.length ? `<p>Rejected price candidates: ${safeHtml(String(priceDiagnostics.rejectedPriceCandidates.length))}</p>` : "",
       priceDiagnostics.rejectedPriceCandidates?.length ? `<ul>${priceDiagnostics.rejectedPriceCandidates.slice(0, 5).map((item) => `<li>${safeHtml(rejectedPriceCandidateLabel(item))}</li>`).join("")}</ul>` : "",
+      priceDiagnostics.rejectedOutcomePriceCandidates?.length ? `<p>Rejected outcome price candidates: ${safeHtml(String(priceDiagnostics.rejectedOutcomePriceCandidates.length))}</p>` : "",
+      priceDiagnostics.rejectedOutcomePriceCandidates?.length ? `<ul>${priceDiagnostics.rejectedOutcomePriceCandidates.slice(0, 5).map((item) => `<li>${safeHtml(rejectedPriceCandidateLabel(item))}</li>`).join("")}</ul>` : "",
       priceDiagnostics.lowerBidCandidates?.length ? `<p>Lower bid candidates ignored: ${safeHtml(String(priceDiagnostics.lowerBidCandidates.length))}</p>` : "",
       priceDiagnostics.lowerBidCandidates?.length ? `<ul>${priceDiagnostics.lowerBidCandidates.slice(0, 5).map((item) => `<li>${safeHtml(rejectedPriceCandidateLabel(item))}</li>`).join("")}</ul>` : "",
       `<p>Listed price source: ${safeHtml(priceDiagnostics.listedPriceSource || "-")}</p>`,
@@ -401,11 +403,28 @@
       currentBidSourceText: redactSensitiveText(currentBidEvidence.sourceText || "").slice(0, 300),
       currentBidConfidence: currentBidEvidence.confidenceScore ?? null,
       rejectedPriceCandidates,
+      rejectedOutcomePriceCandidates: rejectedOutcomePriceCandidates(safeListing, rejectedPriceCandidates),
       lowerBidCandidates,
       listedPrice: safeListing.listedPrice ?? null,
       listedPriceSource: debug.listedPriceDecision?.source || "",
       listedPriceSemantics: safeListing.priceSemantics?.listedPrice || debug.listedPriceDecision?.semantics || "",
     };
+  }
+
+  function rejectedOutcomePriceCandidates(listing = {}, rejectedPriceCandidates = []) {
+    const debug = listing.extractedFields?.debug || {};
+    const explicit = Array.isArray(debug.rejectedPurchaseOutcomeCandidates) ? debug.rejectedPurchaseOutcomeCandidates : [];
+    const fallback = rejectedPriceCandidates.filter((candidate) => /outcome|purchase|transport_estimate|active_current_bid|bid_count/i.test(candidate.rejectionReason || ""));
+    return [...explicit, ...fallback]
+      .map((candidate) => ({
+        field: candidate.field || "soldPriceCandidate",
+        value: candidate.value ?? null,
+        sourceType: candidate.sourceType || candidate.source || "",
+        sourceName: candidate.sourceName || candidate.label || "",
+        sourceText: redactSensitiveText(candidate.sourceText || "").slice(0, 300),
+        rejectionReason: candidate.rejectedReason || candidate.rejectionReason || "not_purchase_outcome_price",
+      }))
+      .slice(0, 8);
   }
 
   function rejectedPriceCandidateLabel(candidate = {}) {

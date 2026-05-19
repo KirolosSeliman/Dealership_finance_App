@@ -59,6 +59,20 @@ def test_training_row_accepts_verified_openlane_accepted_amount():
     assert normalized["is_training_eligible"] is True
 
 
+def test_training_row_accepts_verified_openlane_buy_price_auction():
+    normalized = normalize_training_row(base_row(
+        buy_price_auction=4000,
+        sold_price_candidate=4000,
+        carfax_url_status="text_only",
+        vin="3KPFL4A72HE119966",
+    ))
+
+    assert normalized["target_price"] == 4000
+    assert normalized["target_source"] == "buy_price_auction"
+    assert normalized["target_confidence"] == "verified"
+    assert normalized["is_training_eligible"] is True
+
+
 def test_training_row_accepts_dealer_flow_actual_sale_price():
     normalized = normalize_training_row(base_row(
         source_name="Dealer Flow",
