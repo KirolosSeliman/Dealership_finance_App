@@ -380,7 +380,7 @@
 
   function attachStableCaptureMetadata(listing, readiness, result, bidStabilization) {
     const stabilization = bidStabilization?.metadata || result?.bidStabilization;
-    return {
+    const next = {
       ...listing,
       openlaneMetadata: {
         ...(listing.openlaneMetadata || {}),
@@ -389,6 +389,7 @@
         networkObserverStatus: result?.networkObserverStatus || undefined,
       },
     };
+    return root.DealerFlowOpenLaneExtractionContract?.applyOpenLaneExtractionContract?.(next) || next;
   }
 
   function isBidUnstable(listing = {}) {

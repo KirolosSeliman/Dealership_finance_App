@@ -43,6 +43,46 @@ test("extension saveListing omits valuation when widget has no valuation yet", a
   assert.equal("valuation" in (capturedBody || {}), false);
 });
 
+test("extension saveListing sends canonical OpenLane values instead of stale legacy fields", async () => {
+  let capturedBody: Record<string, unknown> | undefined;
+  const context = extensionContext({
+    fetch: async (_url: string, init: { body?: string }) => {
+      capturedBody = JSON.parse(String(init.body || "{}"));
+      return { ok: true, json: async () => ({ ok: true, id: "saved", marketListingId: "market", valuation: { confidenceScore: 40 } }) };
+    },
+  });
+  runExtensionScript(context, "browser-extension/src/openlane-extraction-contract.js");
+  runExtensionScript(context, "browser-extension/src/api-client.js");
+
+  const canonical = context.window.DealerFlowOpenLaneExtractionContract.createCanonicalOpenLaneState({
+    pageContext: { pageType: "active_listing", captureKind: "observation" },
+    activeAuction: {
+      currentBid: 14_200,
+      evidence: [{ field: "currentBid", sourceType: "section_map", sourceText: "Current bid $14,200" }],
+    },
+    readiness: { ready: true, state: "ready_to_capture", missingData: [] },
+  });
+
+  await context.window.DealerFlowMarketSnapApi.saveListing(
+    { dealerFlowBaseUrl: "https://dealer-flow.example", organizationId },
+    {
+      sourceName: "OpenLane",
+      title: "2017 Kia Forte",
+      pageType: "active_listing",
+      captureKind: "observation",
+      currentBid: 13_800,
+      openlaneCanonicalState: canonical,
+    },
+    null,
+  );
+
+  const listing = capturedBody?.listing as Record<string, unknown>;
+  assert.equal(listing.currentBid, 14_200);
+  assert.equal((listing.auctionObservation as { currentBid?: number })?.currentBid, 14_200);
+  assert.equal((listing.priceSemantics as { currentBid?: string })?.currentBid, "observation");
+  assert.equal((listing.openlaneCanonicalState as { activeAuction?: { currentBid?: number } })?.activeAuction?.currentBid, 14_200);
+});
+
 test("extension settings save preserves existing active Deep Capture consent fields", async () => {
   const syncStore: Record<string, unknown> = {
     dealerFlowBaseUrl: "https://dealer-flow.example",

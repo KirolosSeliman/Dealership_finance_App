@@ -408,6 +408,21 @@
     setCanonical(next, "conditionReportText", condition.conditionReportText);
     setCanonical(next, "missingData", readiness.missingData);
 
+    const previousPriceSemantics = next.priceSemantics || {};
+    next.priceSemantics = compact({
+      soldPriceCandidate: purchaseOutcome.soldPriceCandidate !== undefined ? "candidate_wholesale_label" : undefined,
+      finalBidAmount: purchaseOutcome.finalBidAmount !== undefined ? "wholesale_label" : undefined,
+      acceptedAmount: purchaseOutcome.acceptedAmount !== undefined ? "wholesale_label" : undefined,
+      buyPriceAuction: purchaseOutcome.buyPriceAuction !== undefined ? "acquisition_cost" : undefined,
+      totalInvoiceAmount: purchaseOutcome.totalInvoiceAmount !== undefined ? "acquisition_cost" : undefined,
+      finalAcquisitionCost: purchaseOutcome.finalAcquisitionCost !== undefined ? "acquisition_cost" : undefined,
+      ...previousPriceSemantics,
+      currentBid: activeAuction.currentBid !== undefined ? "observation" : previousPriceSemantics.currentBid,
+      currentOffer: activeAuction.currentOffer !== undefined ? "observation" : previousPriceSemantics.currentOffer,
+      bestOffer: activeAuction.bestOffer !== undefined ? "observation" : previousPriceSemantics.bestOffer,
+      buyNowPrice: activeAuction.buyNowPrice !== undefined ? "observation" : previousPriceSemantics.buyNowPrice,
+    });
+
     next.pageContext = compact({ ...(next.pageContext || {}), ...pageContext });
     next.identity = compact({ ...(next.identity || {}), ...identity });
     next.auctionObservation = compact({ ...(next.auctionObservation || {}), ...activeAuction });

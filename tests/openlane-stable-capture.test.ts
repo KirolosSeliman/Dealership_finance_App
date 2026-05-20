@@ -57,6 +57,8 @@ test("OpenLane stable capture finalizes after delayed SPA vehicle content appear
   assert.equal(result.readiness.vinStatus, "found");
   assert.equal(result.listing.vin, "KM8J3CA46HU123456");
   assert.equal(result.listing.mileageKm, 111486);
+  assert.equal((result.listing.openlaneCanonicalState as { readiness?: { readyToCapture?: boolean; state?: string } }).readiness?.readyToCapture, true);
+  assert.equal((result.listing.openlaneCanonicalState as { readiness?: { state?: string } }).readiness?.state, "ready_to_capture");
 });
 
 test("OpenLane stable capture blocks weak identity without VIN but allows VIN-backed capture", () => {

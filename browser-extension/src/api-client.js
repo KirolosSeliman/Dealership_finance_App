@@ -57,8 +57,9 @@
   async function analyzeListing(first, second) {
     const { settings, listing } = await requestArgs(first, second);
     validateMarketSnapSettings(settings);
+    const safeListing = canonicalListing(listing);
     return requestJson(settings, "/api/market-snap/analyze-listing", {
-      ...listing,
+      ...safeListing,
       organizationId: settings.organizationId,
     });
   }
@@ -66,9 +67,10 @@
   async function saveListing(first, second, third) {
     const { settings, listing, valuation } = await requestArgs(first, second, third);
     validateMarketSnapSettings(settings);
+    const safeListing = canonicalListing(listing);
     const body = {
       organizationId: settings.organizationId,
-      listing,
+      listing: safeListing,
     };
     if (valuation && typeof valuation === "object") body.valuation = valuation;
     return requestJson(settings, "/api/market-snap/save-listing", body);
@@ -77,8 +79,9 @@
   async function captureListing(first, second) {
     const { settings, listing } = await requestArgs(first, second);
     validateMarketSnapSettings(settings);
+    const safeListing = canonicalListing(listing);
     return requestJson(settings, "/api/market-snap/capture-listing", {
-      ...listing,
+      ...safeListing,
       organizationId: settings.organizationId,
     });
   }
@@ -115,6 +118,19 @@
   function buildDealerFlowUrl(path, settings) {
     const baseUrl = normalizeBaseUrl(settings);
     return `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
+  }
+
+  function canonicalListing(listing = {}) {
+    const safeListing = listing || {};
+    const canonical = safeListing.openlaneCanonicalState || safeListing.canonicalOpenLaneState;
+    const contract = window.DealerFlowOpenLaneExtractionContract;
+    if (canonical && typeof contract?.canonicalToLegacyPayload === "function") {
+      return contract.canonicalToLegacyPayload(canonical, safeListing);
+    }
+    if (/openlane/i.test(String(safeListing.sourceName || "")) && typeof contract?.applyOpenLaneExtractionContract === "function") {
+      return contract.applyOpenLaneExtractionContract(safeListing);
+    }
+    return safeListing;
   }
 
   function dealerFlowMarketSnapUrl(settings) {

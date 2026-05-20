@@ -1,6 +1,8 @@
 (function () {
   function buildCopyPayload(listing = {}, state = {}) {
-    const safeListing = canonicalListing(listing || {});
+    const rawListing = listing || {};
+    const safeListing = canonicalListing(rawListing);
+    const canonicalState = normalizeCanonicalState(safeListing);
     const classification = safeListing.openlaneMetadata?.classification || null;
     const outcomeEvidence = safeListing.outcomeEvidence || classification?.evidence || [];
     const debug = safeListing.extractedFields?.debug || {};
@@ -20,13 +22,22 @@
     const purchaseOutcomeDebug = buildPurchaseOutcomeDebug(safeListing, priceDiagnostics);
     const conditionCleanupDebug = buildConditionCleanupDebug(safeListing);
     const carfaxDebug = buildCarfaxDebug(safeListing);
-    const contradictionDiagnostics = buildContradictionDiagnostics(safeListing, {
+    const contradictionDiagnostics = buildContradictionDiagnostics(rawListing, {
+      safeListing,
       priceDiagnostics,
       currentBidDebug,
       purchaseOutcomeDebug,
       conditionCleanupDebug,
       carfaxDebug,
     });
+    const sourcePriorities = buildSourcePriorities(canonicalState, safeListing);
+    if (canonicalState) {
+      canonicalState.diagnostics = {
+        ...(canonicalState.diagnostics || {}),
+        sourcePriorities,
+      };
+    }
+    const rejectedCandidates = rejectedFieldCandidateItems(safeListing);
     const sectionMap = {
       summary: safeListing.openlaneMetadata?.sectionMapSummary || safeListing.debug?.sectionMapSummary || null,
       textRegions: safeListing.openlaneMetadata?.textRegions || null,
@@ -34,7 +45,13 @@
     };
     return sanitizeDebugValue({
       normalizedExtraction,
+      canonicalState,
       legacyPayload: safeListing,
+      diagnostics: {
+        sourcePriorities,
+        rejectedCandidates,
+        legacyOverrides: contradictionDiagnostics.legacyOverrides || [],
+      },
       valuation: state.valuation || null,
       classification,
       sectionMap,
@@ -321,7 +338,7 @@
   }
 
   function buildContradictionDiagnostics(listing = {}, parts = {}) {
-    const safeListing = canonicalListing(listing || {});
+    const safeListing = parts.safeListing || canonicalListing(listing || {});
     const priceDiagnostics = parts.priceDiagnostics || buildPriceDiagnostics(safeListing);
     const purchaseOutcomeDebug = parts.purchaseOutcomeDebug || buildPurchaseOutcomeDebug(safeListing, priceDiagnostics);
     const conditionCleanupDebug = parts.conditionCleanupDebug || buildConditionCleanupDebug(safeListing);
@@ -345,8 +362,94 @@
         ...(carfaxDebug.carfaxRejectedReasons || []).map((reason) => ({ reason })),
       ].filter(Boolean).slice(0, 8),
       networkContradictions: networkMessage ? [{ message: networkMessage }] : [],
+      legacyOverrides: buildLegacyOverrideDiagnostics(listing, safeListing),
       purchaseMarkerRejectedReasons: purchaseOutcomeDebug.purchaseMarkerRejectedReasons || [],
     });
+  }
+
+  function buildLegacyOverrideDiagnostics(original = {}, canonicalized = {}) {
+    const fields = [
+      "pageType",
+      "captureKind",
+      "currentBid",
+      "listedPrice",
+      "soldPriceCandidate",
+      "buyPriceAuction",
+      "finalBidAmount",
+      "carfaxUrlStatus",
+      "carfaxUrl",
+      "missingData",
+      "conditionReportText",
+    ];
+    const overrides = [];
+    for (const field of fields) {
+      const legacyValue = original?.[field];
+      const canonicalValue = canonicalized?.[field];
+      if (!isMeaningfulValue(legacyValue) || !isMeaningfulValue(canonicalValue)) continue;
+      if (sameDiagnosticValue(legacyValue, canonicalValue)) continue;
+      overrides.push({
+        legacyValueOverridden: true,
+        canonicalWinningField: field,
+        legacyValue,
+        canonicalValue,
+        sourceEvidence: evidenceForField(canonicalized, field),
+      });
+    }
+    return overrides.slice(0, 12);
+  }
+
+  function buildSourcePriorities(canonicalState = {}, listing = {}) {
+    const explicit = canonicalState?.diagnostics?.sourcePriorities || listing.debug?.fieldEvidenceSummary;
+    if (explicit && Object.keys(explicit).length) return explicit;
+    return compactObject({
+      vin: summarizeEvidence(canonicalState?.identity?.evidence?.[0] || listing.fieldEvidence?.vin?.[0]),
+      mileageKm: summarizeEvidence(canonicalState?.identity?.evidence?.find?.((item) => item?.field === "mileageKm") || listing.fieldEvidence?.mileageKm?.[0]),
+      currentBid: summarizeEvidence(canonicalState?.activeAuction?.evidence?.[0] || listing.fieldEvidence?.currentBid?.[0]),
+      soldPriceCandidate: summarizeEvidence(canonicalState?.purchaseOutcome?.evidence?.[0] || listing.fieldEvidence?.soldPriceCandidate?.[0]),
+      carfaxUrl: summarizeEvidence(canonicalState?.carfax?.evidence?.[0]),
+      condition: summarizeEvidence(canonicalState?.condition?.evidence?.[0]),
+    });
+  }
+
+  function summarizeEvidence(evidence) {
+    if (!evidence) return undefined;
+    return {
+      sourceType: evidence.sourceType || evidence.source || "",
+      sourceName: evidence.sourceName || "",
+      confidenceScore: evidence.confidenceScore ?? null,
+    };
+  }
+
+  function compactObject(value = {}) {
+    return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined && item !== null && item !== ""));
+  }
+
+  function evidenceForField(listing = {}, field = "") {
+    const evidence = listing.fieldEvidence?.[field]?.[0]
+      || listing.auctionObservation?.evidence?.find?.((item) => item?.field === field)
+      || listing.activeAuction?.evidence?.find?.((item) => item?.field === field)
+      || listing.purchaseOutcome?.evidence?.find?.((item) => item?.field === field)
+      || listing.carfax?.evidence?.[0]
+      || listing.condition?.evidence?.[0]
+      || null;
+    if (!evidence) return null;
+    return {
+      field: evidence.field || field,
+      sourceType: evidence.sourceType || evidence.source || "",
+      sourceName: evidence.sourceName || "",
+      sourceText: sanitizeText(evidence.sourceText || ""),
+      confidenceScore: evidence.confidenceScore ?? null,
+    };
+  }
+
+  function isMeaningfulValue(value) {
+    if (value === undefined || value === null || value === "") return false;
+    if (Array.isArray(value)) return value.length > 0;
+    return true;
+  }
+
+  function sameDiagnosticValue(left, right) {
+    return JSON.stringify(left) === JSON.stringify(right);
   }
 
   function purchaseMarkerRejectedEvidence(listing = {}) {
@@ -500,6 +603,13 @@
     const adapter = root.DealerFlowOpenLaneExtractionContract?.canonicalToLegacyPayload;
     if (canonical && typeof adapter === "function") return adapter(canonical, safeListing);
     return safeListing;
+  }
+
+  function normalizeCanonicalState(listing = {}) {
+    const root = typeof window !== "undefined" ? window : globalThis;
+    const normalizer = root.DealerFlowOpenLaneExtractionContract?.normalizeOpenLaneCanonicalState;
+    if (typeof normalizer === "function") return normalizer(listing || {});
+    return listing.openlaneCanonicalState || listing.canonicalOpenLaneState || null;
   }
 
   function classificationMessage(listing = {}) {

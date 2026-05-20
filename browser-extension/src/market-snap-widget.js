@@ -243,7 +243,7 @@
     const rejectedFieldCandidates = rejectedFieldCandidateItems(safeListing);
     const priceDiagnostics = buildPriceDiagnostics(safeListing);
     const currentBidDebug = buildCurrentBidDebug(safeListing, priceDiagnostics);
-    const contradictions = contradictionDiagnostics(safeListing, priceDiagnostics);
+    const contradictions = contradictionDiagnostics(listing || {}, priceDiagnostics, safeListing);
     const conditionDebug = conditionCleanupDebug(safeListing);
     return [
       `<p>Page type: ${safeHtml(safeListing.pageType || "-")}</p>`,
@@ -275,6 +275,8 @@
       `<p>Condition contradictions: ${safeHtml(String(contradictions.conditionContradictions.length))}</p>`,
       `<p>Carfax contradictions: ${safeHtml(String(contradictions.carfaxContradictions.length))}</p>`,
       `<p>Network contradictions: ${safeHtml(String(contradictions.networkContradictions.length))}</p>`,
+      `<p>Legacy overrides: ${safeHtml(String(contradictions.legacyOverrides.length))}</p>`,
+      contradictions.legacyOverrides.length ? `<ul>${contradictions.legacyOverrides.slice(0, 5).map((item) => `<li>${safeHtml(legacyOverrideLabel(item))}</li>`).join("")}</ul>` : "",
       `<p>Price state: ${safeHtml(priceStateLabel(safeListing))}</p>`,
       `<p>Current bid: ${safeHtml(moneyOrDash(safeListing.currentBid))}</p>`,
       `<p>Current bid source: ${safeHtml(priceDiagnostics.currentBidSource || "-")}</p>`,
@@ -487,10 +489,11 @@
     };
   }
 
-  function contradictionDiagnostics(listing = {}, priceDiagnostics = buildPriceDiagnostics(listing)) {
-    const rejectedMarkers = purchaseMarkerRejectedEvidence(listing);
-    const conditionDebug = conditionCleanupDebug(listing);
-    const networkMessage = networkObserverDiagnosticMessage(listing, listing.openlaneMetadata?.deepCaptureRuntime || {});
+  function contradictionDiagnostics(listing = {}, priceDiagnostics = buildPriceDiagnostics(listing), canonicalized) {
+    const safeListing = canonicalized || canonicalListing(listing || {});
+    const rejectedMarkers = purchaseMarkerRejectedEvidence(safeListing);
+    const conditionDebug = conditionCleanupDebug(safeListing);
+    const networkMessage = networkObserverDiagnosticMessage(safeListing, safeListing.openlaneMetadata?.deepCaptureRuntime || {});
     return {
       classificationContradictions: rejectedMarkers.map((item) => item.rejectedReason || item.rejectionReason || item.marker || "rejected_purchase_marker").slice(0, 8),
       priceContradictions: [
@@ -499,8 +502,9 @@
         ...(priceDiagnostics.rejectedOutcomePriceCandidates || []),
       ].slice(0, 12),
       conditionContradictions: conditionDebug.rejectedConditionLines || [],
-      carfaxContradictions: listing.carfaxUrlStatus === "text_only" ? ["carfax_text_visible_without_safe_url"] : [],
+      carfaxContradictions: safeListing.carfaxUrlStatus === "text_only" ? ["carfax_text_visible_without_safe_url"] : [],
       networkContradictions: networkMessage ? [networkMessage] : [],
+      legacyOverrides: legacyOverrideDiagnostics(listing, safeListing),
     };
   }
 
@@ -519,6 +523,51 @@
     return (classification.ignoredEvidence || [])
       .filter((item) => item?.rejectedReason || item?.rejectionReason || /purchase|pickup|paid|outcome|sold/i.test(`${item?.marker || ""} ${item?.sourceText || ""}`))
       .slice(0, 12);
+  }
+
+  function legacyOverrideDiagnostics(original = {}, canonicalized = {}) {
+    const fields = ["pageType", "captureKind", "currentBid", "listedPrice", "soldPriceCandidate", "buyPriceAuction", "finalBidAmount", "carfaxUrlStatus", "carfaxUrl", "missingData"];
+    return fields
+      .map((field) => {
+        const legacyValue = original?.[field];
+        const canonicalValue = canonicalized?.[field];
+        if (!diagnosticValuePresent(legacyValue) || !diagnosticValuePresent(canonicalValue) || JSON.stringify(legacyValue) === JSON.stringify(canonicalValue)) return null;
+        return {
+          legacyValueOverridden: true,
+          canonicalWinningField: field,
+          legacyValue,
+          canonicalValue,
+          sourceEvidence: legacyOverrideEvidence(canonicalized, field),
+        };
+      })
+      .filter(Boolean)
+      .slice(0, 12);
+  }
+
+  function legacyOverrideEvidence(listing = {}, field = "") {
+    const evidence = listing.fieldEvidence?.[field]?.[0]
+      || listing.activeAuction?.evidence?.find?.((item) => item?.field === field)
+      || listing.auctionObservation?.evidence?.find?.((item) => item?.field === field)
+      || listing.purchaseOutcome?.evidence?.find?.((item) => item?.field === field)
+      || listing.carfax?.evidence?.[0]
+      || null;
+    if (!evidence) return null;
+    return {
+      sourceType: evidence.sourceType || evidence.source || "",
+      sourceName: evidence.sourceName || "",
+      sourceText: redactSensitiveText(evidence.sourceText || "").slice(0, 180),
+      confidenceScore: evidence.confidenceScore ?? null,
+    };
+  }
+
+  function diagnosticValuePresent(value) {
+    if (value === undefined || value === null || value === "") return false;
+    if (Array.isArray(value)) return value.length > 0;
+    return true;
+  }
+
+  function legacyOverrideLabel(item = {}) {
+    return `legacyValueOverridden ${item.canonicalWinningField}: ${JSON.stringify(item.legacyValue)} -> ${JSON.stringify(item.canonicalValue)}`;
   }
 
   function purchaseMarkerRejectedReasons(listing = {}) {

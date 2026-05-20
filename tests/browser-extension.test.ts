@@ -522,10 +522,21 @@ test("Market Snap copy payload uses canonical OpenLane state over stale legacy f
     }),
   });
 
+  const canonicalState = payload.canonicalState as {
+    activeAuction?: { currentBid?: number };
+    purchaseOutcome?: { soldPriceCandidate?: number };
+    diagnostics?: { sourcePriorities?: Record<string, unknown> };
+  };
   const legacyPayload = payload.legacyPayload as { currentBid?: number; soldPriceCandidate?: number; carfaxUrlStatus?: string; missingData?: string[] };
   const readiness = payload.readinessSummary as { currentBid?: number; soldPriceCandidate?: number; carfaxStatus?: string; missingData?: string[] };
   const currentBidDebug = payload.currentBidDebug as { winningCurrentBid?: number };
+  const contradictionDiagnostics = payload.contradictionDiagnostics as {
+    legacyOverrides?: Array<{ legacyValueOverridden?: boolean; canonicalWinningField?: string; canonicalValue?: unknown }>;
+  };
 
+  assert.equal(canonicalState.activeAuction?.currentBid, 14_200);
+  assert.equal(canonicalState.purchaseOutcome?.soldPriceCandidate, 4_000);
+  assert.ok(canonicalState.diagnostics?.sourcePriorities);
   assert.equal(legacyPayload.currentBid, 14_200);
   assert.equal(legacyPayload.soldPriceCandidate, 4_000);
   assert.equal(legacyPayload.carfaxUrlStatus, "url_found");
@@ -535,6 +546,11 @@ test("Market Snap copy payload uses canonical OpenLane state over stale legacy f
   assert.equal(readiness.carfaxStatus, "url_found");
   assert.deepEqual(readiness.missingData, []);
   assert.equal(currentBidDebug.winningCurrentBid, 14_200);
+  assert.ok(contradictionDiagnostics.legacyOverrides?.some((item) => (
+    item.legacyValueOverridden === true
+    && item.canonicalWinningField === "currentBid"
+    && item.canonicalValue === 14_200
+  )));
 });
 
 test("Market Snap widget debug UX explains purchased, active, Carfax, network, and noisy fields", () => {
@@ -556,6 +572,8 @@ test("Market Snap widget debug UX explains purchased, active, Carfax, network, a
     "Network JSON observed but no vehicle/carfax/price candidates found.",
     "Network diagnostics:",
     "networkObserverDiagnosticsLabel",
+    "Legacy overrides:",
+    "legacyValueOverridden",
     "Q&A/sidebar/market-guide text ignored for canonical fields.",
     "Current bid source:",
     "Current bid source text:",
