@@ -31,6 +31,7 @@
         "src/market-snap-widget.js",
         "src/capture-runtime.js",
         "src/openlane-stable-capture.js",
+        "src/openlane-bid-live-monitor.js",
         "src/copy-payload.js",
         "src/content-script.js"
       ],

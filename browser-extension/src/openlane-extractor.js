@@ -720,6 +720,23 @@
     });
   }
 
+  function extractOpenLaneCurrentBidOnly(doc = document, href = safeCurrentHref(), options = {}) {
+    root.DealerFlowOpenLaneSectionMap?.clearOpenLaneExtractionCache?.(doc);
+    const textRegions = extractTextRegions(doc, href);
+    const result = extractCurrentBidFromBidPanel(textRegions, doc, {
+      mainText: textRegions.mainText,
+      networkEvidence: options.networkEvidence,
+    });
+    return {
+      currentBid: result.value,
+      evidence: result.evidence,
+      candidates: result.candidates,
+      lowerBidCandidates: result.lowerBidCandidates,
+      staleCurrentBidCandidates: result.staleCurrentBidCandidates,
+      diagnostics: result.diagnostics,
+    };
+  }
+
   function extractActiveListingCurrentBid({ sectionMap = {}, doc = document, networkEvidence = [], labelValues, mainText, footerText } = {}) {
     const candidates = [];
     const zones = sectionMap.zones || {};
@@ -2092,6 +2109,7 @@
     extractVisibleText,
     extractLabelValueMap,
     extractMoneyByLabels,
+    extractOpenLaneCurrentBidOnly,
     extractPurchaseOutcomePrice,
     extractMileage,
     extractVin,

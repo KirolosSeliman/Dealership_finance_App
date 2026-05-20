@@ -23,6 +23,7 @@
     saving: false,
     timer: 0,
     observer: null,
+    bidLiveMonitor: null,
     readyRetries: 0,
     pendingRun: null,
     settingsRefreshTimer: 0,
@@ -104,6 +105,7 @@
   }
 
   function removeWidget() {
+    stopBidLiveMonitor("widget_removed");
     STATE.widget?.destroy?.();
     STATE.widget = null;
     STATE.listing = null;
@@ -122,6 +124,7 @@
     patchHistory("replaceState");
     window.addEventListener("popstate", onRouteChange);
     window.addEventListener("dealerflow:locationchange", onRouteChange);
+    window.addEventListener("beforeunload", () => stopBidLiveMonitor("page_unload"));
   }
 
   function observeSettingsChanges() {
@@ -169,6 +172,7 @@
 
   function onRouteChange() {
     if (STATE.currentUrl === location.href) return;
+    stopBidLiveMonitor("route_changed");
     STATE.currentUrl = location.href;
     clearExtractionCache();
     STATE.lastSignature = "";
@@ -203,6 +207,7 @@
       const listing = stableCapture.listing;
       STATE.listing = listing;
       STATE.safeExpansion = stableCapture.safeExpansion || null;
+      syncBidLiveMonitor(listing);
       if (!stableCapture.readiness.readyToCapture || !isVehicleListing(listing)) {
         STATE.widget?.render({ status: "warning", listing, message: readinessMessage(stableCapture.readiness) });
         return;
@@ -263,6 +268,7 @@
       STATE.phase = "idle";
       STATE.listing = listing;
       STATE.safeExpansion = stableCapture.safeExpansion || null;
+      syncBidLiveMonitor(listing);
       STATE.widget?.render({
         status: stableCapture.readiness.readyToCapture ? "idle" : "warning",
         listing,
@@ -434,6 +440,51 @@
     window.DealerFlowOpenLaneSectionMap?.clearOpenLaneExtractionCache?.(document);
   }
 
+  function syncBidLiveMonitor(listing) {
+    if (!shouldRunBidLiveMonitor(listing)) {
+      stopBidLiveMonitor("not_active_bid_page");
+      return;
+    }
+    const existing = STATE.bidLiveMonitor?.getStatus?.();
+    if (existing?.active && existing.href === location.href) return;
+    stopBidLiveMonitor("replaced");
+    STATE.bidLiveMonitor = window.DealerFlowOpenLaneBidLiveMonitor?.startOpenLaneBidLiveMonitor?.({
+      doc: document,
+      href: location.href,
+      getHref: () => location.href,
+      getListing: () => STATE.listing,
+      onBidUpdate: (nextListing, metadata) => {
+        STATE.listing = applyConsentGateToListing(nextListing);
+        STATE.lastSignature = listingSignature(STATE.listing);
+        STATE.widget?.render({
+          status: STATE.phase === "success" ? "ready" : "idle",
+          listing: STATE.listing,
+          valuation: STATE.valuation,
+          message: bidLiveMonitorMessage(metadata),
+        });
+      },
+    }) || null;
+  }
+
+  function stopBidLiveMonitor(reason = "stopped") {
+    STATE.bidLiveMonitor?.stop?.(reason);
+    STATE.bidLiveMonitor = null;
+  }
+
+  function shouldRunBidLiveMonitor(listing = STATE.listing) {
+    if (!listing || !isOpenLaneHost()) return false;
+    if (listing.pageType && listing.pageType !== "active_listing") return false;
+    if (listing.captureKind && listing.captureKind !== "observation") return false;
+    if (listing.soldPriceCandidate || listing.buyPriceAuction || listing.finalBidAmount) return false;
+    return Boolean(window.DealerFlowOpenLaneBidLiveMonitor?.startOpenLaneBidLiveMonitor);
+  }
+
+  function bidLiveMonitorMessage(metadata = {}) {
+    const previous = moneyLabel(metadata.previousBid);
+    const next = moneyLabel(metadata.currentBid);
+    return previous && next ? `Current bid updated from ${previous} to ${next}.` : "Current bid updated.";
+  }
+
   function isVehicleListing(listing) {
     return Boolean(listing && (listing.vin || (listing.year && listing.make && listing.model)) && (listing.mileageKm || listing.listedPrice || listing.imageCount));
   }
@@ -540,6 +591,11 @@
 
   function listingSignature(listing) {
     return STATE.captureRuntime?.captureSignature(listing) || [listing.vin, listing.listingUrl, listing.currentBid, listing.buyNowPrice, listing.bestOffer, listing.mileageKm, listing.imageCount, listing.videoCount].join("|");
+  }
+
+  function moneyLabel(value) {
+    const amount = Number(value || 0);
+    return Number.isFinite(amount) && amount > 0 ? `$${amount.toLocaleString("en-CA")}` : "";
   }
 
   function logExtractionDebug(listing) {
