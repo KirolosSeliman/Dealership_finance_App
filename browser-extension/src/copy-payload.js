@@ -388,6 +388,9 @@
   }
 
   function purchaseEvidenceSource(listing = {}) {
+    const explicit = listing.openlaneMetadata?.purchaseEconomics?.purchaseEvidenceSource
+      || listing.extractedFields?.debug?.purchaseEvidenceSource;
+    if (explicit) return explicit;
     const evidence = listing.outcomeEvidence || listing.openlaneMetadata?.classification?.evidence || [];
     const first = evidence.find((item) => item.sourceText || item.marker || item.evidenceType) || {};
     if (first.sourceText) return first.sourceText;

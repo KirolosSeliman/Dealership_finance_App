@@ -9,6 +9,7 @@ const repoRoot = process.cwd();
 const require = createRequire(import.meta.url);
 require("../browser-extension/src/deep-capture-activation.js");
 require("../browser-extension/src/openlane-section-map.js");
+require("../browser-extension/src/openlane-page-classifier.js");
 const networkObserver = require("../browser-extension/src/openlane-network-observer.js") as {
   extractCandidatesFromNetworkPayload: (payload: unknown, url?: string) => { vinCandidates: Array<{ vin: string }>; mediaCandidates: Array<{ url: string }>; conditionCandidates: Array<{ text: string }>; sanitizedKeys: string[] };
   sanitizeNetworkPayload: (payload: unknown) => unknown;
@@ -422,6 +423,43 @@ test("Market Snap copy payload builder returns sanitized readiness and debug evi
   assert.match(JSON.stringify(payload.debugSummary), /Q&A\/sidebar\/market-guide text ignored/i);
   assert.equal((payload.valuation as { confidenceScore?: number }).confidenceScore, 88);
   assert.doesNotMatch(JSON.stringify(payload), /should-not-copy|secret-token/i);
+});
+
+test("Market Snap copy payload exposes Kia purchase outcome fields without listedPrice missing noise", () => {
+  const copyPayload = require("../browser-extension/src/copy-payload.js") as {
+    buildCopyPayload: (listing: Record<string, unknown>, state?: Record<string, unknown>) => Record<string, unknown>;
+  };
+  const listing = extractOpenLaneFixture(
+    readFileSync(join(repoRoot, "tests/fixtures/openlane/openlane-vdp-kia-purchase-sold-price-picked-up-live.html"), "utf8"),
+    "https://app.openlane.ca/vdp/3KPFL4A72HE119966",
+  );
+
+  const payload = copyPayload.buildCopyPayload(listing);
+  const readiness = payload.readinessSummary as {
+    missingData?: string[];
+    soldPriceCandidate?: number;
+    buyPriceAuction?: number;
+    finalBidAmount?: number | null;
+    purchaseEvidenceSource?: string;
+  };
+  const purchaseDebug = payload.purchaseOutcomeDebug as {
+    soldPriceCandidate?: number;
+    buyPriceAuction?: number;
+    finalBidAmount?: number | null;
+    purchaseEvidenceSource?: string;
+    rejectedOutcomePriceCandidates?: unknown[];
+  };
+
+  assert.equal(readiness.soldPriceCandidate, 4_000);
+  assert.equal(readiness.buyPriceAuction, 4_000);
+  assert.equal(readiness.finalBidAmount, null);
+  assert.equal(readiness.purchaseEvidenceSource, "purchase_detail_panel");
+  assert.ok(!readiness.missingData?.includes("listedPrice"));
+  assert.equal(purchaseDebug.soldPriceCandidate, 4_000);
+  assert.equal(purchaseDebug.buyPriceAuction, 4_000);
+  assert.equal(purchaseDebug.purchaseEvidenceSource, "purchase_detail_panel");
+  assert.ok(Array.isArray(purchaseDebug.rejectedOutcomePriceCandidates));
+  assert.match(JSON.stringify(payload), /soldPriceCandidate|buyPriceAuction|purchaseOutcomeDebug|rejectedOutcomePriceCandidates/);
 });
 
 test("Market Snap widget debug UX explains purchased, active, Carfax, network, and noisy fields", () => {

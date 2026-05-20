@@ -1153,13 +1153,24 @@
   }
 
   function buildMissingData(listing) {
+    const isOutcomePage = ["purchase_detail", "post_sale", "fee_details", "purchase_info"].includes(String(listing.pageType || ""))
+      || ["candidate_outcome", "verified_outcome"].includes(String(listing.captureKind || ""));
+    const hasOutcomePrice = [
+      listing.soldPriceCandidate,
+      listing.buyPriceAuction,
+      listing.finalBidAmount,
+      listing.acceptedAmount,
+      listing.negotiatedAmount,
+      listing.totalInvoiceAmount,
+      listing.finalAcquisitionCost,
+    ].some((value) => value !== undefined && value !== null && value !== "");
     const requiredFields = {
       vin: listing.vin,
       year: listing.year,
       make: listing.make,
       model: listing.model,
       mileageKm: listing.mileageKm,
-      listedPrice: listing.listedPrice,
+      ...(isOutcomePage ? { outcomePrice: hasOutcomePrice ? true : undefined } : { listedPrice: listing.listedPrice }),
     };
     return Object.entries(requiredFields)
       .filter(([, value]) => value === undefined || value === null || value === "")

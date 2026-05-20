@@ -1239,6 +1239,7 @@ test("OpenLane live Kia purchase fixture maps sold price into structured outcome
   assert.equal(listing.finalBidAmount, undefined);
   assert.equal((listing.priceSemantics as Record<string, string>).soldPriceCandidate, "candidate_wholesale_label");
   assert.equal((listing.priceSemantics as Record<string, string>).buyPriceAuction, "verified_wholesale_label");
+  assert.ok(!((listing.missingData as string[] | undefined) || []).includes("listedPrice"));
   assert.equal(metadata.purchaseEconomics?.purchaseEvidenceSource, "purchase_detail_panel");
   assert.equal(fields.debug?.purchaseEvidenceSource, "purchase_detail_panel");
   assert.ok(fieldEvidence.soldPriceCandidate?.some((item) => item.sourceType === "purchase_detail_panel" && /Sold price\s+\$4,000/i.test(String(item.sourceText))));

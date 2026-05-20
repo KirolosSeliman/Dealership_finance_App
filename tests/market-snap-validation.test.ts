@@ -742,6 +742,34 @@ test("Market Snap validation accepts verified purchased VDP outcome with strong 
   assert.equal(kia.data?.buyPriceAuction, 4_000);
 });
 
+test("Market Snap validation rejects verified outcome without a verified price field", () => {
+  const result = marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "purchase_detail",
+    captureKind: "verified_outcome",
+    title: "2017 Kia Forte",
+    year: 2017,
+    make: "Kia",
+    model: "Forte",
+    vin: "3KPFK4A77HE123456",
+    soldPriceCandidate: 4_000,
+    outcomeConfidence: "verified",
+    outcomeEvidence: [{
+      evidenceType: "purchase_document",
+      sourceText: "Order history Sold price $4,000 Mark as picked up",
+      capturedAt: "2026-05-18T12:00:00.000Z",
+      confidenceScore: 96,
+    }],
+    priceSemantics: {
+      soldPriceCandidate: "candidate_wholesale_label",
+    },
+  });
+
+  assert.equal(result.success, false);
+});
+
 test("Market Snap validation rejects outcome prices on unsupported OpenLane page types", () => {
   const result = marketListingPayloadSchema.safeParse({
     organizationId,
