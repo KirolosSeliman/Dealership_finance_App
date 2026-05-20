@@ -15,6 +15,7 @@ const stableCapture = require("../browser-extension/src/openlane-stable-capture.
   extractStableOpenLaneListing: (doc: Record<string, unknown>, href: string, settings: Record<string, unknown>, options?: Record<string, unknown>) => Promise<{
     listing: Record<string, unknown>;
     readiness: { readyToCapture: boolean; state: string; blockedReason: string; vinStatus: string; carfaxStatus: string; attempts: number; missingData: string[] };
+    debug?: Record<string, unknown>;
   }>;
   evaluateOpenLaneReadiness: (listing: Record<string, unknown>, classifier: Record<string, unknown>, options?: Record<string, unknown>) => {
     readyToCapture: boolean;
@@ -131,6 +132,60 @@ test("OpenLane stable capture clears cache between route VIN changes", async () 
   assert.equal(second.listing.vin, "4T1G11AK8LU123456");
 });
 
+test("OpenLane stable capture reruns bounded bid stabilization when bid candidates conflict", async () => {
+  const extractor = (globalThis as Record<string, { extractOpenLaneListing?: unknown }>).DealerFlowOpenLaneExtractor;
+  const original = extractor.extractOpenLaneListing;
+  let calls = 0;
+  extractor.extractOpenLaneListing = () => {
+    calls += 1;
+    return calls === 1
+      ? activeBidListing(8_500, [{ value: 10_300, sourceType: "section_map", sourceName: "section-map:bidPanel" }, { value: 8_500, sourceType: "active_bid_bar", sourceName: "section-map:activeBidBar" }], [{ value: 8_500, sourceType: "active_bid_bar" }])
+      : activeBidListing(10_300, [{ value: 10_300, sourceType: "section_map", sourceName: "section-map:bidPanel" }], []);
+  };
+  try {
+    const result = await stableCapture.extractStableOpenLaneListing(fakeDocument("OpenLane vehicle"), "https://app.openlane.ca/vdp/JM3KFBDM1L0123456", {}, {
+      delaysMs: [],
+      bidStabilizationDelaysMs: [0, 0],
+      sleep: async () => undefined,
+    });
+
+    const metadata = (result.listing.openlaneMetadata as Record<string, Record<string, unknown>>).bidStabilization;
+    assert.equal(result.listing.currentBid, 10_300);
+    assert.equal(metadata.initialCurrentBid, 8_500);
+    assert.equal(metadata.finalCurrentBid, 10_300);
+    assert.equal(metadata.bidStabilizationAttempts, 1);
+    assert.equal(metadata.stoppedReason, "bid_updated_after_stabilization");
+  } finally {
+    extractor.extractOpenLaneListing = original;
+  }
+});
+
+test("OpenLane stable capture cancels bid stabilization on route change", async () => {
+  const extractor = (globalThis as Record<string, { extractOpenLaneListing?: unknown }>).DealerFlowOpenLaneExtractor;
+  const original = extractor.extractOpenLaneListing;
+  let calls = 0;
+  extractor.extractOpenLaneListing = () => {
+    calls += 1;
+    return activeBidListing(8_500, [{ value: 10_300, sourceType: "section_map", sourceName: "section-map:bidPanel" }, { value: 8_500, sourceType: "active_bid_bar", sourceName: "section-map:activeBidBar" }], [{ value: 8_500, sourceType: "active_bid_bar" }]);
+  };
+  try {
+    const result = await stableCapture.extractStableOpenLaneListing(fakeDocument("OpenLane vehicle"), "https://app.openlane.ca/vdp/JM3KFBDM1L0123456", {}, {
+      delaysMs: [],
+      bidStabilizationDelaysMs: [0, 0],
+      getHref: () => "https://app.openlane.ca/vdp/ROUTECHANGED12345",
+      sleep: async () => undefined,
+    });
+
+    const metadata = (result.listing.openlaneMetadata as Record<string, Record<string, unknown>>).bidStabilization;
+    assert.equal(result.listing.currentBid, 8_500);
+    assert.equal(metadata.bidStabilizationAttempts, 0);
+    assert.equal(metadata.stoppedReason, "route_changed");
+    assert.equal(calls, 1);
+  } finally {
+    extractor.extractOpenLaneListing = original;
+  }
+});
+
 test("OpenLane stable capture exposes safe helper functions", () => {
   const doc = {
     querySelectorAll: () => [
@@ -165,5 +220,30 @@ function fakeNode(attributes: Record<string, string>, textContent: string) {
     getAttribute: (name: string) => attributes[name] ?? null,
     innerText: textContent,
     textContent,
+  };
+}
+
+function activeBidListing(currentBid: number, priceCandidates: Array<Record<string, unknown>>, staleCurrentBidCandidates: Array<Record<string, unknown>>) {
+  return {
+    sourceName: "OpenLane",
+    pageType: "active_listing",
+    captureKind: "observation",
+    vin: "JM3KFBDM1L0123456",
+    year: 2020,
+    make: "Mazda",
+    model: "CX-5",
+    mileageKm: 74512,
+    currentBid,
+    listedPrice: currentBid,
+    carfaxUrlStatus: "text_only",
+    extractionConfidenceScore: 90,
+    priceSemantics: { currentBid: "observation", listedPrice: "observation_alias_current_bid" },
+    extractedFields: {
+      currentBidEvidence: { sourceType: "section_map", sourceName: "section-map:bidPanel", sourceText: `Current bid $${currentBid}` },
+      debug: {
+        priceCandidates,
+        staleCurrentBidCandidates,
+      },
+    },
   };
 }

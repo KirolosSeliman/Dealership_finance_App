@@ -64,6 +64,7 @@
       networkEvidenceCount: runtime.networkEvidenceCount ?? safeListing.openlaneMetadata?.networkEvidence?.length ?? 0,
       networkObserverMessage: networkObserverMessage(runtime, safeListing),
       priceState: priceStateLabel(safeListing),
+      bidStabilization: safeListing.openlaneMetadata?.bidStabilization || null,
       currentBid: safeListing.currentBid ?? null,
       currentBidSource: buildPriceDiagnostics(safeListing).currentBidSource,
       currentBidSourceText: buildPriceDiagnostics(safeListing).currentBidSourceText,
@@ -297,6 +298,7 @@
     return [
       classificationMessage(listing),
       priceDiagnosticMessage(listing),
+      bidStabilizationMessage(listing),
       transportIgnoredMessage(listing),
       listing.carfaxUrlStatus === "text_only" ? "Carfax text found, but no URL is exposed." : "",
       networkObserverMessage(listing.openlaneMetadata?.deepCaptureRuntime || {}, listing),
@@ -317,6 +319,16 @@
   function priceDiagnosticMessage(listing = {}) {
     if (listing.soldPriceCandidate || listing.buyPriceAuction) return "Sold price extracted from purchase panel.";
     if (listing.currentBid && !listing.soldPriceCandidate) return "Current bid is observation-only and is not saved as a final sale label.";
+    return "";
+  }
+
+  function bidStabilizationMessage(listing = {}) {
+    const state = listing.openlaneMetadata?.bidStabilization || {};
+    if (!state.bidStabilizationAttempts) return "";
+    if (state.initialCurrentBid && state.finalCurrentBid && state.initialCurrentBid !== state.finalCurrentBid) {
+      return `Current bid updated from ${moneyLabel(state.initialCurrentBid)} to ${moneyLabel(state.finalCurrentBid)} after bid panel stabilization.`;
+    }
+    if (state.bidState && state.bidState !== "stable") return `Bid panel stabilization checked ${state.bidStabilizationAttempts} time(s); state: ${state.bidState}.`;
     return "";
   }
 

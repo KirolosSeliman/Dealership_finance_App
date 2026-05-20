@@ -338,6 +338,7 @@
     return [
       classificationMessage(safeListing),
       priceDiagnosticMessage(safeListing),
+      bidStabilizationMessage(safeListing),
       ...priceRejectionMessages(safeListing),
       transportIgnoredMessage(safeListing),
       safeListing.carfaxUrlStatus === "text_only" ? "Carfax text found, but no URL is exposed." : "",
@@ -362,6 +363,16 @@
     if (safeListing.soldPriceCandidate || safeListing.buyPriceAuction) return "Sold price extracted from purchase panel.";
     if (safeListing.currentBid && !safeListing.soldPriceCandidate) return "Current bid is observation-only and is not saved as a final sale label.";
     if ((safeListing.pageType === "active_listing" || safeListing.captureKind === "observation") && !safeListing.currentBid) return "Current bid not found. Active listing remains observation-only.";
+    return "";
+  }
+
+  function bidStabilizationMessage(listing = {}) {
+    const state = listing.openlaneMetadata?.bidStabilization || {};
+    if (!state.bidStabilizationAttempts) return "";
+    if (state.initialCurrentBid && state.finalCurrentBid && state.initialCurrentBid !== state.finalCurrentBid) {
+      return `Current bid updated from ${moneyOrDash(state.initialCurrentBid)} to ${moneyOrDash(state.finalCurrentBid)} after bid panel stabilization.`;
+    }
+    if (state.bidState && state.bidState !== "stable") return `Bid panel stabilization checked ${state.bidStabilizationAttempts} time(s); state: ${state.bidState}.`;
     return "";
   }
 

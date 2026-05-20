@@ -45,6 +45,9 @@
       if (index < delays.length) await sleepFn(Number(delays[index] || 0));
     }
 
+    const bidStabilization = await stabilizeCurrentBidIfNeeded(lastResult, doc, href, settings, options, sleepFn);
+    if (bidStabilization?.result) lastResult = bidStabilization.result;
+
     const listing = lastResult?.listing || {};
     const readiness = {
       ...(lastResult?.readiness || evaluateOpenLaneReadiness(listing, lastResult?.classifier || {}, { attempts: attempts.length })),
@@ -53,7 +56,7 @@
       safeExpansionClickedCount: lastResult?.safeExpansionClickedCount || 0,
     };
     return {
-      listing: attachStableCaptureMetadata(listing, readiness, lastResult),
+      listing: attachStableCaptureMetadata(listing, readiness, lastResult, bidStabilization),
       readiness,
       safeExpansion: lastResult?.safeExpansion || null,
       debug: {
@@ -62,8 +65,65 @@
         bestCarfaxEvidence: bestFieldEvidence(listing, "carfaxUrl") || bestFieldEvidence(listing, "carfaxUrlStatus"),
         classifier: lastResult?.classifier || null,
         networkObserverStatus: lastResult?.networkObserverStatus || null,
+        bidStabilization: bidStabilization?.metadata || null,
       },
     };
+  }
+
+  async function stabilizeCurrentBidIfNeeded(initialResult, doc, href, settings, options, sleepFn) {
+    if (!initialResult?.listing || !isBidUnstable(initialResult.listing)) return null;
+    const delays = Array.isArray(options.bidStabilizationDelaysMs) ? options.bidStabilizationDelaysMs : [500, 1500];
+    const maxAttempts = Math.min(2, Number(options.maxBidStabilizationAttempts || 2));
+    const initialCurrentBid = initialResult.listing.currentBid;
+    let previousBid = initialCurrentBid;
+    let finalResult = initialResult;
+    let attempts = 0;
+    let stoppedReason = "max_attempts_reached";
+
+    for (let index = 0; index < Math.min(maxAttempts, delays.length); index += 1) {
+      if (typeof options.isCancelled === "function" && options.isCancelled()) {
+        stoppedReason = "cancelled";
+        break;
+      }
+      if (typeof options.getHref === "function" && options.getHref() !== href) {
+        stoppedReason = "route_changed";
+        break;
+      }
+      await sleepFn(Number(delays[index] || 0));
+      if (typeof options.getHref === "function" && options.getHref() !== href) {
+        stoppedReason = "route_changed";
+        break;
+      }
+      clearExtractionCache(doc);
+      const attempt = await runStableAttempt(doc, href, settings, {
+        ...options,
+        attemptNumber: attempts + 1,
+        bidOnly: true,
+      });
+      attempts += 1;
+      finalResult = attempt;
+      const nextBid = attempt.listing?.currentBid;
+      if (nextBid && nextBid === previousBid && !isBidUnstable(attempt.listing)) {
+        stoppedReason = "stable_same_value";
+        break;
+      }
+      previousBid = nextBid;
+      if (nextBid && nextBid !== initialCurrentBid && !isBidUnstable(attempt.listing)) {
+        stoppedReason = "bid_updated_after_stabilization";
+        break;
+      }
+    }
+
+    const finalCurrentBid = finalResult?.listing?.currentBid;
+    const metadata = {
+      bidState: bidStateFor(finalResult?.listing || initialResult.listing),
+      initialCurrentBid,
+      finalCurrentBid,
+      bidStabilizationAttempts: attempts,
+      bidUpdatedAt: finalCurrentBid && finalCurrentBid !== initialCurrentBid ? new Date().toISOString() : undefined,
+      stoppedReason,
+    };
+    return { result: { ...finalResult, bidStabilization: metadata }, metadata };
   }
 
   async function runStableAttempt(doc, href, settings, options = {}) {
@@ -270,15 +330,34 @@
     };
   }
 
-  function attachStableCaptureMetadata(listing, readiness, result) {
+  function attachStableCaptureMetadata(listing, readiness, result, bidStabilization) {
+    const stabilization = bidStabilization?.metadata || result?.bidStabilization;
     return {
       ...listing,
       openlaneMetadata: {
         ...(listing.openlaneMetadata || {}),
         stableCaptureReadiness: readiness,
+        bidStabilization: stabilization || undefined,
         networkObserverStatus: result?.networkObserverStatus || undefined,
       },
     };
+  }
+
+  function isBidUnstable(listing = {}) {
+    return bidStateFor(listing) !== "stable";
+  }
+
+  function bidStateFor(listing = {}) {
+    const debug = listing.extractedFields?.debug || {};
+    if ((debug.staleCurrentBidCandidates || []).length) return "unstable_candidate_conflict";
+    const candidates = debug.priceCandidates || [];
+    const accepted = listing.currentBid;
+    const active = candidates.find((candidate) => candidate.sourceType === "active_bid_bar" && !candidate.rejectedReason && candidate.value);
+    const bidPanel = candidates.find((candidate) => /bidPanel/i.test(String(candidate.sourceName || "")) && !candidate.rejectedReason && candidate.value);
+    if (active?.value && bidPanel?.value && Number(active.value) !== Number(bidPanel.value)) return "unstable_candidate_conflict";
+    const currentBidText = `${listing.extractedFields?.currentBidEvidence?.sourceText || ""} ${candidates.map((candidate) => candidate.sourceText || "").join(" ")}`;
+    if (accepted && /\b(under\s+1\s+min|seconds?\s+ago|just now|updated now)\b/i.test(currentBidText)) return "recent_bid_panel_observed";
+    return "stable";
   }
 
   function bestFieldEvidence(listing, field) {

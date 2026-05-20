@@ -394,6 +394,7 @@ test("Market Snap widget debug UX explains purchased, active, Carfax, network, a
     "Rejected outcome price candidates:",
     "Lower bid candidates ignored:",
     "Stale current bid candidates ignored:",
+    "Current bid updated from",
     "Listed price semantics:",
     "Rejected bid count as price:",
     "buildPriceDiagnostics",
