@@ -72,12 +72,17 @@ test("OpenLane bid live monitor is bid-only, bounded, and has no backend side ef
   const contentScript = readFileSync(join(repoRoot, "browser-extension/src/content-script.js"), "utf8");
 
   assert.match(monitor, /startOpenLaneBidLiveMonitor/);
+  assert.match(monitor, /createOpenLaneBidStateController/);
   assert.match(monitor, /BID_ZONE_SELECTOR/);
   assert.match(monitor, /maxDurationMs/);
+  assert.match(monitor, /mediumIntervalMs/);
+  assert.match(monitor, /scheduleInterval/);
   assert.match(monitor, /route_changed/);
   assert.match(monitor, /extractOpenLaneCurrentBidOnly/);
   assert.doesNotMatch(monitor, /analyzeListing|saveListing|enqueueCapture|expandOpenLaneReadOnlySections|fetch\s*\(|XMLHttpRequest/i);
   assert.match(contentScript, /syncBidLiveMonitor\(listing\)/);
+  assert.match(contentScript, /createOpenLaneBidStateController/);
+  assert.match(contentScript, /extractBidState/);
   assert.match(contentScript, /stopBidLiveMonitor\("route_changed"\)/);
   assert.match(contentScript, /stopBidLiveMonitor\("page_unload"\)/);
   assert.match(contentScript, /Current bid updated from/);

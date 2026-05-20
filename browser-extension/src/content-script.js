@@ -448,12 +448,14 @@
     const existing = STATE.bidLiveMonitor?.getStatus?.();
     if (existing?.active && existing.href === location.href) return;
     stopBidLiveMonitor("replaced");
-    STATE.bidLiveMonitor = window.DealerFlowOpenLaneBidLiveMonitor?.startOpenLaneBidLiveMonitor?.({
+    STATE.bidLiveMonitor = window.DealerFlowOpenLaneBidLiveMonitor?.createOpenLaneBidStateController?.({
       doc: document,
       href: location.href,
       getHref: () => location.href,
       getListing: () => STATE.listing,
-      onBidUpdate: (nextListing, metadata) => {
+      extractBidState: (doc, href, options) => window.DealerFlowOpenLaneExtractor?.extractOpenLaneCurrentBidOnly?.(doc, href, options),
+      isWidgetConnected: () => Boolean(STATE.widget?.host?.isConnected),
+      onBidStateChange: (nextListing, metadata) => {
         STATE.listing = applyConsentGateToListing(nextListing);
         STATE.lastSignature = listingSignature(STATE.listing);
         STATE.widget?.render({
@@ -476,7 +478,7 @@
     if (listing.pageType && listing.pageType !== "active_listing") return false;
     if (listing.captureKind && listing.captureKind !== "observation") return false;
     if (listing.soldPriceCandidate || listing.buyPriceAuction || listing.finalBidAmount) return false;
-    return Boolean(window.DealerFlowOpenLaneBidLiveMonitor?.startOpenLaneBidLiveMonitor);
+    return Boolean(window.DealerFlowOpenLaneBidLiveMonitor?.createOpenLaneBidStateController);
   }
 
   function bidLiveMonitorMessage(metadata = {}) {
