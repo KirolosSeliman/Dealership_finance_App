@@ -25,11 +25,17 @@
     const feeDetailsZoneText = normalizeSpace(zones.feeDetailsPanel?.text || "");
     const bidZoneText = normalizeSpace(zones.bidPanel?.text || "");
     const footerText = normalizeSpace(regions.footerText || zones.footer?.text || "");
-    const purchaseScopedText = normalizeSpace([purchaseZoneText, postSaleZoneText, feeDetailsZoneText, mainText].filter(Boolean).join("\n")).slice(0, RAW_TEXT_LIMIT);
+    const trustedPurchaseScopedText = normalizeSpace([purchaseZoneText, postSaleZoneText, feeDetailsZoneText].filter(Boolean).join("\n")).slice(0, RAW_TEXT_LIMIT);
+    const purchaseScopedText = (trustedPurchaseScopedText || (!isVdpUrl ? mainText : "")).slice(0, RAW_TEXT_LIMIT);
+    ignoredEvidence.push(...rejectedPurchaseMarkerEvidence(mainText, zones));
     const hasOrderHistory = /\border history\b/i.test(purchaseScopedText);
     const hasVdpSoldPrice = isVdpUrl && /\bsold price\b/i.test(purchaseScopedText);
-    const hasPickedUpAction = /\b(mark as picked up|picked up)\b/i.test(purchaseScopedText);
-    const hasPurchaseAction = /\b(mark as picked up|picked up|purchase complete|purchased|paid|invoice|full bid history|mark retrieved|retrieved)\b/i.test(purchaseScopedText);
+    const hasStrongPurchaseContext = /\b(order history|sold price|selling price|invoice|fee details|purchase confirmed|payment received)\b/i.test(purchaseScopedText);
+    const hasPickedUpAction = /\bmark as picked up\b/i.test(purchaseScopedText)
+      || (hasStrongPurchaseContext && /\bpicked up\b/i.test(purchaseScopedText) && !isNoisyPurchaseMarkerText(purchaseScopedText));
+    const hasPurchaseAction = hasPickedUpAction
+      || /\b(purchase complete|purchased|invoice|full bid history|mark retrieved|retrieved|payment received|purchase confirmed)\b/i.test(purchaseScopedText)
+      || (hasStrongPurchaseContext && /\bpaid\b/i.test(purchaseScopedText) && !/\bpaid off\b/i.test(purchaseScopedText));
     const hasMainPurchaseContext = /\b(purchases?|open order|order history|purchase info|documents)\b/i.test(mainText);
     const hasBuyerPurchasePanel = (
       /\b(order history|purchase details?)\b/i.test(purchaseZoneText)
@@ -57,7 +63,7 @@
     addEvidence(evidence, "purchase_detail_panel", hasPurchaseDetailPanel, snippet(purchaseScopedText, /\b(order history|sold price|selling price|mark as picked up|picked up)\b/i));
     addEvidence(evidence, "fee_details", /\b(fee details|buy price\s*-\s*auction|transaction fee|vehicle history fee|tax(?:es)?)\b/i.test(mainText), snippet(mainText, /\b(fee details|buy price\s*-\s*auction|transaction fee|vehicle history fee|tax(?:es)?)\b/i));
     addEvidence(evidence, "post_sale", /\b(post sale|sold price|negotiat|counter offer|accepted|rejected)\b/i.test(`${path} ${mainText}`), snippet(mainText, /\b(post sale|sold price|negotiat|counter offer|accepted|rejected)\b/i));
-    addEvidence(evidence, "accepted_outcome", hasAcceptedOutcomeEvidence(mainText), snippet(mainText, /\b(status\s+accepted|accepted amount|seller accepted|paid|invoice|finalized|completed|purchase confirmed|retrieved)\b/i));
+    addEvidence(evidence, "accepted_outcome", hasAcceptedOutcomeEvidence(purchaseScopedText || mainText), snippet(purchaseScopedText || mainText, /\b(status\s+accepted|accepted amount|seller accepted|paid|invoice|finalized|completed|purchase confirmed|retrieved)\b/i));
     addEvidence(evidence, "pending_outcome", /\b(pending|awaiting|counter offer|submitted|rejected)\b/i.test(mainText), snippet(mainText, /\b(pending|awaiting|counter offer|submitted|rejected)\b/i));
 
     if (/\bPURCHASE\b[\s\S]{0,120}\b(Browse|On hold|Closing|Purchases)\b/i.test(sidebarText)) {
@@ -144,7 +150,44 @@
 
   function hasAcceptedOutcomeEvidence(text) {
     if (/\b(no|not|without)\s+accepted\b/i.test(text)) return false;
-    return /\b(status\s+accepted|accepted amount|seller accepted|paid|invoice|finalized|completed|purchase confirmed|retrieved|mark as picked up|picked up)\b/i.test(text);
+    if (isNoisyPurchaseMarkerText(text)) return false;
+    if (/\b(status\s+accepted|accepted amount|seller accepted|invoice|finalized|completed|purchase confirmed|retrieved|mark as picked up)\b/i.test(text)) return true;
+    return /\bpaid\b/i.test(text) && /\b(order history|sold price|invoice|fee details|payment received|purchase confirmed)\b/i.test(text) && !/\bpaid off\b/i.test(text);
+  }
+
+  function rejectedPurchaseMarkerEvidence(mainText, zones = {}) {
+    const noisyZones = [
+      ["dealerNotes", zones.dealerNotes?.text],
+      ["qaSection", zones.qaSection?.text],
+      ["disclosuresCondition", zones.disclosuresCondition?.text],
+      ["knownHistory", zones.knownHistory?.text],
+    ];
+    const evidence = [];
+    for (const [sourceZone, text] of noisyZones) {
+      const sourceText = normalizeSpace(text || "");
+      if (!sourceText || !/\b(picked up|schedule pickup|paid off|re-read the carfax|carfax report|vehicle release form|booster pack)\b/i.test(sourceText)) continue;
+      evidence.push({
+        marker: "rejected_purchase_marker",
+        sourceZone,
+        sourceText: snippet(sourceText, /\b(picked up|schedule pickup|paid off|re-read the carfax|carfax report|vehicle release form|booster pack)\b/i) || sourceText.slice(0, 180),
+        confidence: 92,
+        rejectedReason: "weak_purchase_marker_in_non_purchase_context",
+      });
+    }
+    if (/\b(picked up\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|pickup\s+is\s+available|schedule pickup|paid off|please re-read the carfax report|bring your own booster pack|payment instructions are completed)\b/i.test(mainText)) {
+      evidence.push({
+        marker: "rejected_purchase_marker",
+        sourceZone: "mainText",
+        sourceText: snippet(mainText, /\b(picked up\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|pickup\s+is\s+available|schedule pickup|paid off|please re-read the carfax report|bring your own booster pack|payment instructions are completed)\b/i),
+        confidence: 88,
+        rejectedReason: "weak_purchase_marker_without_order_history_or_sold_price",
+      });
+    }
+    return evidence;
+  }
+
+  function isNoisyPurchaseMarkerText(text) {
+    return /\b(picked up\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|pickup\s+is\s+available|schedule pickup|vehicle release form|bring your own booster pack|paid off|please re-read the carfax report|payment instructions are completed|seller notes?|dealer notes?|questions? and answers?|q\s*&\s*a|transport note)\b/i.test(String(text || ""));
   }
 
   function extractDocumentRegions(doc) {

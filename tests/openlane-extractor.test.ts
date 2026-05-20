@@ -23,6 +23,7 @@ const classifier = require("../browser-extension/src/openlane-page-classifier.js
     confidenceScore: number;
     evidence: Array<{ marker: string }>;
     decisiveEvidence?: Array<{ marker: string }>;
+    ignoredEvidence?: Array<{ marker?: string; rejectedReason?: string }>;
     warnings: string[];
   };
   classifyOpenLanePage: (doc: Record<string, unknown>, href?: string) => {
@@ -1155,6 +1156,34 @@ test("OpenLane classifier ignores sidebar and footer purchase noise without a re
   assert.equal(sidebarOnly.captureKind, "observation");
   assert.equal(footerOnly.pageType, "active_listing");
   assert.equal(footerOnly.captureKind, "observation");
+});
+
+test("OpenLane classifier rejects weak pickup, paid-off, and Carfax notes on active VDP pages", () => {
+  const pickupInstructions = classifier.classifyOpenLanePageFromHtml(
+    fixture("openlane-vdp-active-pickup-instructions-not-purchase.html"),
+    "https://app.openlane.ca/vdp/JM3KFBDM1L0999999",
+  );
+  const paidOffCarfaxNote = classifier.classifyOpenLanePageFromHtml(`
+    <main data-testid="vehicle-detail-page">
+      <section class="vehicle-hero" data-vin="KNAE55LC7J6040713">
+        <h1>2018 Kia Stinger GT</h1>
+        <p>VIN KNAE55LC7J6040713</p>
+        <p>Odometer 111,486 KM</p>
+      </section>
+      <section class="bid-panel"><h2>Current bid</h2><p>$13,700</p><p>4 Bids</p></section>
+      <section class="dealer-notes">
+        <h2>Note from selling dealer</h2>
+        <p>Paid Off. Please re-read the CARFAX report. Vehicle can be picked up Monday - Friday by appointment.</p>
+      </section>
+    </main>
+  `, "https://app.openlane.ca/vdp/KNAE55LC7J6040713");
+
+  assert.equal(pickupInstructions.pageType, "active_listing");
+  assert.equal(pickupInstructions.captureKind, "observation");
+  assert.ok(pickupInstructions.ignoredEvidence?.some((item) => item.marker === "rejected_purchase_marker"));
+  assert.equal(paidOffCarfaxNote.pageType, "active_listing");
+  assert.equal(paidOffCarfaxNote.captureKind, "observation");
+  assert.ok(paidOffCarfaxNote.ignoredEvidence?.some((item) => item.rejectedReason === "weak_purchase_marker_in_non_purchase_context" || item.rejectedReason === "weak_purchase_marker_without_order_history_or_sold_price"));
 });
 
 test("OpenLane purchased VDP extracts sold price as outcome and ignores transport estimate as price", () => {
