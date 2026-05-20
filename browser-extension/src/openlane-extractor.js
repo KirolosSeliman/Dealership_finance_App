@@ -1611,7 +1611,14 @@
 
   function isConditionHeaderText(text) {
     const normalized = normalizeSpace(text).toLowerCase();
-    return conditionBoundaryHeadings().some((heading) => normalized === normalizeSpace(heading).toLowerCase());
+    const headerAliases = [
+      ...conditionBoundaryHeadings(),
+      "Tire & wheels",
+      "Tire and wheels",
+      "Tires & wheels",
+      "Tires and wheels",
+    ];
+    return headerAliases.some((heading) => normalized === normalizeSpace(heading).toLowerCase());
   }
 
   function highRiskConditionTerms(text) {

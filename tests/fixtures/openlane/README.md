@@ -47,5 +47,7 @@ Fixtures in this folder must be sanitized snapshots of visible page structure on
 - `openlane-vdp-carfax-text-only-live.html` - live CARFAX text-only evidence fixture with `Always view the CARFAX report` and no safe URL metadata.
 - `openlane-network-carfax-url-live.json` - allowed OpenLane vehicle JSON evidence containing a safe CARFAX URL with a token-like query parameter for sanitizer verification.
 - `openlane-vdp-condition-pollution-live.html` - condition pollution evidence fixture for mechanical/exterior/tire-wheel header bleed, bid rows, legal footer, and transport noise.
+- `openlane-vdp-condition-section-boundary-noise.html` - Phase 12 exact boundary fixture for Mechanical/Exterior/Interior/Tire & wheels header-as-value cleanup.
 - `openlane-network-observer-zero-evidence-live.json` - copied-debug style observer status showing enabled network observation but zero useful allowed evidence.
 - `openlane-vdp-hyundai-santa-fe-sport-live.html` - multi-word model evidence fixture for `2014 Hyundai Santa Fe Sport SE`.
+- `openlane-vdp-hyundai-santa-fe-sport-title.html` - Phase 12 exact multi-word title fixture for `2014 Hyundai Santa Fe Sport SE`.
