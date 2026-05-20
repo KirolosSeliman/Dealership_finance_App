@@ -507,6 +507,14 @@ function enforceCaptureContract(value: Partial<z.infer<typeof marketListingPaylo
     });
   }
 
+  if (isOpenLanePricePayload(value) && value.captureKind === "verified_outcome" && !value.vin) {
+    context.addIssue({
+      code: "custom",
+      path: ["vin"],
+      message: "Verified OpenLane outcome captures require a valid VIN.",
+    });
+  }
+
   if ((value.captureKind === "verified_outcome" || value.outcomeConfidence === "verified") && !value.outcomeEvidence?.length) {
     context.addIssue({
       code: "custom",

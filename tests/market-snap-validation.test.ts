@@ -381,10 +381,38 @@ test("Market Snap validation rejects bid-count evidence as canonical OpenLane pr
       }],
     },
   });
+  const currentBidSeventyOneCount = marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "active_listing",
+    captureKind: "observation",
+    title: "2020 Nissan Frontier",
+    year: 2020,
+    make: "Nissan",
+    model: "Frontier",
+    currentBid: 71,
+    priceSemantics: {
+      currentBid: "observation",
+    },
+    fieldEvidence: {
+      currentBid: [{
+        field: "currentBid",
+        value: 71,
+        normalizedValue: 71,
+        sourceType: "section_map",
+        sourceName: "OpenLane bid panel",
+        sourceText: "71 Bids",
+        confidenceScore: 72,
+        capturedAt: "2026-05-20T12:00:00.000Z",
+      }],
+    },
+  });
 
   assert.equal(currentBidCount.success, false);
   assert.equal(listedBidCount.success, false);
   assert.equal(currentBidFiftyNineCount.success, false);
+  assert.equal(currentBidSeventyOneCount.success, false);
 });
 
 test("Market Snap validation preserves valid low OpenLane current bids with strong money evidence", () => {
@@ -449,6 +477,42 @@ test("Market Snap validation preserves valid low OpenLane current bids with stro
 
   assert.equal(withBidCountNearby.success, true);
   assert.equal(withBidCountNearby.data?.currentBid, 4);
+});
+
+test("Market Snap validation accepts live money current bid with nearby bid count as observation", () => {
+  const result = marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "active_listing",
+    captureKind: "observation",
+    title: "2020 Nissan Frontier Crew Cab",
+    year: 2020,
+    make: "Nissan",
+    model: "Frontier",
+    currentBid: 14_200,
+    listedPrice: 14_200,
+    priceSemantics: {
+      currentBid: "observation",
+      listedPrice: "observation_alias_current_bid",
+    },
+    fieldEvidence: {
+      currentBid: [{
+        field: "currentBid",
+        value: 14_200,
+        normalizedValue: 14_200,
+        sourceType: "section_map",
+        sourceName: "OpenLane bid panel",
+        sourceText: "Current bid $14,200 71 Bids",
+        confidenceScore: 96,
+        capturedAt: "2026-05-20T12:00:00.000Z",
+      }],
+    },
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.data?.currentBid, 14_200);
+  assert.equal(result.data?.priceSemantics?.currentBid, "observation");
 });
 
 test("Market Snap validation rejects transport evidence as canonical OpenLane price data", () => {
@@ -608,6 +672,7 @@ test("Market Snap validation keeps post-sale negotiation candidates separate fro
     pageType: "post_sale",
     captureKind: "verified_outcome",
     title: "2020 Toyota Camry SE",
+    vin: "4T1G11AK1LU123456",
     soldPriceCandidate: 18_250,
     acceptedAmount: 17_900,
     negotiatedAmount: 17_900,
@@ -740,6 +805,36 @@ test("Market Snap validation accepts verified purchased VDP outcome with strong 
   assert.equal(kia.success, true);
   assert.equal(kia.data?.soldPriceCandidate, 4_000);
   assert.equal(kia.data?.buyPriceAuction, 4_000);
+});
+
+test("Market Snap validation rejects verified OpenLane outcome without VIN", () => {
+  const result = marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "purchase_detail",
+    captureKind: "verified_outcome",
+    title: "2017 Kia Forte",
+    year: 2017,
+    make: "Kia",
+    model: "Forte",
+    buyPriceAuction: 4_000,
+    soldPriceCandidate: 4_000,
+    outcomeConfidence: "verified",
+    outcomeEvidence: [{
+      evidenceType: "purchase_document",
+      sourceText: "Order history Sold price $4,000 Mark as picked up",
+      capturedAt: "2026-05-20T12:00:00.000Z",
+      confidenceScore: 96,
+    }],
+    priceSemantics: {
+      soldPriceCandidate: "candidate_wholesale_label",
+      buyPriceAuction: "verified_wholesale_label",
+    },
+  });
+
+  assert.equal(result.success, false);
+  assert.match(JSON.stringify(result.error?.issues), /valid VIN/i);
 });
 
 test("Market Snap validation rejects verified outcome without a verified price field", () => {

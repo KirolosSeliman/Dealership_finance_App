@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { buildOpenLaneTrainingDataset } from "../src/lib/market-snap/training-export";
+import { buildOpenLaneTrainingDataset, type OpenLaneOutcomeExportRow } from "../src/lib/market-snap/training-export";
 
 const organizationId = "11111111-1111-4111-8111-111111111111";
 
@@ -18,6 +18,32 @@ test("OpenLane training export excludes active bids and pending outcomes from la
   assert.equal(dataset.retailRows.length, 0);
   assert.equal(dataset.report.rejectedByReason.observation_only, 1);
   assert.equal(dataset.report.rejectedByReason.candidate_outcome, 2);
+});
+
+test("OpenLane training export never promotes currentBid or listedPrice as labels", () => {
+  const pollutedOutcome = {
+    organization_id: organizationId,
+    vehicle_identity_id: "identity-1",
+    outcome_type: "polluted_current_bid",
+    capture_kind: "verified_outcome",
+    confidence_level: "verified",
+    is_training_eligible: true,
+    model_improvement_opted_in: true,
+    current_bid: 14_200,
+    listed_price: 14_200,
+    sold_price_candidate: 14_200,
+    captured_at: "2026-05-20T12:00:00.000Z",
+  } as OpenLaneOutcomeExportRow & { current_bid: number; listed_price: number };
+  const dataset = buildOpenLaneTrainingDataset({
+    observations: [activeObservation({ current_bid: 14_200 })],
+    outcomes: [pollutedOutcome],
+    retailSales: [],
+  });
+
+  assert.equal(dataset.wholesaleRows.length, 0);
+  assert.equal(dataset.acquisitionRows.length, 0);
+  assert.equal(dataset.report.rejectedByReason.missing_verified_label, 1);
+  assert.doesNotMatch(JSON.stringify(dataset), /listed_price|current_bid|sold_price_candidate/i);
 });
 
 test("OpenLane training export separates verified wholesale and acquisition labels", () => {
@@ -102,6 +128,7 @@ test("OpenLane training dataset SQL export only uses verified outcomes and sales
   assert.match(migration, /left join vehicle_valuations vv on vv\.id = s\.market_snap_valuation_id/i);
   assert.match(migration, /vv\.confidence_score as market_snap_confidence_score/i);
   assert.doesNotMatch(migration, /current_bid\s+as\s+label/i);
+  assert.doesNotMatch(migration, /listed_price\s+as\s+label/i);
   assert.doesNotMatch(migration, /sold_price_candidate\s+as\s+label/i);
   assert.doesNotMatch(migration, /s\.market_snap_confidence_score/i);
 });
