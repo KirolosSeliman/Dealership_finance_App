@@ -1313,6 +1313,37 @@ test("OpenLane active current bid resolver downgrades stale active bid bar behin
   assert.ok(fields.debug?.priceCandidates?.some((item) => item.value === 59 && item.rejectedReason === "bid_count_not_money"));
 });
 
+test("OpenLane active current bid resolver prefers final-minute fresh bid over stale sticky bid", () => {
+  const listing = extractor.extractOpenLaneFixture(
+    fixture("openlane-vdp-nissan-final-minute-bid-refresh.html"),
+    "https://app.openlane.ca/vdp/1N6ED1EK0PN123456",
+  );
+  const fields = listing.extractedFields as {
+    currentBidEvidence?: { sourceName?: string; sourceText?: string; confidenceScore?: number; selectionScore?: number };
+    debug?: {
+      priceCandidates?: Array<{ field?: string; value?: number; sourceType?: string; sourceText?: string; rejectedReason?: string; selectionScore?: number; recencyText?: string }>;
+      staleCurrentBidCandidates?: Array<{ value?: number; sourceType?: string; sourceText?: string; rejectedReason?: string }>;
+      currentBidDiagnostics?: { winningCurrentBid?: number; winningSourceText?: string; winningSelectionScore?: number };
+    };
+  };
+
+  assert.equal(listing.pageType, "active_listing");
+  assert.equal(listing.captureKind, "observation");
+  assert.equal(listing.currentBid, 14_200);
+  assert.equal(listing.listedPrice, 14_200);
+  assert.notEqual(listing.currentBid, 13_800);
+  assert.notEqual(listing.currentBid, 71);
+  assert.match(String(fields.currentBidEvidence?.sourceText), /\$14,200/);
+  assert.match(String(fields.currentBidEvidence?.sourceText), /Under 1 min/i);
+  assert.ok(Number(fields.currentBidEvidence?.selectionScore || 0) > 0);
+  assert.equal(fields.debug?.currentBidDiagnostics?.winningCurrentBid, 14_200);
+  assert.match(String(fields.debug?.currentBidDiagnostics?.winningSourceText), /\$14,200/);
+  assert.ok(fields.debug?.staleCurrentBidCandidates?.some((item) => item.value === 13_800 && item.sourceType === "active_bid_bar" && item.rejectedReason === "stale_current_bid_candidate"));
+  assert.ok(!fields.debug?.staleCurrentBidCandidates?.some((item) => item.value === 14_200));
+  assert.ok(fields.debug?.priceCandidates?.some((item) => item.field === "currentBid" && item.value === 71 && item.rejectedReason === "bid_count_not_money"));
+  assert.ok(fields.debug?.priceCandidates?.some((item) => item.value === 14_200 && /Under 1 min/i.test(String(item.sourceText)) && Number(item.selectionScore || 0) > 0));
+});
+
 test("OpenLane active current bid resolver supports sticky footer fallback and still rejects bid count", () => {
   const listing = extractor.extractOpenLaneFixture(
     fixture("openlane-vdp-active-current-bid-footer-fallback.html"),

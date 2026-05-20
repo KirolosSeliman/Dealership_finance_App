@@ -745,13 +745,19 @@
         sourceText: accepted.sourceText,
         endpointPattern: accepted.endpointPattern,
         confidenceScore: accepted.confidenceScore,
+        selectionScore: accepted.selectionScore,
+        recencyText: accepted.recencyText,
+        freshnessScore: accepted.freshnessScore,
+        isStale: accepted.isStale,
         capturedAt: accepted.capturedAt || new Date().toISOString(),
       } : undefined,
       lowerBidCandidates,
       staleCurrentBidCandidates,
       diagnostics: {
+        winningCurrentBid: accepted?.value,
         winningSourceType: accepted?.sourceType,
         winningSourceName: accepted?.sourceName,
+        winningSourceText: accepted?.sourceText,
         winningSelectionScore: accepted ? currentBidSelectionScore(accepted) : undefined,
         candidateCount: candidates.length,
         rejectedCandidateCount: candidates.filter((candidate) => candidate.rejectedReason).length,
@@ -936,7 +942,7 @@
     if (!candidate.value) return;
     const rejectedReason = currentBidRejectedReason(candidate);
     const freshness = currentBidFreshness(candidate);
-    candidates.push(compact({
+    const record = compact({
       field: "currentBid",
       value: candidate.value,
       sourceType: candidate.sourceType,
@@ -950,7 +956,9 @@
       confidenceScore: rejectedReason ? Math.min(Number(candidate.confidenceScore || 0), 20) : candidate.confidenceScore,
       capturedAt: candidate.capturedAt,
       rejectedReason,
-    }));
+    });
+    record.selectionScore = currentBidSelectionScore(record);
+    candidates.push(record);
   }
 
   function selectCurrentBidCandidate(candidates) {
@@ -1003,6 +1011,7 @@
     if (!accepted?.value) return [];
     return dedupeCurrentBidCandidates(candidates
       .filter((candidate) => !candidate.rejectedReason && candidate.value && candidate !== accepted)
+      .filter((candidate) => Number(candidate.value) !== Number(accepted.value))
       .filter((candidate) => candidate.isStale || (candidate.sourceType === "active_bid_bar" && Number(candidate.value) < Number(accepted.value)))
       .map((candidate) => ({
         field: "currentBid",
@@ -1012,6 +1021,7 @@
         sourceText: candidate.sourceText,
         recencyText: candidate.recencyText,
         confidenceScore: candidate.confidenceScore,
+        selectionScore: candidate.selectionScore,
         freshnessScore: candidate.freshnessScore,
         rejectedReason: "stale_current_bid_candidate",
       })))
