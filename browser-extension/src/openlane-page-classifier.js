@@ -80,6 +80,11 @@
       captureKind = has(evidence, "accepted_outcome") || /\b(total|taxes|buy price\s*-\s*auction)\b/i.test(mainText) ? "verified_outcome" : "candidate_outcome";
       outcomeConfidence = captureKind === "verified_outcome" ? "verified" : "high";
       decisiveEvidence = evidence.filter((item) => ["fee_details", "accepted_outcome"].includes(item.marker));
+    } else if (isPurchaseList(path, mainText) && !isVdpUrl) {
+      pageType = /\/purchases?(?:$|\s|[?#])/i.test(path) ? "purchase_list" : /\/purchases?\/[^/\s]+/i.test(path) || /\b(order details)\b/i.test(mainText) ? "purchase_detail" : "purchase_list";
+      captureKind = "candidate_outcome";
+      outcomeConfidence = hasStrongPurchaseContext ? "high" : "medium";
+      decisiveEvidence = evidence.filter((item) => ["purchase_context", "vehicle_identity", "vehicle_header", "buyer_purchase_panel", "post_sale"].includes(item.marker));
     } else if (has(evidence, "post_sale") && !has(evidence, "vdp_selling_price") && !has(evidence, "purchase_detail_panel")) {
       pageType = "post_sale";
       captureKind = has(evidence, "accepted_outcome") ? "verified_outcome" : "candidate_outcome";
@@ -95,11 +100,6 @@
       captureKind = "observation";
       outcomeConfidence = "low";
       decisiveEvidence = evidence.filter((item) => ["vdp_url", "current_bid", "vehicle_identity", "vehicle_header"].includes(item.marker));
-    } else if (isPurchaseList(path, mainText)) {
-      pageType = /\/purchases?(?:$|\s|[?#])/i.test(path) ? "purchase_list" : /\/purchases?\/[^/\s]+/i.test(path) || /\b(order details)\b/i.test(mainText) ? "purchase_detail" : "purchase_list";
-      captureKind = "candidate_outcome";
-      outcomeConfidence = "medium";
-      decisiveEvidence = evidence.filter((item) => item.marker === "purchase_context");
     } else if (isSupportedActiveListingPath(url.pathname) && has(evidence, "current_bid") && (has(evidence, "vehicle_identity") || has(evidence, "vehicle_header"))) {
       pageType = "active_listing";
       captureKind = "observation";

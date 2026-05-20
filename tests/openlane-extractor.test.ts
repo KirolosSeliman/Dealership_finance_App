@@ -1884,11 +1884,11 @@ test("OpenLane realistic Hyundai fee details fixture maps invoice economics exac
   assert.equal(metadata.purchaseEconomics?.currency, "CAD");
 });
 
-test("OpenLane realistic Kia purchase detail fixture preserves media/disclosures and candidate post-sale price", () => {
+test("OpenLane realistic Kia purchase detail fixture preserves media/disclosures and candidate purchase price", () => {
   const listing = extractor.extractOpenLaneFixture(fixture("openlane-purchase-detail-kia-realistic.html"), "https://www.openlane.ca/purchases/kia-forte");
   const metadata = listing.openlaneMetadata as { disclosureCount?: number; mediaCountEvidence?: Record<string, unknown> };
 
-  assert.equal(listing.pageType, "post_sale");
+  assert.equal(listing.pageType, "purchase_detail");
   assert.equal(listing.captureKind, "candidate_outcome");
   assert.equal(listing.vin, "3KPFL4A78JE224744");
   assert.equal(listing.mileageKm, 163042);
@@ -1908,6 +1908,23 @@ test("OpenLane purchase list without fee details remains candidate context only"
   assert.equal(listing.buyPriceAuction, undefined);
   assert.equal(listing.totalInvoiceAmount, undefined);
   assert.equal(listing.finalAcquisitionCost, undefined);
+});
+
+test("OpenLane purchase list sold-price card extracts candidate sold price without verified buy label", () => {
+  const listing = extractor.extractOpenLaneFixture(
+    fixture("openlane-purchase-list-sold-price-card-live.html"),
+    "https://app.openlane.ca/purchases",
+  );
+  const fieldEvidence = listing.fieldEvidence as Record<string, Array<{ sourceType?: string; sourceText?: string }>>;
+
+  assert.equal(listing.pageType, "purchase_list");
+  assert.equal(listing.captureKind, "candidate_outcome");
+  assert.equal(listing.soldPriceCandidate, 4_000);
+  assert.equal(listing.buyPriceAuction, undefined);
+  assert.equal((listing.priceSemantics as Record<string, string>).soldPriceCandidate, "candidate_wholesale_label");
+  assert.equal((listing.priceSemantics as Record<string, string>).buyPriceAuction, undefined);
+  assert.ok(fieldEvidence.soldPriceCandidate?.some((item) => item.sourceType === "purchase_list_card" && /Sold price\s+\$4,000/i.test(String(item.sourceText))));
+  assert.ok(!((listing.missingData as string[] | undefined) || []).includes("soldPriceCandidate"));
 });
 
 test("OpenLane post-sale pending negotiation keeps sold and counter amounts as candidate labels", () => {

@@ -1668,7 +1668,7 @@
   }
 
   function extractPurchaseEconomics(text, classification, sectionMap, networkEvidence) {
-    if (!["fee_details", "purchase_detail", "purchase_info"].includes(classification.pageType)) return {};
+    if (!["fee_details", "purchase_detail", "purchase_info", "purchase_list"].includes(classification.pageType)) return {};
     const purchaseOutcomePrice = extractPurchaseOutcomePrice({
       pageContext: classification.pageType,
       captureKind: classification.captureKind,
@@ -1730,7 +1730,7 @@
 
   function extractPurchaseOutcomePrice({ pageContext, captureKind, outcomeConfidence, confidenceScore, sectionMap, text, networkEvidence } = {}) {
     if (!isPurchaseOutcomePriceContext(pageContext, captureKind)) return {};
-    const sources = trustedPurchaseOutcomeSources(sectionMap, text);
+    const sources = trustedPurchaseOutcomeSources(sectionMap, text, pageContext);
     if (!sources.length) return {};
     const rejectedCandidates = collectRejectedPurchaseOutcomeCandidates(sources, text);
     const soldCandidate = firstTrustedPurchaseMoneyCandidate(sources, ["Sold price", "Final price", "Purchase price", "Accepted price"], "soldPriceCandidate");
@@ -1772,20 +1772,21 @@
   }
 
   function isPurchaseOutcomePriceContext(pageContext, captureKind) {
-    return ["purchase_detail", "post_sale", "fee_details", "purchase_info", "verified_outcome", "candidate_outcome"].includes(String(pageContext || ""))
+    return ["purchase_detail", "purchase_list", "post_sale", "fee_details", "purchase_info", "verified_outcome", "candidate_outcome"].includes(String(pageContext || ""))
       || ["verified_outcome", "candidate_outcome"].includes(String(captureKind || ""));
   }
 
-  function trustedPurchaseOutcomeSources(sectionMap, text) {
+  function trustedPurchaseOutcomeSources(sectionMap, text, pageContext) {
     const zones = sectionMap?.zones || {};
+    const purchasePanelSourceType = pageContext === "purchase_list" ? "purchase_list_card" : "purchase_detail_panel";
     const sources = [
-      purchaseSourceFromZone("purchasePanel", zones.purchasePanel, "purchase_detail_panel"),
+      purchaseSourceFromZone("purchasePanel", zones.purchasePanel, purchasePanelSourceType),
       purchaseSourceFromZone("postSalePanel", zones.postSalePanel, "post_sale_page"),
       purchaseSourceFromZone("feeDetailsPanel", zones.feeDetailsPanel, "fee_details_page"),
     ].filter(Boolean);
     if (sources.length) return sources;
     const fallbackText = normalizeSpace(text || "");
-    return fallbackText ? [{ name: "mainText", sourceType: "purchase_detail_panel", text: fallbackText }] : [];
+    return fallbackText ? [{ name: "mainText", sourceType: purchasePanelSourceType, text: fallbackText }] : [];
   }
 
   function purchaseSourceFromZone(name, zone, sourceType) {
@@ -1799,7 +1800,7 @@
       for (const label of labels) {
         const candidate = purchaseMoneyCandidateNearLabel(source.text, label);
         if (!candidate?.value) continue;
-        if (isRejectedPurchasePriceSource(candidate.sourceText)) continue;
+        if (isRejectedPurchasePriceSource(candidate.sourceText) && !hasPositivePurchasePriceLabel(candidate.sourceText)) continue;
         return {
           field,
           label,
@@ -1895,6 +1896,10 @@
       || /\b\d{1,3}\s+Bids?\b/i.test(text);
   }
 
+  function hasPositivePurchasePriceLabel(sourceText) {
+    return /\b(sold price|final price|purchase price|accepted price|buy price\s*-\s*auction|selling price)\b/i.test(String(sourceText || ""));
+  }
+
   function hasVerifiedPurchaseCompletionEvidence(sources, outcomeConfidence) {
     if (outcomeConfidence === "verified") return true;
     return sources.some((source) => /\b(mark as picked up|picked up|paid|finalized|completed|retrieved|purchase confirmed|invoice)\b/i.test(source.text));
@@ -1904,6 +1909,7 @@
     if (sourceType === "network_json") return "network_json";
     if (sourceType === "fee_details_page") return "fee_details_page";
     if (sourceType === "post_sale_page") return "post_sale_page";
+    if (sourceType === "purchase_list_card") return "purchase_list_card";
     return "visible_page_text";
   }
 
@@ -2118,7 +2124,7 @@
   }
 
   function moneyRegex() {
-    return /(?:CA\$|CAD|\$)\s*[\d][\d,.\s]*(?:\.\d{2})?|\b[\d][\d,.\s]*(?:\.\d{2})?\s*\$|\bCAD\s*[\d,]+(?:\.\d{2})?/i;
+    return /(?:CA\$|CAD|\$)\s*[\d][\d,.]*(?:\.\d{2})?|\b[\d][\d,.]*(?:\.\d{2})?\s*\$|\bCAD\s*[\d,]+(?:\.\d{2})?/i;
   }
 
   function isTransportPriceContext(text) {
