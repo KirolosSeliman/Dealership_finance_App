@@ -76,6 +76,7 @@ const urlLikeKey = /\b(url|href|src|thumbnail|poster)\b/i;
 const noisyAlwaysPriceEvidencePattern = /\b(outbid|watchlist|photos?|disclosures?|videos?|transport\s+estimate|transport|delivery|pickup|distance|shipping|livraison|ramassage)\b|\/\s*km\b/i;
 const bidCountPriceEvidencePattern = /\b\d+\s+bids?\b|\bbids?\b/i;
 const strongMoneyEvidencePattern = /(?:[$]|CAD|CA\$|USD|US\$)\s*\d|\d[\d,. ]*\s*(?:CAD|CA\$|USD|US\$)\b/i;
+const conditionPollutionPattern = /\b(current\s+bid|full\s+bid\s+history|\d+\s+bids?|transport\s+estimate|sales\s+history\s+of\s+similar\s+vehicles|subscribe\s+now|terms\s+(?:of\s+use|and\s+conditions)|privacy\s+policy|openlane\s+inc\.\s+all\s+rights\s+reserved)\b/i;
 
 const safeDeepRecord = (maxBytes: number, maxArrayLength = 120) => z.record(z.string(), z.unknown()).superRefine((value, context) => {
   const size = jsonByteLength(value);
@@ -417,7 +418,8 @@ const marketListingPayloadBaseSchema = z.object({
 
 function enforceCaptureContract(value: Partial<z.infer<typeof marketListingPayloadBaseSchema>>, context: z.RefinementCtx) {
   const activeObservationPages = new Set(["active_listing", "watchlist"]);
-  const trustedOutcomePages = new Set(["purchase_detail", "post_sale", "fee_details"]);
+  const trustedOutcomePages = new Set(["purchase_detail", "purchase_list", "post_sale", "fee_details"]);
+  const outcomeCaptureKinds = new Set(["candidate_outcome", "verified_outcome", "manual_confirmation"]);
   const outcomePriceFields = [
     "soldPriceCandidate",
     "finalBidAmount",
@@ -479,7 +481,15 @@ function enforceCaptureContract(value: Partial<z.infer<typeof marketListingPaylo
     context.addIssue({
       code: "custom",
       path: ["pageType"],
-      message: "OpenLane outcome price fields are only accepted from purchase detail, post-sale, or fee detail pages.",
+      message: "OpenLane outcome price fields are only accepted from purchase list/detail, post-sale, or fee detail pages.",
+    });
+  }
+
+  if (isOpenLanePricePayload(value) && value.pageType && trustedOutcomePages.has(value.pageType) && outcomeCaptureKinds.has(value.captureKind ?? "") && !hasOutcomePrice) {
+    context.addIssue({
+      code: "custom",
+      path: ["captureKind"],
+      message: "OpenLane purchase/outcome captures require sold or acquisition price evidence.",
     });
   }
 
@@ -596,6 +606,22 @@ function enforceCaptureContract(value: Partial<z.infer<typeof marketListingPaylo
       });
     }
   }
+
+  if (isOpenLanePricePayload(value) && value.carfaxUrl && !isTrustedOpenLaneCarfaxUrl(value.carfaxUrl)) {
+    context.addIssue({
+      code: "custom",
+      path: ["carfaxUrl"],
+      message: "OpenLane CARFAX URL must point to CARFAX or an OpenLane vehicle-history/report path.",
+    });
+  }
+
+  if (isOpenLanePricePayload(value) && hasCanonicalConditionPollution(value)) {
+    context.addIssue({
+      code: "custom",
+      path: ["conditionReportText"],
+      message: "Canonical OpenLane condition fields contain bid, legal, or transport pollution.",
+    });
+  }
 }
 
 function isOpenLanePricePayload(value: Partial<z.infer<typeof marketListingPayloadBaseSchema>>) {
@@ -665,6 +691,36 @@ function hasOnlyTransportMileageEvidence(evidence: Array<{ sourceText?: string; 
   if (acceptedVehicleEvidence) return false;
   return evidence.some((item) => /\b(transport|delivery|pickup|distance|estimate|shipping|livraison|ramassage)\b/i.test(String(item.sourceText || item.rejectionReason || ""))
     || /\bCAD\b|\$\s*\d[\d,. ]*\s*\/\s*\d[\d,. ]*\s*km\b|\/\s*km\b/i.test(String(item.sourceText || "")));
+}
+
+function isTrustedOpenLaneCarfaxUrl(value: string) {
+  try {
+    const url = new URL(value);
+    const hostname = url.hostname.toLowerCase();
+    const pathname = url.pathname.toLowerCase();
+    if (/(^|\.)carfax\.(ca|com)$/.test(hostname)) return true;
+    if (/(^|\.)openlane\.(ca|com)$/.test(hostname) && /\b(?:carfax|vehicle-history|reports?|history)\b/.test(pathname)) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function hasCanonicalConditionPollution(value: Partial<z.infer<typeof marketListingPayloadBaseSchema>>) {
+  const conditionText = [
+    value.conditionReportText,
+    safeConditionJson(value.condition),
+  ].filter(Boolean).join(" ");
+  return conditionPollutionPattern.test(conditionText);
+}
+
+function safeConditionJson(value: unknown) {
+  if (!value || typeof value !== "object") return "";
+  try {
+    return JSON.stringify(value).slice(0, 12_000);
+  } catch {
+    return "";
+  }
 }
 
 export const marketListingPayloadSchema = marketListingPayloadBaseSchema.superRefine(enforceCaptureContract);

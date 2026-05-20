@@ -807,6 +807,61 @@ test("Market Snap validation accepts verified purchased VDP outcome with strong 
   assert.equal(kia.data?.buyPriceAuction, 4_000);
 });
 
+test("Market Snap validation accepts purchase-list outcome candidates with sold price evidence", () => {
+  const result = marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "purchase_list",
+    captureKind: "candidate_outcome",
+    title: "2017 Kia Forte",
+    year: 2017,
+    make: "Kia",
+    model: "Forte",
+    vin: "3KPFK4A77HE123456",
+    soldPriceCandidate: 4_000,
+    outcomeConfidence: "medium",
+    outcomeEvidence: [{
+      evidenceType: "visible_page_text",
+      sourceText: "Purchase card Sold price $4,000",
+      capturedAt: "2026-05-20T12:00:00.000Z",
+      confidenceScore: 92,
+    }],
+    priceSemantics: {
+      soldPriceCandidate: "candidate_wholesale_label",
+    },
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.data?.pageType, "purchase_list");
+  assert.equal(result.data?.soldPriceCandidate, 4_000);
+});
+
+test("Market Snap validation rejects OpenLane purchase outcomes without a sold or acquisition price", () => {
+  const result = marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "purchase_detail",
+    captureKind: "candidate_outcome",
+    title: "2017 Kia Forte",
+    year: 2017,
+    make: "Kia",
+    model: "Forte",
+    vin: "3KPFK4A77HE123456",
+    outcomeConfidence: "medium",
+    outcomeEvidence: [{
+      evidenceType: "visible_page_text",
+      sourceText: "Order history Mark as picked up",
+      capturedAt: "2026-05-20T12:00:00.000Z",
+      confidenceScore: 82,
+    }],
+  });
+
+  assert.equal(result.success, false);
+  assert.match(JSON.stringify(result.error?.issues), /sold or acquisition price/i);
+});
+
 test("Market Snap validation rejects verified OpenLane outcome without VIN", () => {
   const result = marketListingPayloadSchema.safeParse({
     organizationId,
@@ -863,6 +918,56 @@ test("Market Snap validation rejects verified outcome without a verified price f
   });
 
   assert.equal(result.success, false);
+});
+
+test("Market Snap validation rejects fake CARFAX URLs on OpenLane captures", () => {
+  const result = marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "active_listing",
+    captureKind: "observation",
+    title: "2017 Hyundai Tucson",
+    year: 2017,
+    make: "Hyundai",
+    model: "Tucson",
+    vin: "KM8J3CA46HU123456",
+    currentBid: 14_200,
+    carfaxUrl: "https://example.com/fake-carfax-report",
+    carfaxUrlStatus: "url_found",
+    priceSemantics: {
+      currentBid: "observation",
+    },
+  });
+
+  assert.equal(result.success, false);
+  assert.match(JSON.stringify(result.error?.issues), /CARFAX URL/i);
+});
+
+test("Market Snap validation rejects canonical condition fields polluted by bid, legal, or transport text", () => {
+  const result = marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "active_listing",
+    captureKind: "observation",
+    title: "2017 Hyundai Tucson",
+    year: 2017,
+    make: "Hyundai",
+    model: "Tucson",
+    vin: "KM8J3CA46HU123456",
+    currentBid: 5_100,
+    conditionReportText: "Mechanical Engine and transmission are good. Full bid history 29 Bids. OPENLANE Inc. All rights reserved. Transport estimate CAD $428 / 185km.",
+    condition: {
+      conditionReportText: "Mechanical Engine and transmission are good. Full bid history 29 Bids. OPENLANE Inc. All rights reserved. Transport estimate CAD $428 / 185km.",
+    },
+    priceSemantics: {
+      currentBid: "observation",
+    },
+  });
+
+  assert.equal(result.success, false);
+  assert.match(JSON.stringify(result.error?.issues), /condition/i);
 });
 
 test("Market Snap validation rejects outcome prices on unsupported OpenLane page types", () => {
