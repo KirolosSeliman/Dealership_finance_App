@@ -284,6 +284,9 @@ test("Market Snap copy payload builder returns sanitized readiness and debug evi
         lowerBidCandidates: [
           { field: "currentBid", value: 11_100, sourceType: "visible_text", sourceText: "$11,100", rejectedReason: "lower_bid_history_candidate" },
         ],
+        staleCurrentBidCandidates: [
+          { field: "currentBid", value: 8_500, sourceType: "active_bid_bar", sourceText: "Current bid $8,500 Last refreshed earlier", rejectedReason: "stale_current_bid_candidate" },
+        ],
         listedPriceDecision: { source: "current_bid", semantics: "observation_alias_current_bid" },
         apiToken: "Bearer should-not-copy",
       },
@@ -357,8 +360,11 @@ test("Market Snap copy payload builder returns sanitized readiness and debug evi
   assert.match(JSON.stringify((payload.priceDiagnostics as { rejectedOutcomePriceCandidates?: unknown[] }).rejectedOutcomePriceCandidates), /transport_estimate_not_purchase_outcome/);
   assert.match(JSON.stringify((payload.readinessSummary as { rejectedOutcomePriceCandidates?: unknown[] }).rejectedOutcomePriceCandidates), /transport_estimate_not_purchase_outcome/);
   assert.match(JSON.stringify((payload.priceDiagnostics as { lowerBidCandidates?: unknown[] }).lowerBidCandidates), /11100/);
+  assert.match(JSON.stringify((payload.priceDiagnostics as { staleCurrentBidCandidates?: unknown[] }).staleCurrentBidCandidates), /stale_current_bid_candidate/);
+  assert.match(JSON.stringify((payload.readinessSummary as { staleCurrentBidCandidates?: unknown[] }).staleCurrentBidCandidates), /stale_current_bid_candidate/);
   assert.match(JSON.stringify((payload.priceDiagnostics as { priceDiagnosticMessages?: string[] }).priceDiagnosticMessages), /Rejected bid count as price: Current bid 4 Bids/);
   assert.match(JSON.stringify((payload.priceDiagnostics as { priceDiagnosticMessages?: string[] }).priceDiagnosticMessages), /Lower bid candidate ignored: \$11,100/);
+  assert.match(JSON.stringify((payload.priceDiagnostics as { priceDiagnosticMessages?: string[] }).priceDiagnosticMessages), /Stale current bid candidate ignored: \$8,500/);
   assert.deepEqual((payload.readinessSummary as { ignoredNoisyZones?: string[] }).ignoredNoisyZones, ["sidebar", "marketGuide", "qaSection"]);
   assert.equal((payload.readinessSummary as { rejectedFieldCandidateCount?: number }).rejectedFieldCandidateCount, 2);
   assert.match(JSON.stringify(payload.debugSummary), /Network JSON observed but no vehicle\/carfax\/price candidates/i);
@@ -387,6 +393,7 @@ test("Market Snap widget debug UX explains purchased, active, Carfax, network, a
     "Rejected price candidates:",
     "Rejected outcome price candidates:",
     "Lower bid candidates ignored:",
+    "Stale current bid candidates ignored:",
     "Listed price semantics:",
     "Rejected bid count as price:",
     "buildPriceDiagnostics",

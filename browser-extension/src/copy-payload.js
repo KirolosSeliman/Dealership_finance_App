@@ -70,6 +70,7 @@
       currentBidConfidence: buildPriceDiagnostics(safeListing).currentBidConfidence,
       rejectedPriceCandidates: buildPriceDiagnostics(safeListing).rejectedPriceCandidates,
       rejectedOutcomePriceCandidates: buildPriceDiagnostics(safeListing).rejectedOutcomePriceCandidates,
+      staleCurrentBidCandidates: buildPriceDiagnostics(safeListing).staleCurrentBidCandidates,
       listedPrice: safeListing.listedPrice ?? null,
       listedPriceSource: buildPriceDiagnostics(safeListing).listedPriceSource,
       listedPriceSemantics: buildPriceDiagnostics(safeListing).listedPriceSemantics,
@@ -179,6 +180,18 @@
         rejectionReason: candidate.rejectedReason || candidate.rejectionReason || "lower_bid_candidate",
       }))
       .slice(0, 6);
+    const staleCurrentBidCandidates = (debug.staleCurrentBidCandidates || [])
+      .map((candidate) => ({
+        field: candidate.field || "currentBid",
+        value: candidate.value ?? null,
+        sourceType: candidate.sourceType || "",
+        sourceName: candidate.sourceName || "",
+        sourceText: sanitizeText(candidate.sourceText || ""),
+        recencyText: sanitizeText(candidate.recencyText || ""),
+        freshnessScore: candidate.freshnessScore ?? null,
+        rejectionReason: candidate.rejectedReason || candidate.rejectionReason || "stale_current_bid_candidate",
+      }))
+      .slice(0, 6);
     return sanitizeDebugValue({
       currentBid: listing.currentBid ?? null,
       currentBidSource: currentBidEvidence.sourceType || currentBidEvidence.matchedLabel || "",
@@ -187,10 +200,11 @@
       rejectedPriceCandidates,
       rejectedOutcomePriceCandidates: rejectedOutcomePriceCandidates(listing, rejectedPriceCandidates),
       lowerBidCandidates,
+      staleCurrentBidCandidates,
       listedPrice: listing.listedPrice ?? null,
       listedPriceSource: debug.listedPriceDecision?.source || "",
       listedPriceSemantics: listing.priceSemantics?.listedPrice || debug.listedPriceDecision?.semantics || "",
-      priceDiagnosticMessages: priceDiagnosticMessages(listing, rejectedPriceCandidates, lowerBidCandidates),
+      priceDiagnosticMessages: priceDiagnosticMessages(listing, rejectedPriceCandidates, lowerBidCandidates, staleCurrentBidCandidates),
     });
   }
 
@@ -210,7 +224,7 @@
       .slice(0, 8);
   }
 
-  function priceDiagnosticMessages(listing = {}, rejectedPriceCandidates = [], lowerBidCandidates = []) {
+  function priceDiagnosticMessages(listing = {}, rejectedPriceCandidates = [], lowerBidCandidates = [], staleCurrentBidCandidates = []) {
     return [
       listing.currentBid ? `Current bid selected: ${moneyLabel(listing.currentBid)}.` : "Current bid not found. Active listing remains observation-only.",
       ...rejectedPriceCandidates
@@ -218,6 +232,8 @@
         .map((candidate) => `Rejected bid count as price: ${candidate.sourceText || candidate.value}`),
       ...lowerBidCandidates
         .map((candidate) => `Lower bid candidate ignored: ${moneyLabel(candidate.value) || candidate.sourceText}`),
+      ...staleCurrentBidCandidates
+        .map((candidate) => `Stale current bid candidate ignored: ${moneyLabel(candidate.value) || candidate.sourceText}`),
       listing.priceSemantics?.listedPrice === "observation_alias_current_bid" ? "Listed price is an observation alias of current bid, not a final sale label." : "",
     ].filter(Boolean);
   }

@@ -274,6 +274,8 @@
       priceDiagnostics.rejectedOutcomePriceCandidates?.length ? `<ul>${priceDiagnostics.rejectedOutcomePriceCandidates.slice(0, 5).map((item) => `<li>${safeHtml(rejectedPriceCandidateLabel(item))}</li>`).join("")}</ul>` : "",
       priceDiagnostics.lowerBidCandidates?.length ? `<p>Lower bid candidates ignored: ${safeHtml(String(priceDiagnostics.lowerBidCandidates.length))}</p>` : "",
       priceDiagnostics.lowerBidCandidates?.length ? `<ul>${priceDiagnostics.lowerBidCandidates.slice(0, 5).map((item) => `<li>${safeHtml(rejectedPriceCandidateLabel(item))}</li>`).join("")}</ul>` : "",
+      priceDiagnostics.staleCurrentBidCandidates?.length ? `<p>Stale current bid candidates ignored: ${safeHtml(String(priceDiagnostics.staleCurrentBidCandidates.length))}</p>` : "",
+      priceDiagnostics.staleCurrentBidCandidates?.length ? `<ul>${priceDiagnostics.staleCurrentBidCandidates.slice(0, 5).map((item) => `<li>${safeHtml(rejectedPriceCandidateLabel(item))}</li>`).join("")}</ul>` : "",
       `<p>Listed price source: ${safeHtml(priceDiagnostics.listedPriceSource || "-")}</p>`,
       `<p>Listed price semantics: ${safeHtml(priceDiagnostics.listedPriceSemantics || "-")}</p>`,
       `<p>Sold price candidate: ${safeHtml(moneyOrDash(safeListing.soldPriceCandidate))}</p>`,
@@ -397,6 +399,18 @@
         rejectionReason: candidate.rejectedReason || candidate.rejectionReason || "lower_bid_candidate",
       }))
       .slice(0, 6);
+    const staleCurrentBidCandidates = (debug.staleCurrentBidCandidates || [])
+      .map((candidate) => ({
+        field: candidate.field || "currentBid",
+        value: candidate.value ?? null,
+        sourceType: candidate.sourceType || "",
+        sourceName: candidate.sourceName || "",
+        sourceText: redactSensitiveText(candidate.sourceText || "").slice(0, 300),
+        recencyText: redactSensitiveText(candidate.recencyText || "").slice(0, 80),
+        freshnessScore: candidate.freshnessScore ?? null,
+        rejectionReason: candidate.rejectedReason || candidate.rejectionReason || "stale_current_bid_candidate",
+      }))
+      .slice(0, 6);
     return {
       currentBid: safeListing.currentBid ?? null,
       currentBidSource: currentBidEvidence.sourceType || currentBidEvidence.matchedLabel || "",
@@ -405,6 +419,7 @@
       rejectedPriceCandidates,
       rejectedOutcomePriceCandidates: rejectedOutcomePriceCandidates(safeListing, rejectedPriceCandidates),
       lowerBidCandidates,
+      staleCurrentBidCandidates,
       listedPrice: safeListing.listedPrice ?? null,
       listedPriceSource: debug.listedPriceDecision?.source || "",
       listedPriceSemantics: safeListing.priceSemantics?.listedPrice || debug.listedPriceDecision?.semantics || "",

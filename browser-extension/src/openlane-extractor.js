@@ -210,6 +210,7 @@
           priceCandidates: [...(currentBidResult.candidates || []), ...(purchaseEconomics.priceCandidates || []), ...(postSaleOutcome.priceCandidates || [])],
           rejectedPurchaseOutcomeCandidates: purchaseEconomics.rejectedCandidates,
           lowerBidCandidates: currentBidResult.lowerBidCandidates,
+          staleCurrentBidCandidates: currentBidResult.staleCurrentBidCandidates,
           currentBidDiagnostics: currentBidResult.diagnostics,
           listedPriceDecision: listedPriceResult.decision,
           mediaRejected,
@@ -730,10 +731,9 @@
     addCurrentBidDomCandidates(candidates, doc);
     addCurrentBidLabelValueCandidates(candidates, labelValues);
     addCurrentBidTextCandidates(candidates, "visible_text", mainText, 36);
-    const accepted = candidates
-      .filter((candidate) => !candidate.rejectedReason && candidate.value)
-      .sort((a, b) => Number(b.confidenceScore || 0) - Number(a.confidenceScore || 0) || Number(b.value || 0) - Number(a.value || 0))[0];
+    const accepted = selectCurrentBidCandidate(candidates);
     const lowerBidCandidates = identifyLowerBidCandidates(candidates, accepted);
+    const staleCurrentBidCandidates = identifyStaleCurrentBidCandidates(candidates, accepted);
     return {
       value: accepted?.value,
       evidence: accepted ? {
@@ -748,12 +748,15 @@
         capturedAt: accepted.capturedAt || new Date().toISOString(),
       } : undefined,
       lowerBidCandidates,
+      staleCurrentBidCandidates,
       diagnostics: {
         winningSourceType: accepted?.sourceType,
         winningSourceName: accepted?.sourceName,
+        winningSelectionScore: accepted ? currentBidSelectionScore(accepted) : undefined,
         candidateCount: candidates.length,
         rejectedCandidateCount: candidates.filter((candidate) => candidate.rejectedReason).length,
         lowerBidCandidateCount: lowerBidCandidates.length,
+        staleCurrentBidCandidateCount: staleCurrentBidCandidates.length,
       },
       candidates: candidates
         .sort((a, b) => Number(b.confidenceScore || 0) - Number(a.confidenceScore || 0))
@@ -865,7 +868,9 @@
         const value = currentBidMoneyFrom(token);
         const tokenIndex = window.start + (match.index || 0);
         const distance = Math.abs(tokenIndex - window.labelIndex);
-        const sourceText = currentBidCandidateSnippet(source, tokenIndex, token.length);
+        const sourceText = /activeBidBar|bidPanel/i.test(sourceName)
+          ? normalizeSpace(window.text).slice(0, 240)
+          : currentBidCandidateSnippet(source, tokenIndex, token.length);
         addCurrentBidCandidate(candidates, {
           value,
           token,
@@ -930,12 +935,17 @@
   function addCurrentBidCandidate(candidates, candidate) {
     if (!candidate.value) return;
     const rejectedReason = currentBidRejectedReason(candidate);
+    const freshness = currentBidFreshness(candidate);
     candidates.push(compact({
       field: "currentBid",
       value: candidate.value,
       sourceType: candidate.sourceType,
       sourceName: candidate.sourceName,
       sourceText: normalizeSpace(candidate.sourceText).slice(0, 240),
+      recencyText: freshness.recencyText,
+      freshnessScore: freshness.freshnessScore,
+      isVisible: candidate.sourceType !== "network_json",
+      isStale: freshness.isStale,
       endpointPattern: candidate.endpointPattern,
       confidenceScore: rejectedReason ? Math.min(Number(candidate.confidenceScore || 0), 20) : candidate.confidenceScore,
       capturedAt: candidate.capturedAt,
@@ -943,10 +953,38 @@
     }));
   }
 
+  function selectCurrentBidCandidate(candidates) {
+    return candidates
+      .filter((candidate) => !candidate.rejectedReason && candidate.value)
+      .sort((a, b) => currentBidSelectionScore(b) - currentBidSelectionScore(a)
+        || Number(b.value || 0) - Number(a.value || 0))[0];
+  }
+
+  function currentBidSelectionScore(candidate = {}) {
+    const sourceType = String(candidate.sourceType || "");
+    let score = Number(candidate.confidenceScore || 0) + Number(candidate.freshnessScore || 0);
+    if (sourceType === "network_json") score += 12;
+    if (sourceType === "section_map" && /bidPanel/i.test(String(candidate.sourceName || ""))) score += 10;
+    if (sourceType === "active_bid_bar" && !candidate.isStale) score += 8;
+    if (sourceType === "active_bid_bar" && candidate.isStale) score -= 36;
+    return score;
+  }
+
+  function currentBidFreshness(candidate = {}) {
+    const text = String(candidate.sourceText || "");
+    const recencyText = text.match(/\b(under\s+1\s+min|just now|updated now|last refreshed earlier|refreshed earlier|earlier|stale|previous)\b/i)?.[0];
+    const isStale = /\b(last refreshed earlier|refreshed earlier|stale|previous|earlier)\b/i.test(text);
+    let freshnessScore = 0;
+    if (/\b(under\s+1\s+min|just now|updated now)\b/i.test(text)) freshnessScore += 18;
+    if (/bidPanel/i.test(String(candidate.sourceName || ""))) freshnessScore += 4;
+    if (isStale) freshnessScore -= 32;
+    return compact({ recencyText, freshnessScore, isStale });
+  }
+
   function identifyLowerBidCandidates(candidates, accepted) {
     if (!accepted?.value) return [];
     return dedupeCurrentBidCandidates(candidates
-      .filter((candidate) => !candidate.rejectedReason && candidate.value && candidate.value < accepted.value)
+      .filter((candidate) => (!candidate.rejectedReason || candidate.rejectedReason === "lower_bid_history_candidate") && candidate.value && candidate.value < accepted.value)
       .map((candidate) => ({
         field: "currentBid",
         value: candidate.value,
@@ -954,9 +992,28 @@
         sourceName: candidate.sourceName,
         sourceText: candidate.sourceText,
         confidenceScore: candidate.confidenceScore,
-        rejectedReason: candidate.sourceType === "visible_text" || /history|bidder/i.test(`${candidate.sourceName || ""} ${candidate.sourceText || ""}`)
+        rejectedReason: candidate.rejectedReason === "lower_bid_history_candidate" || candidate.sourceType === "visible_text" || /history|bidder/i.test(`${candidate.sourceName || ""} ${candidate.sourceText || ""}`)
           ? "lower_bid_history_candidate"
           : "lower_current_bid_candidate",
+      })))
+      .slice(0, 8);
+  }
+
+  function identifyStaleCurrentBidCandidates(candidates, accepted) {
+    if (!accepted?.value) return [];
+    return dedupeCurrentBidCandidates(candidates
+      .filter((candidate) => !candidate.rejectedReason && candidate.value && candidate !== accepted)
+      .filter((candidate) => candidate.isStale || (candidate.sourceType === "active_bid_bar" && Number(candidate.value) < Number(accepted.value)))
+      .map((candidate) => ({
+        field: "currentBid",
+        value: candidate.value,
+        sourceType: candidate.sourceType,
+        sourceName: candidate.sourceName,
+        sourceText: candidate.sourceText,
+        recencyText: candidate.recencyText,
+        confidenceScore: candidate.confidenceScore,
+        freshnessScore: candidate.freshnessScore,
+        rejectedReason: "stale_current_bid_candidate",
       })))
       .slice(0, 8);
   }
@@ -979,6 +1036,7 @@
     if (!hasMoneyMarker(`${token} ${sourceText}`)) return "missing_money_context";
     if (isTransportPriceContext(sourceText)) return "transport_or_distance_not_current_bid";
     if (/\b(buy now|buy it now)\b/i.test(candidate.betweenLabelAndToken || "")) return "buy_now_not_current_bid";
+    if (/\b(full bid history|bid history|bidder)\b/i.test(candidate.betweenLabelAndToken || "")) return "lower_bid_history_candidate";
     if (/\b(reserve|sold price|selling price|invoice total|subtotal|taxes|fees?)\b/i.test(sourceText)
       && !/\b(current bid|top bid|mise actuelle)\b/i.test(sourceText)) {
       return "non_current_bid_price_context";
