@@ -11,6 +11,7 @@
   let sequence = 0;
   let contentScriptActive = false;
   let queueEnabled = true;
+  const installedByEarlyHook = document.currentScript?.dataset?.dealerFlowEarlyHook === "true";
 
   postDiagnostic("page_hook_installed");
 
@@ -126,7 +127,7 @@
         source: "dealer-flow-openlane-network-diagnostics",
         type,
         pageHookInstalled: true,
-        earlyHookInstalled: Boolean(window.__dealerFlowOpenLaneEarlyNetworkHook),
+        earlyHookInstalled: installedByEarlyHook,
         earlyQueueLength: earlyQueue.length,
         endpointPattern: details.endpointPattern || "",
         reason: details.reason || "",

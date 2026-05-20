@@ -400,7 +400,7 @@ test("Market Snap copy payload builder returns sanitized readiness and debug evi
   assert.equal((payload.readinessSummary as { networkObserverDiagnostics?: { deniedEventCount?: number } }).networkObserverDiagnostics?.deniedEventCount, 1);
   assert.equal((payload.readinessSummary as { networkObserverDiagnostics?: { irrelevantJsonCount?: number } }).networkObserverDiagnostics?.irrelevantJsonCount, 1);
   assert.equal((payload.readinessSummary as { carfaxDiagnostics?: { carfaxTextOnlyCandidateCount?: number } }).carfaxDiagnostics?.carfaxTextOnlyCandidateCount, 1);
-  assert.match(String((payload.readinessSummary as { networkObserverMessage?: string }).networkObserverMessage), /no vehicle\/carfax\/price candidates/i);
+  assert.match(String((payload.readinessSummary as { networkObserverMessage?: string }).networkObserverMessage), /safe vehicle JSON but no Carfax\/currentBid candidates/i);
   assert.equal((payload.readinessSummary as { priceState?: string }).priceState, "observation");
   assert.equal((payload.readinessSummary as { currentBidSource?: string }).currentBidSource, "section_map");
   assert.match(String((payload.readinessSummary as { currentBidSourceText?: string }).currentBidSourceText), /\$13,700/);
@@ -425,12 +425,12 @@ test("Market Snap copy payload builder returns sanitized readiness and debug evi
   assert.match(JSON.stringify((payload.conditionCleanupDebug as { rejectedConditionLines?: unknown[] }).rejectedConditionLines), /bid_history_noise/);
   assert.match(JSON.stringify((payload.conditionCleanupDebug as { sectionBoundaryDecisions?: unknown[] }).sectionBoundaryDecisions), /Mechanical/);
   assert.match(JSON.stringify((payload.carfaxDebug as { carfaxCandidateCounts?: unknown }).carfaxCandidateCounts), /carfaxTextOnlyCandidateCount/);
-  assert.match(JSON.stringify((payload.carfaxDebug as { networkObserverMessage?: string }).networkObserverMessage), /no vehicle\/carfax\/price candidates/i);
+  assert.match(JSON.stringify((payload.carfaxDebug as { networkObserverMessage?: string }).networkObserverMessage), /safe vehicle JSON but no Carfax\/currentBid candidates/i);
   assert.match(JSON.stringify((payload.contradictionDiagnostics as { classificationContradictions?: unknown[] }).classificationContradictions), /pickup_schedule_not_purchase_outcome/);
   assert.match(JSON.stringify((payload.contradictionDiagnostics as { priceContradictions?: unknown[] }).priceContradictions), /stale_current_bid_candidate/);
   assert.match(JSON.stringify((payload.contradictionDiagnostics as { conditionContradictions?: unknown[] }).conditionContradictions), /bid_history_noise/);
   assert.match(JSON.stringify((payload.contradictionDiagnostics as { carfaxContradictions?: unknown[] }).carfaxContradictions), /text_only/);
-  assert.match(JSON.stringify((payload.contradictionDiagnostics as { networkContradictions?: unknown[] }).networkContradictions), /no vehicle\/carfax\/price candidates/i);
+  assert.match(JSON.stringify((payload.contradictionDiagnostics as { networkContradictions?: unknown[] }).networkContradictions), /safe vehicle JSON but no Carfax\/currentBid candidates/i);
   assert.match(JSON.stringify((payload.priceDiagnostics as { priceDiagnosticMessages?: string[] }).priceDiagnosticMessages), /Rejected bid count as price: Current bid 4 Bids/);
   assert.match(JSON.stringify((payload.priceDiagnostics as { priceDiagnosticMessages?: string[] }).priceDiagnosticMessages), /Lower bid candidate ignored: \$11,100/);
   assert.match(JSON.stringify((payload.priceDiagnostics as { priceDiagnosticMessages?: string[] }).priceDiagnosticMessages), /Stale current bid candidate ignored: \$8,500/);
@@ -438,7 +438,7 @@ test("Market Snap copy payload builder returns sanitized readiness and debug evi
   assert.equal((payload.readinessSummary as { rejectedFieldCandidateCount?: number }).rejectedFieldCandidateCount, 2);
   assert.deepEqual((payload.readinessSummary as { requiredFieldsForPageType?: string[] }).requiredFieldsForPageType, ["vin"]);
   assert.match(String((payload.readinessSummary as { listedPriceRequirementReason?: string }).listedPriceRequirementReason), /not required/i);
-  assert.match(JSON.stringify(payload.debugSummary), /Network JSON observed but no vehicle\/carfax\/price candidates/i);
+  assert.match(JSON.stringify(payload.debugSummary), /Network observer saw safe vehicle JSON but no Carfax\/currentBid candidates/i);
   assert.match(JSON.stringify(payload.debugSummary), /Q&A\/sidebar\/market-guide text ignored/i);
   assert.equal((payload.valuation as { confidenceScore?: number }).confidenceScore, 88);
   assert.doesNotMatch(JSON.stringify(payload), /should-not-copy|secret-token/i);
@@ -566,10 +566,10 @@ test("Market Snap widget debug UX explains purchased, active, Carfax, network, a
     "Carfax text-only; URL not required.",
     "Transport estimate ignored as listing price.",
     "Carfax text found, but no URL is exposed.",
-    "Network observer is enabled but no OpenLane vehicle JSON has been observed yet",
-    "Network observer is enabled, but the OpenLane page hook is not installed yet.",
-    "Network events observed but denied by allowlist/denylist.",
-    "Network JSON observed but no vehicle/carfax/price candidates found.",
+    "Network observer active; no OpenLane vehicle JSON observed yet.",
+    "Network observer active, but the OpenLane page hook is not installed yet.",
+    "Network observer saw requests but denied them as sensitive.",
+    "Network observer saw safe vehicle JSON but no Carfax/currentBid candidates.",
     "Network diagnostics:",
     "networkObserverDiagnosticsLabel",
     "Legacy overrides:",

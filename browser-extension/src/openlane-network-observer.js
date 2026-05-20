@@ -48,6 +48,9 @@
       reason: "observing_page_generated_responses",
       activationMode: activation.deepCaptureActivationMode,
       consentMode: activation.consentMode,
+      earlyHookInstalled: Boolean(root.__dealerFlowOpenLaneEarlyNetworkHook || observerStatus.earlyHookInstalled),
+      contentListenerActive: true,
+      eventState: eventStateFromStatus(observerStatus),
       observationCount: observations.length,
     };
     return getOpenLaneNetworkObserverStatus();
@@ -56,7 +59,9 @@
   function stopOpenLaneNetworkObserver() {
     root.removeEventListener?.("message", onPageMessage);
     clearEarlyPageHookQueue();
-    observerStatus = { ...observerStatus, enabled: false, reason: "stopped", observationCount: observations.length };
+    observations.splice(0);
+    observedEventIds.clear();
+    observerStatus = { ...resetObserverRuntimeFields(observerStatus), enabled: false, reason: "stopped", contentListenerActive: false, observationCount: observations.length, eventState: "no_events_observed" };
   }
 
   function isDeepCaptureAllowed(settings = {}, context = {}) {
@@ -84,10 +89,15 @@
       irrelevantJsonCount: 0,
       duplicateEventCount: 0,
       parseErrorCount: 0,
+      eventState: "no_events_observed",
       lastAllowedEndpointPattern: "",
       lastDeniedEndpointPattern: "",
       lastDeniedEndpointReason: "",
       lastObservedEndpointSample: "",
+      pageHookInjectionAttempted: false,
+      contentListenerActive: false,
+      queueFlushRequested: false,
+      pageHookDiagnosticCount: 0,
     };
   }
 
@@ -98,9 +108,10 @@
     observerStatus = {
       ...observerStatus,
       pageHookInstalled: Boolean(data.pageHookInstalled || observerStatus.pageHookInstalled),
-      earlyHookInstalled: Boolean(data.earlyHookInstalled || observerStatus.earlyHookInstalled),
+      earlyHookInstalled: Boolean(root.__dealerFlowOpenLaneEarlyNetworkHook || data.earlyHookInstalled || observerStatus.earlyHookInstalled),
       earlyQueueLength: Math.max(0, Number(data.earlyQueueLength || 0)),
       earlyQueueFlushed: Boolean(observerStatus.earlyQueueFlushed || data.type === "early_queue_flushed"),
+      pageHookDiagnosticCount: Number(observerStatus.pageHookDiagnosticCount || 0) + 1,
       pageHookEventCount: Number(observerStatus.pageHookEventCount || 0) + 1,
       lastPageHookEventAt: new Date().toISOString(),
     };
@@ -111,6 +122,7 @@
         lastDeniedEndpointPattern: diagnosticEndpointPattern,
         lastDeniedEndpointReason: diagnosticReason || "denied_by_page_hook",
         lastObservedEndpointSample: diagnosticEndpointPattern,
+        eventState: "events_observed_but_denied",
         observationCount: observations.length,
       };
     }
@@ -132,6 +144,7 @@
       pageHookEventCount: Number(observerStatus.pageHookEventCount || 0) + 1,
       lastPageHookEventAt: new Date().toISOString(),
       lastObservedEndpointSample: endpointPattern(url),
+      eventState: "events_observed",
     };
     if (eventId && observedEventIds.has(eventId)) {
       observerStatus = {
@@ -148,6 +161,7 @@
         deniedEventCount: Number(observerStatus.deniedEventCount || 0) + 1,
         lastDeniedEndpointPattern: decision.endpointPattern,
         lastDeniedEndpointReason: decision.reason,
+        eventState: "events_observed_but_denied",
         observationCount: observations.length,
       };
       return undefined;
@@ -156,6 +170,7 @@
       ...observerStatus,
       allowedEventCount: Number(observerStatus.allowedEventCount || 0) + 1,
       lastAllowedEndpointPattern: decision.endpointPattern,
+      eventState: "events_observed_allowed",
       observationCount: observations.length,
     };
     const parsed = parseJsonBody(body);
@@ -163,6 +178,7 @@
       observerStatus = {
         ...observerStatus,
         parseErrorCount: Number(observerStatus.parseErrorCount || 0) + 1,
+        eventState: "events_observed_parse_failed",
       };
       return undefined;
     }
@@ -172,6 +188,7 @@
         ...observerStatus,
         irrelevantJsonCount: Number(observerStatus.irrelevantJsonCount || 0) + 1,
         candidateCounts: candidateCounts(candidates),
+        eventState: "events_observed_but_irrelevant",
       };
       return undefined;
     }
@@ -189,6 +206,7 @@
       observationCount: observations.length,
       candidateCounts: candidateCounts(candidates),
       lastAllowedEndpointPattern: decision.endpointPattern,
+      eventState: "allowed_with_candidates",
     };
     return observation;
   }
@@ -206,6 +224,35 @@
 
   function getOpenLaneNetworkObserverStatus() {
     return { ...observerStatus, observationCount: observations.length };
+  }
+
+  function resetObserverRuntimeFields(status = observerStatus) {
+    return {
+      ...status,
+      observationCount: 0,
+      pageHookEventCount: 0,
+      allowedEventCount: 0,
+      deniedEventCount: 0,
+      irrelevantJsonCount: 0,
+      duplicateEventCount: 0,
+      parseErrorCount: 0,
+      lastAllowedEndpointPattern: "",
+      lastDeniedEndpointPattern: "",
+      lastDeniedEndpointReason: "",
+      lastObservedEndpointSample: "",
+      candidateCounts: undefined,
+      eventState: "no_events_observed",
+    };
+  }
+
+  function eventStateFromStatus(status = observerStatus) {
+    if (Number(status.observationCount || observations.length || 0) > 0) return "allowed_with_candidates";
+    if (Number(status.parseErrorCount || 0) > 0) return "events_observed_parse_failed";
+    if (Number(status.irrelevantJsonCount || 0) > 0) return "events_observed_but_irrelevant";
+    if (Number(status.deniedEventCount || 0) > 0) return "events_observed_but_denied";
+    if (Number(status.allowedEventCount || 0) > 0) return "events_observed_allowed";
+    if (Number(status.pageHookEventCount || 0) > 0) return "events_observed";
+    return "no_events_observed";
   }
 
   function mergeNetworkEvidenceIntoListing(listing = {}, evidence = getOpenLaneNetworkEvidence()) {
@@ -429,12 +476,12 @@
 
   function injectPageHook() {
     if (root.__dealerFlowOpenLaneNetworkObserverInjected) {
-      observerStatus = { ...observerStatus, pageHookInstalled: true };
+      observerStatus = { ...observerStatus, pageHookInjectionAttempted: true };
       return;
     }
+    observerStatus = { ...observerStatus, pageHookInjectionAttempted: true };
     if (typeof document === "undefined") return;
     root.__dealerFlowOpenLaneNetworkObserverInjected = true;
-    observerStatus = { ...observerStatus, pageHookInstalled: true };
     const script = document.createElement("script");
     script.src = chrome.runtime.getURL("src/openlane-network-page-hook.js");
     script.async = false;
@@ -443,11 +490,13 @@
   }
 
   function flushEarlyPageHookQueue() {
+    observerStatus = { ...observerStatus, queueFlushRequested: true };
     postPageHookControl("flush");
   }
 
   function clearEarlyPageHookQueue() {
     postPageHookControl("clear");
+    observerStatus = { ...observerStatus, queueFlushRequested: false };
   }
 
   function postPageHookControl(type) {

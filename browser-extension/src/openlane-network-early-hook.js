@@ -8,6 +8,7 @@
     const script = document.createElement("script");
     script.src = chrome.runtime.getURL("src/openlane-network-page-hook.js");
     script.async = false;
+    script.dataset.dealerFlowEarlyHook = "true";
     target.appendChild(script);
     script.remove();
   } catch {

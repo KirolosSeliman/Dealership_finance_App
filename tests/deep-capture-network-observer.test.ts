@@ -14,6 +14,11 @@ const networkObserver = require("../browser-extension/src/openlane-network-obser
     observationCount: number;
     pageHookInstalled?: boolean;
     earlyHookInstalled?: boolean;
+    pageHookInjectionAttempted?: boolean;
+    contentListenerActive?: boolean;
+    queueFlushRequested?: boolean;
+    pageHookDiagnosticCount?: number;
+    eventState?: string;
     earlyQueueLength?: number;
     earlyQueueFlushed?: boolean;
     pageHookEventCount?: number;
@@ -97,8 +102,47 @@ test("OpenLane network observer status reports current evidence count", () => {
   assert.equal(after.lastAllowedEndpointPattern, "app.openlane.ca/api/vdp/:id");
   assert.ok(Number(after.allowedEventCount || 0) >= 1);
   assert.equal(after.lastObservedEndpointSample, "app.openlane.ca/api/vdp/:id");
+  assert.equal(after.eventState, "allowed_with_candidates");
   assert.equal(after.candidateCounts?.vin, 1);
   networkObserver.stopOpenLaneNetworkObserver();
+});
+
+test("OpenLane network observer distinguishes early content hook from proven page hook install", () => {
+  const previousEarlyFlag = globalThis.__dealerFlowOpenLaneEarlyNetworkHook;
+  globalThis.__dealerFlowOpenLaneEarlyNetworkHook = true;
+  try {
+    const started = networkObserver.startOpenLaneNetworkObserver({
+      dealerFlowBaseUrl: "https://dealer-flow.example",
+      organizationId: "63c47786-fb41-40c1-a573-71346969b9e0",
+      observePageNetworkData: true,
+      deepCaptureEnabled: true,
+    }, { href: "https://app.openlane.ca/vdp/KM8J3CA46HU123456" });
+    const beforeDiagnostic = networkObserver.getOpenLaneNetworkObserverStatus();
+
+    assert.equal(started.enabled, true);
+    assert.equal(beforeDiagnostic.earlyHookInstalled, true);
+    assert.equal(beforeDiagnostic.contentListenerActive, true);
+    assert.equal(beforeDiagnostic.pageHookInstalled, false);
+    assert.equal(beforeDiagnostic.pageHookInjectionAttempted, true);
+    assert.equal(beforeDiagnostic.queueFlushRequested, true);
+    assert.equal(beforeDiagnostic.eventState, "no_events_observed");
+
+    networkObserver.rememberPageHookDiagnostic({
+      type: "page_hook_installed",
+      pageHookInstalled: true,
+      earlyHookInstalled: true,
+    });
+    const afterDiagnostic = networkObserver.getOpenLaneNetworkObserverStatus();
+    assert.equal(afterDiagnostic.pageHookInstalled, true);
+    assert.ok(Number(afterDiagnostic.pageHookDiagnosticCount || 0) >= 1);
+  } finally {
+    if (previousEarlyFlag === undefined) {
+      delete globalThis.__dealerFlowOpenLaneEarlyNetworkHook;
+    } else {
+      globalThis.__dealerFlowOpenLaneEarlyNetworkHook = previousEarlyFlag;
+    }
+    networkObserver.stopOpenLaneNetworkObserver();
+  }
 });
 
 test("OpenLane network observer flushes early page hook queue when active and clears it when stopped", async () => {
@@ -176,6 +220,7 @@ test("OpenLane network observer records page-hook denied endpoint diagnostics wi
   assert.equal(after.lastDeniedEndpointPattern, "app.openlane.ca/api/profile/me");
   assert.equal(after.lastDeniedEndpointReason, "denied_sensitive_endpoint");
   assert.equal(after.lastObservedEndpointSample, "app.openlane.ca/api/profile/me");
+  assert.equal(after.eventState, "events_observed_but_denied");
   assert.doesNotMatch(JSON.stringify(after), /responseText|secret-token|authorization=|token=/i);
 });
 
@@ -188,6 +233,7 @@ test("OpenLane network observer counts irrelevant JSON and parse errors without 
   assert.ok(Number(after.irrelevantJsonCount || 0) >= Number(before.irrelevantJsonCount || 0) + 1);
   assert.ok(Number(after.parseErrorCount || 0) >= Number(before.parseErrorCount || 0) + 1);
   assert.equal(after.lastObservedEndpointSample, "app.openlane.ca/api/vdp/:id");
+  assert.equal(after.eventState, "events_observed_parse_failed");
   assert.doesNotMatch(JSON.stringify(after), /secret-token|authorization=|token=/i);
 });
 

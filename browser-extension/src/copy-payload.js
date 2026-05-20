@@ -162,19 +162,22 @@
     const observer = runtime.networkObserver || {};
     const count = Number(runtime.networkEvidenceCount ?? observer.observationCount ?? listing.openlaneMetadata?.networkEvidence?.length ?? 0);
     if (observer.enabled && count === 0) {
-      if (!observer.pageHookInstalled && !observer.earlyHookInstalled) {
-        return "Network observer is enabled, but the OpenLane page hook is not installed yet.";
+      if (!observer.pageHookInstalled) {
+        return "Network observer active, but the OpenLane page hook is not installed yet.";
       }
-      if (Number(observer.pageHookEventCount || 0) === 0) {
-        return "Network observer is enabled, but no OpenLane network responses have been observed yet.";
+      if (observer.eventState === "no_events_observed" || Number(observer.pageHookEventCount || 0) === 0) {
+        return "Network observer active; no OpenLane vehicle JSON observed yet.";
       }
-      if (Number(observer.deniedEventCount || 0) > 0 && Number(observer.allowedEventCount || 0) === 0) {
-        return "Network events observed but denied by allowlist/denylist.";
+      if (observer.eventState === "events_observed_but_denied" || (Number(observer.deniedEventCount || 0) > 0 && Number(observer.allowedEventCount || 0) === 0)) {
+        return "Network observer saw requests but denied them as sensitive.";
       }
-      if (Number(observer.irrelevantJsonCount || 0) > 0) {
-        return "Network JSON observed but no vehicle/carfax/price candidates found.";
+      if (observer.eventState === "events_observed_but_irrelevant" || Number(observer.irrelevantJsonCount || 0) > 0) {
+        return "Network observer saw safe vehicle JSON but no Carfax/currentBid candidates.";
       }
-      return "Network observer is enabled but no OpenLane vehicle JSON has been observed yet. Reload the VDP or check early hook/endpoint allowlist.";
+      if (observer.eventState === "events_observed_parse_failed" || Number(observer.parseErrorCount || 0) > 0) {
+        return "Network observer saw safe responses but JSON parsing failed.";
+      }
+      return "Network observer active; no useful OpenLane vehicle evidence yet. Reload the VDP or check endpoint allowlist.";
     }
     return "";
   }
@@ -184,6 +187,11 @@
     return sanitizeDebugValue({
       pageHookInstalled: Boolean(observer.pageHookInstalled),
       earlyHookInstalled: Boolean(observer.earlyHookInstalled),
+      pageHookInjectionAttempted: Boolean(observer.pageHookInjectionAttempted),
+      contentListenerActive: Boolean(observer.contentListenerActive),
+      queueFlushRequested: Boolean(observer.queueFlushRequested),
+      pageHookDiagnosticCount: Number(observer.pageHookDiagnosticCount || 0),
+      eventState: observer.eventState || "",
       earlyQueueLength: Number(observer.earlyQueueLength || 0),
       earlyQueueFlushed: Boolean(observer.earlyQueueFlushed),
       lastPageHookEventAt: observer.lastPageHookEventAt || "",
