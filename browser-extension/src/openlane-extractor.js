@@ -1164,14 +1164,14 @@
       listing.totalInvoiceAmount,
       listing.finalAcquisitionCost,
     ].some((value) => value !== undefined && value !== null && value !== "");
-    const requiredFields = {
-      vin: listing.vin,
-      year: listing.year,
-      make: listing.make,
-      model: listing.model,
-      mileageKm: listing.mileageKm,
-      ...(isOutcomePage ? { outcomePrice: hasOutcomePrice ? true : undefined } : { listedPrice: listing.listedPrice }),
-    };
+    const requiredFields = isOutcomePage
+      ? {
+        vin: listing.vin,
+        soldPriceCandidate: hasOutcomePrice ? true : undefined,
+      }
+      : {
+        vin: listing.vin,
+      };
     return Object.entries(requiredFields)
       .filter(([, value]) => value === undefined || value === null || value === "")
       .map(([field]) => field);

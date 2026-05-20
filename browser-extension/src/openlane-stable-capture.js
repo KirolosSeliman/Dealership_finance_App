@@ -191,6 +191,9 @@
     if (!reliableContext) {
       return { ...base, state: "pending_vehicle_data", blockedReason: "missing_reliable_price_mileage_image_or_title_context" };
     }
+    if (isOutcomeCapture(listing, pageType) && !hasOutcomePriceEvidence(listing)) {
+      return { ...base, state: "pending_vehicle_data", blockedReason: "missing_purchase_outcome_price" };
+    }
     if (vinStatus === "found") {
       return { ...base, readyToCapture: true, state: "ready_to_capture", blockedReason: "" };
     }
@@ -211,6 +214,34 @@
 
   function isOpenLaneListing(listing = {}, classifier = {}) {
     return /openlane/i.test(String(listing.sourceName || classifier.sourceName || ""));
+  }
+
+  function isOutcomeCapture(listing = {}, pageType = "") {
+    return /purchase_detail|post_sale|fee_details|purchase_info/i.test(String(pageType || listing.pageType || ""))
+      || /candidate_outcome|verified_outcome/i.test(String(listing.captureKind || ""));
+  }
+
+  function hasOutcomePriceEvidence(listing = {}) {
+    const hasOutcomePrice = [
+      listing.soldPriceCandidate,
+      listing.buyPriceAuction,
+      listing.finalBidAmount,
+      listing.acceptedAmount,
+      listing.negotiatedAmount,
+      listing.totalInvoiceAmount,
+      listing.finalAcquisitionCost,
+    ].some((value) => value !== undefined && value !== null && value !== "");
+    if (!hasOutcomePrice) return false;
+    return Boolean(
+      listing.outcomeEvidence?.length
+        || listing.fieldEvidence?.soldPriceCandidate?.length
+        || listing.fieldEvidence?.buyPriceAuction?.length
+        || listing.fieldEvidence?.finalBidAmount?.length
+        || listing.openlaneMetadata?.purchaseEconomics?.purchaseEvidenceSource
+        || listing.priceSemantics?.soldPriceCandidate
+        || listing.priceSemantics?.buyPriceAuction
+        || listing.priceSemantics?.finalBidAmount,
+    );
   }
 
   function recoverVinFromUrl(href = "") {

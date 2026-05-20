@@ -907,12 +907,12 @@ test("OpenLane extractor captures and deduplicates visible photos and videos", (
   assert.ok((listing.videos as Array<{ url: string }>).some((video) => video.url.includes("f150-walkaround.mp4")));
 });
 
-test("OpenLane extractor reports missing price instead of inventing one", () => {
+test("OpenLane extractor does not invent a listed price when active price is missing", () => {
   const html = readFileSync(join(repoRoot, "tests/fixtures/openlane/openlane-missing-price.html"), "utf8");
   const listing = extractOpenLaneFixture(html);
 
   assert.equal(listing.listedPrice, undefined);
-  assert.ok((listing.missingData as string[]).includes("listedPrice"));
+  assert.ok(!((listing.missingData as string[] | undefined) || []).includes("listedPrice"));
 });
 
 test("OpenLane extractor feeds condition report and announcements into payload", () => {

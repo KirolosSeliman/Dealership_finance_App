@@ -75,6 +75,43 @@ test("OpenLane stable capture blocks weak identity without VIN but allows VIN-ba
   assert.equal(strong.vinStatus, "found");
 });
 
+test("OpenLane stable capture requires outcome price evidence on purchase pages", () => {
+  const missingOutcome = stableCapture.evaluateOpenLaneReadiness(
+    {
+      sourceName: "OpenLane",
+      pageType: "purchase_detail",
+      captureKind: "verified_outcome",
+      title: "2017 Kia Forte",
+      vin: "3KPFL4A72HE119966",
+      year: 2017,
+      make: "Kia",
+      model: "Forte",
+      imageCount: 13,
+      missingData: ["soldPriceCandidate"],
+    },
+    { pageType: "purchase_detail" },
+  );
+  const withOutcome = stableCapture.evaluateOpenLaneReadiness(
+    {
+      sourceName: "OpenLane",
+      pageType: "purchase_detail",
+      captureKind: "verified_outcome",
+      title: "2017 Kia Forte",
+      vin: "3KPFL4A72HE119966",
+      year: 2017,
+      make: "Kia",
+      model: "Forte",
+      soldPriceCandidate: 4000,
+      outcomeEvidence: [{ evidenceType: "purchase_detail_panel" }],
+    },
+    { pageType: "purchase_detail" },
+  );
+
+  assert.equal(missingOutcome.readyToCapture, false);
+  assert.equal(missingOutcome.blockedReason, "missing_purchase_outcome_price");
+  assert.equal(withOutcome.readyToCapture, true);
+});
+
 test("OpenLane stable capture keeps no-VIN listings preview-only even when identity is stable", async () => {
   const doc = fakeDocument("2017 Hyundai Tucson AWD Odometer 111,486 KM Current Bid $4,600 23 total photos CARFAX Canada");
   doc.images = Array.from({ length: 23 }, () => ({}));

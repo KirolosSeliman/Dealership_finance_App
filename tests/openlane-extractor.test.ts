@@ -958,7 +958,7 @@ test("OpenLane extractor captures condition reports and missing data", () => {
   assert.match(String(condition.conditionReportText), /Transmission hesitation/);
   assert.ok((condition.declarations as string[]).some((item) => /Structural/i.test(item)));
   assert.ok((missing.missingData as string[]).includes("vin"));
-  assert.ok((missing.missingData as string[]).includes("listedPrice"));
+  assert.ok(!((missing.missingData as string[] | undefined) || []).includes("listedPrice"));
   assert.ok((missing.warnings as string[]).some((warning) => /Carfax/i.test(warning)));
 });
 
@@ -1355,6 +1355,42 @@ test("OpenLane purchase outcome resolver accepts sold price in noisy order histo
   assert.ok((result.rejectedCandidates as Array<{ value?: number; rejectedReason?: string }>).some((item) => item.value === 21900 && item.rejectedReason === "active_current_bid_not_purchase_outcome"));
   assert.ok((result.rejectedCandidates as Array<{ value?: number; rejectedReason?: string }>).some((item) => item.value === 15 && item.rejectedReason === "bid_count_not_purchase_outcome_price"));
   assert.ok((result.rejectedCandidates as Array<{ value?: number; rejectedReason?: string }>).some((item) => item.value === 378 && item.rejectedReason === "transport_estimate_not_purchase_outcome"));
+});
+
+test("OpenLane context-aware missing data does not require listedPrice on active VDP previews", () => {
+  const listing = extractor.extractOpenLaneFixture(`
+    <main data-testid="vehicle-detail-page">
+      <h1>2020 Mazda CX-5 GS AWD</h1>
+      <button aria-label="Copy VIN JM3KFBDM1L0123456">VIN JM3KFBDM1L0123456</button>
+      <dl>
+        <dt>Odometer</dt>
+        <dd>74,512 KM</dd>
+      </dl>
+      <p>CARFAX Canada report available</p>
+      <img src="https://pub-us.kar-media.com/vehicle/JM3KFBDM1L0123456/front.jpg" width="1280" height="960" />
+    </main>
+  `, "https://app.openlane.ca/vdp/JM3KFBDM1L0123456");
+  const missing = listing.missingData as string[];
+
+  assert.equal(listing.pageType, "active_listing");
+  assert.equal(listing.currentBid, undefined);
+  assert.equal(listing.carfaxUrlStatus, "text_only");
+  const missingFields = missing || [];
+  assert.ok(!missingFields.includes("listedPrice"));
+  assert.ok(!missingFields.includes("soldPriceCandidate"));
+  assert.ok(!missingFields.includes("carfax"));
+});
+
+test("OpenLane context-aware missing data names missing sold price on purchase pages", () => {
+  const htmlWithoutSoldPrice = fixture("openlane-vdp-purchased-selling-price.html")
+    .replace(/<dt>Selling price<\/dt>\s*<dd>4 000 \$<\/dd>/i, "");
+  const listing = extractor.extractOpenLaneFixture(htmlWithoutSoldPrice, "https://app.openlane.ca/vdp/3KPFL4A72HE119966");
+  const missing = listing.missingData as string[];
+
+  assert.equal(listing.pageType, "purchase_detail");
+  assert.equal(listing.soldPriceCandidate, undefined);
+  assert.ok(missing.includes("soldPriceCandidate"));
+  assert.ok(!missing.includes("listedPrice"));
 });
 
 test("OpenLane active VDP keeps current bid observational and rejects transport estimate as listed price", () => {
