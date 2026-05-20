@@ -249,6 +249,28 @@ test("Market Snap validation rejects observation payloads that carry outcome pri
   assert.equal(result.success, false);
 });
 
+test("Market Snap validation rejects observation payloads with auction buy outcome fields", () => {
+  const result = marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "active_listing",
+    captureKind: "observation",
+    title: "2017 Kia Forte",
+    year: 2017,
+    make: "Kia",
+    model: "Forte",
+    currentBid: 5_100,
+    buyPriceAuction: 4_000,
+    priceSemantics: {
+      currentBid: "observation",
+      buyPriceAuction: "verified_wholesale_label",
+    },
+  });
+
+  assert.equal(result.success, false);
+});
+
 test("Market Snap validation accepts currentBid as observation without treating it as a final label", () => {
   const result = marketListingPayloadSchema.safeParse({
     organizationId,
@@ -332,9 +354,37 @@ test("Market Snap validation rejects bid-count evidence as canonical OpenLane pr
       }],
     },
   });
+  const currentBidFiftyNineCount = marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "active_listing",
+    captureKind: "observation",
+    title: "2020 Mazda CX-5",
+    year: 2020,
+    make: "Mazda",
+    model: "CX-5",
+    currentBid: 59,
+    priceSemantics: {
+      currentBid: "observation",
+    },
+    fieldEvidence: {
+      currentBid: [{
+        field: "currentBid",
+        value: 59,
+        normalizedValue: 59,
+        sourceType: "section_map",
+        sourceName: "OpenLane bid panel",
+        sourceText: "59 Bids",
+        confidenceScore: 72,
+        capturedAt: "2026-05-18T12:00:00.000Z",
+      }],
+    },
+  });
 
   assert.equal(currentBidCount.success, false);
   assert.equal(listedBidCount.success, false);
+  assert.equal(currentBidFiftyNineCount.success, false);
 });
 
 test("Market Snap validation preserves valid low OpenLane current bids with strong money evidence", () => {
@@ -368,6 +418,37 @@ test("Market Snap validation preserves valid low OpenLane current bids with stro
 
   assert.equal(result.success, true);
   assert.equal(result.data?.currentBid, 4);
+
+  const withBidCountNearby = marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "active_listing",
+    captureKind: "observation",
+    title: "2018 Kia Stinger GT",
+    year: 2018,
+    make: "Kia",
+    model: "Stinger",
+    currentBid: 4,
+    priceSemantics: {
+      currentBid: "observation",
+    },
+    fieldEvidence: {
+      currentBid: [{
+        field: "currentBid",
+        value: 4,
+        normalizedValue: 4,
+        sourceType: "section_map",
+        sourceName: "OpenLane bid panel",
+        sourceText: "Current bid $4 4 Bids",
+        confidenceScore: 92,
+        capturedAt: "2026-05-18T12:00:00.000Z",
+      }],
+    },
+  });
+
+  assert.equal(withBidCountNearby.success, true);
+  assert.equal(withBidCountNearby.data?.currentBid, 4);
 });
 
 test("Market Snap validation rejects transport evidence as canonical OpenLane price data", () => {
@@ -629,6 +710,63 @@ test("Market Snap validation accepts verified purchased VDP outcome with strong 
 
   assert.equal(result.success, true);
   assert.equal(result.data?.buyPriceAuction, 4_000);
+
+  const kia = marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "purchase_detail",
+    captureKind: "verified_outcome",
+    title: "2017 Kia Forte",
+    year: 2017,
+    make: "Kia",
+    model: "Forte",
+    vin: "3KPFK4A77HE123456",
+    soldPriceCandidate: 4_000,
+    buyPriceAuction: 4_000,
+    outcomeConfidence: "verified",
+    outcomeEvidence: [{
+      evidenceType: "purchase_document",
+      sourceText: "Order history Sold price $4,000 Mark as picked up",
+      capturedAt: "2026-05-18T12:00:00.000Z",
+      confidenceScore: 96,
+    }],
+    priceSemantics: {
+      soldPriceCandidate: "candidate_wholesale_label",
+      buyPriceAuction: "verified_wholesale_label",
+    },
+  });
+
+  assert.equal(kia.success, true);
+  assert.equal(kia.data?.soldPriceCandidate, 4_000);
+  assert.equal(kia.data?.buyPriceAuction, 4_000);
+});
+
+test("Market Snap validation rejects outcome prices on unsupported OpenLane page types", () => {
+  const result = marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "documents",
+    captureKind: "candidate_outcome",
+    title: "2017 Kia Forte",
+    year: 2017,
+    make: "Kia",
+    model: "Forte",
+    soldPriceCandidate: 4_000,
+    outcomeConfidence: "medium",
+    outcomeEvidence: [{
+      evidenceType: "visible_page_text",
+      sourceText: "Document notes mention sold price $4,000",
+      capturedAt: "2026-05-18T12:00:00.000Z",
+      confidenceScore: 80,
+    }],
+    priceSemantics: {
+      soldPriceCandidate: "candidate_wholesale_label",
+    },
+  });
+
+  assert.equal(result.success, false);
 });
 
 test("Market Snap validation rejects current bid semantics marked as label", () => {

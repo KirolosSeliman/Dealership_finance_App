@@ -33,6 +33,8 @@ def test_training_row_rejects_current_bid_and_transport_as_targets():
     with pytest.raises(ValueError, match="missing_verified_target"):
         normalize_training_row(base_row(current_bid=18500))
     with pytest.raises(ValueError, match="missing_verified_target"):
+        normalize_training_row(base_row(listed_price=22900, current_bid=18500))
+    with pytest.raises(ValueError, match="missing_verified_target"):
         normalize_training_row(base_row(transport_cost_cad=428, transport_distance_km=185))
 
 

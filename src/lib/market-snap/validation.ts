@@ -73,7 +73,8 @@ const longerTextList = z.array(z.string().trim().min(1).max(240)).max(50).option
 const unsafeJsonKey = /(auth|authorization|cookie|token|secret|credential|session|password|csrf|jwt|bearer)/i;
 const unsafeUrlProtocol = /^\s*(javascript|data|vbscript):/i;
 const urlLikeKey = /\b(url|href|src|thumbnail|poster)\b/i;
-const noisyPriceEvidencePattern = /\b(bids|outbid|watchlist|photos?|disclosures?|videos?|transport\s+estimate|transport|delivery|pickup|distance|shipping|livraison|ramassage)\b|\/\s*km\b/i;
+const noisyAlwaysPriceEvidencePattern = /\b(outbid|watchlist|photos?|disclosures?|videos?|transport\s+estimate|transport|delivery|pickup|distance|shipping|livraison|ramassage)\b|\/\s*km\b/i;
+const bidCountPriceEvidencePattern = /\b\d+\s+bids?\b|\bbids?\b/i;
 const strongMoneyEvidencePattern = /(?:[$]|CAD|CA\$|USD|US\$)\s*\d|\d[\d,. ]*\s*(?:CAD|CA\$|USD|US\$)\b/i;
 
 const safeDeepRecord = (maxBytes: number, maxArrayLength = 120) => z.record(z.string(), z.unknown()).superRefine((value, context) => {
@@ -416,6 +417,7 @@ const marketListingPayloadBaseSchema = z.object({
 
 function enforceCaptureContract(value: Partial<z.infer<typeof marketListingPayloadBaseSchema>>, context: z.RefinementCtx) {
   const activeObservationPages = new Set(["active_listing", "watchlist"]);
+  const trustedOutcomePages = new Set(["purchase_detail", "post_sale", "fee_details"]);
   const outcomePriceFields = [
     "soldPriceCandidate",
     "finalBidAmount",
@@ -473,6 +475,14 @@ function enforceCaptureContract(value: Partial<z.infer<typeof marketListingPaylo
     });
   }
 
+  if (isOpenLanePricePayload(value) && hasOutcomePrice && value.pageType && !trustedOutcomePages.has(value.pageType)) {
+    context.addIssue({
+      code: "custom",
+      path: ["pageType"],
+      message: "OpenLane outcome price fields are only accepted from purchase detail, post-sale, or fee detail pages.",
+    });
+  }
+
   if (value.captureKind === "observation" && hasOutcomePrice) {
     context.addIssue({
       code: "custom",
@@ -481,7 +491,7 @@ function enforceCaptureContract(value: Partial<z.infer<typeof marketListingPaylo
     });
   }
 
-  if (value.captureKind === "candidate_outcome" && hasOutcomePrice && !hasOutcomePriceEvidence(value, outcomePriceFields)) {
+  if (value.captureKind === "candidate_outcome" && hasOutcomePrice && !hasTrustedOutcomePriceEvidence(value, outcomePriceFields)) {
     context.addIssue({
       code: "custom",
       path: ["outcomeEvidence"],
@@ -502,6 +512,14 @@ function enforceCaptureContract(value: Partial<z.infer<typeof marketListingPaylo
       code: "custom",
       path: ["outcomeEvidence"],
       message: "Verified outcome captures require visible evidence.",
+    });
+  }
+
+  if ((value.captureKind === "verified_outcome" || value.outcomeConfidence === "verified") && hasOutcomePrice && !hasTrustedOutcomePriceEvidence(value, outcomePriceFields)) {
+    context.addIssue({
+      code: "custom",
+      path: ["outcomeEvidence"],
+      message: "Verified OpenLane outcome price fields require trusted purchase, invoice, or accepted-outcome evidence.",
     });
   }
 
@@ -598,23 +616,34 @@ const outcomeEvidenceFields = new Set([
 ]);
 
 function isNoisyPriceEvidenceText(value: unknown) {
-  return noisyPriceEvidencePattern.test(String(value ?? ""));
+  const text = String(value ?? "");
+  if (noisyAlwaysPriceEvidencePattern.test(text)) return true;
+  if (bidCountPriceEvidencePattern.test(text) && !strongMoneyEvidencePattern.test(text)) return true;
+  return false;
 }
 
 function hasStrongMoneyEvidence(evidence: Array<{ sourceText?: string }>) {
   return evidence.some((item) => strongMoneyEvidencePattern.test(String(item.sourceText ?? "")) && !isNoisyPriceEvidenceText(item.sourceText));
 }
 
-function hasOutcomePriceEvidence(
+function hasTrustedOutcomePriceEvidence(
   value: Partial<z.infer<typeof marketListingPayloadBaseSchema>>,
   outcomePriceFields: readonly string[],
 ) {
-  if (value.outcomeEvidence?.some((item) => Boolean(item.sourceText || item.sourceUrl || item.evidenceType))) return true;
-  if (value.sourceEvidence?.some((item) => Boolean(item.sourceText || item.sourceUrl || item.endpointPattern || item.evidenceType))) return true;
+  if (value.outcomeEvidence?.some(isTrustedOutcomeEvidenceItem)) return true;
+  if (value.sourceEvidence?.some(isTrustedOutcomeEvidenceItem)) return true;
   return outcomePriceFields.some((field) => {
     const evidence = value.fieldEvidence?.[field] ?? [];
-    return evidence.some((item) => !item.rejectionReason && Boolean(item.sourceText || item.endpointPattern || item.sourceName));
+    return evidence.some((item) => !item.rejectionReason && isTrustedOutcomeEvidenceItem(item));
   });
+}
+
+function isTrustedOutcomeEvidenceItem(item: { evidenceType?: string; sourceText?: string; sourceUrl?: string; endpointPattern?: string; sourceName?: string; rejectionReason?: string }) {
+  if (!item || item.rejectionReason) return false;
+  if (/fee_details_page|invoice|purchase_document|accepted_negotiation|manual_confirmation/i.test(String(item.evidenceType || ""))) return true;
+  const source = [item.sourceText, item.sourceName, item.endpointPattern, item.sourceUrl].filter(Boolean).join(" ");
+  return /\b(sold\s+price|selling\s+price|order\s+history|mark\s+as\s+picked\s+up|picked\s+up|invoice|paid|payment|buy\s+price|purchase\s+(?:price|detail)|accepted|final\s+bid|total\s+invoice)\b/i.test(source)
+    && strongMoneyEvidencePattern.test(source);
 }
 
 function hasOnlyTransportMileageEvidence(evidence: Array<{ sourceText?: string; rejectionReason?: string }> | undefined) {
