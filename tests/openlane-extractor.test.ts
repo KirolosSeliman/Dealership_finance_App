@@ -534,7 +534,12 @@ test("OpenLane title parser preserves known multi-word models and trims", () => 
     ["2018 Mazda Mazda3 GS Auto", { make: "Mazda", model: "Mazda3", trim: "GS Auto" }],
     ["2018 Kia Stinger GT", { make: "Kia", model: "Stinger", trim: "GT" }],
     ["2023 Nissan Frontier Crew Cab SV", { make: "Nissan", model: "Frontier", trim: "Crew Cab SV" }],
+    ["2023 Nissan Frontier Crew Cab Bed 4x4 Auto", { make: "Nissan", model: "Frontier", trim: "Crew Cab Bed 4x4 Auto" }],
+    ["2022 Nissan Titan Crew Cab PRO-4X", { make: "Nissan", model: "Titan", trim: "Crew Cab PRO-4X" }],
     ["2020 Toyota Camry Hybrid XLE", { make: "Toyota", model: "Camry Hybrid", trim: "XLE" }],
+    ["2019 Toyota Camry Hybrid XLE Auto", { make: "Toyota", model: "Camry Hybrid", trim: "XLE Auto" }],
+    ["2021 Honda Accord Sport CVT", { make: "Honda", model: "Accord", trim: "Sport CVT" }],
+    ["2020 Mercedes-Benz G-Class G 63 AMG", { make: "Mercedes-Benz", model: "G-Class", trim: "G 63 AMG" }],
   ] as const;
 
   for (const [title, expected] of cases) {
@@ -543,6 +548,14 @@ test("OpenLane title parser preserves known multi-word models and trims", () => 
     assert.equal(parsed.model, expected.model, title);
     assert.equal(parsed.trim, expected.trim, title);
   }
+
+  const decoded = extractor.extractYearMakeModelTrim("2014 Hyundai Santa Fe Sport SE", {
+    make: "Hyundai",
+    model: "Santa Fe Sport",
+    trim: "VIN decoded trim should not replace visible trim",
+  });
+  assert.equal(decoded.model, "Santa Fe Sport");
+  assert.equal(decoded.trim, "SE");
 });
 
 test("OpenLane identity debug explains missing VIN when no candidate exists", () => {

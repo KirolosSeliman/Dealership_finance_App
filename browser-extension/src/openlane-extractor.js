@@ -478,7 +478,7 @@
 
   function parseTitle(title) {
     const year = Number(title.match(/\b(19|20)\d{2}\b/)?.[0]);
-    const clean = title.replace(/\b(19|20)\d{2}\b/, "").replace(/[|,-]/g, " ").trim();
+    const clean = title.replace(/\b(19|20)\d{2}\b/, "").replace(/[|,]/g, " ").trim();
     const words = clean.split(/\s+/).filter(Boolean);
     const knownModel = matchKnownModel(words[0], words.slice(1));
     return {
@@ -491,9 +491,11 @@
 
   const KNOWN_MODELS_BY_MAKE = {
     Hyundai: ["Santa Fe Sport", "Santa Fe"],
+    Honda: ["Accord"],
     Mazda: ["Mazda3"],
     Kia: ["Stinger", "Forte"],
-    Nissan: ["Frontier"],
+    "Mercedes-Benz": ["G-Class"],
+    Nissan: ["Frontier", "Titan"],
     Toyota: ["Camry Hybrid", "Camry"],
   };
 
@@ -516,8 +518,29 @@
     return Object.keys(KNOWN_MODELS_BY_MAKE).find((item) => item.toLowerCase() === text) || "";
   }
 
-  function extractYearMakeModelTrim(value) {
-    return parseTitle(String(value || ""));
+  function extractYearMakeModelTrim(value, vinDecodedIdentity) {
+    return mergeVinDecodedIdentity(parseTitle(String(value || "")), vinDecodedIdentity);
+  }
+
+  function mergeVinDecodedIdentity(parsed = {}, vinDecodedIdentity = {}) {
+    if (!vinDecodedIdentity || typeof vinDecodedIdentity !== "object") return parsed;
+    const decoded = {
+      make: cleanDecodedIdentityText(vinDecodedIdentity.make),
+      model: cleanDecodedIdentityText(vinDecodedIdentity.model),
+      trim: cleanDecodedIdentityText(vinDecodedIdentity.trim),
+    };
+    return {
+      ...parsed,
+      make: decoded.make || parsed.make,
+      model: decoded.model || parsed.model,
+      trim: parsed.trim || decoded.trim || undefined,
+    };
+  }
+
+  function cleanDecodedIdentityText(value) {
+    const text = normalizeSpace(String(value || ""));
+    if (!text || /[<>{}]|javascript:|\[redacted/i.test(text)) return "";
+    return text.slice(0, 80);
   }
 
   function cleanTitleCandidate(value) {
