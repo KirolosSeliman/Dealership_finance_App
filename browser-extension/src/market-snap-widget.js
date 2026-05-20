@@ -240,6 +240,7 @@
     const vinCandidates = debug.vinCandidates || [];
     const rejectedFieldCandidates = rejectedFieldCandidateItems(safeListing);
     const priceDiagnostics = buildPriceDiagnostics(safeListing);
+    const currentBidDebug = buildCurrentBidDebug(safeListing, priceDiagnostics);
     const contradictions = contradictionDiagnostics(safeListing, priceDiagnostics);
     const conditionDebug = conditionCleanupDebug(safeListing);
     return [
@@ -252,6 +253,8 @@
       `<p>Consent mode: ${safeHtml(safeListing.consentMode || deepCaptureRuntime.consentMode || "-")}</p>`,
       `<p>Readiness: ${safeHtml(readiness.state || "-")}</p>`,
       `<p>Capture blocked reason: ${safeHtml(readiness.blockedReason || "-")}</p>`,
+      `<p>Required fields for page type: ${safeHtml(requiredFieldsForPageType(safeListing).join(", ") || "-")}</p>`,
+      `<p>Listed price requirement: ${safeHtml(listedPriceRequirementReason(safeListing))}</p>`,
       `<p>VIN: ${safeHtml(safeListing.vin || "-")}</p>`,
       `<p>VIN status: ${safeHtml(readiness.vinStatus || vinStatusLabel(safeListing) || "-")}</p>`,
       `<p>VIN evidence source: ${safeHtml(vinEvidenceSource(safeListing, debug))}</p>`,
@@ -275,6 +278,9 @@
       `<p>Current bid source: ${safeHtml(priceDiagnostics.currentBidSource || "-")}</p>`,
       `<p>Current bid source text: ${safeHtml(priceDiagnostics.currentBidSourceText || "-")}</p>`,
       `<p>Current bid confidence: ${safeHtml(priceDiagnostics.currentBidConfidence ?? "-")}</p>`,
+      `<p>Fresh bid panel candidates: ${safeHtml(String(currentBidDebug.freshBidPanelCandidates.length || 0))}</p>`,
+      `<p>Bid monitor status: ${safeHtml(currentBidDebug.bidMonitorStatus ? JSON.stringify(currentBidDebug.bidMonitorStatus).slice(0, 180) : "-")}</p>`,
+      `<p>Last bid updated at: ${safeHtml(currentBidDebug.lastBidUpdatedAt || "-")}</p>`,
       priceDiagnostics.rejectedPriceCandidates?.length ? `<p>Rejected price candidates: ${safeHtml(String(priceDiagnostics.rejectedPriceCandidates.length))}</p>` : "",
       priceDiagnostics.rejectedPriceCandidates?.length ? `<ul>${priceDiagnostics.rejectedPriceCandidates.slice(0, 5).map((item) => `<li>${safeHtml(rejectedPriceCandidateLabel(item))}</li>`).join("")}</ul>` : "",
       priceDiagnostics.rejectedOutcomePriceCandidates?.length ? `<p>Rejected outcome price candidates: ${safeHtml(String(priceDiagnostics.rejectedOutcomePriceCandidates.length))}</p>` : "",
@@ -289,6 +295,7 @@
       `<p>Buy price auction: ${safeHtml(moneyOrDash(safeListing.buyPriceAuction))}</p>`,
       `<p>Final bid amount: ${safeHtml(moneyOrDash(safeListing.finalBidAmount))}</p>`,
       `<p>Purchase evidence source: ${safeHtml(purchaseEvidenceSource(safeListing))}</p>`,
+      `<p>Sold price parser status: ${safeHtml(soldPriceParserStatus(safeListing, priceDiagnostics))}</p>`,
       `<p>Purchase marker rejected reasons: ${safeHtml(purchaseMarkerRejectedReasons(safeListing).join(", ") || "-")}</p>`,
       `<p>Ignored noisy zones: ${safeHtml(ignoredNoisyZonesLabel(safeListing))}</p>`,
       `<p>Rejected condition lines: ${safeHtml(String(conditionDebug.rejectedConditionLines.length || 0))}</p>`,
@@ -448,6 +455,36 @@
     };
   }
 
+  function buildCurrentBidDebug(listing = {}, priceDiagnostics = buildPriceDiagnostics(listing)) {
+    const safeListing = listing || {};
+    const debug = safeListing.extractedFields?.debug || {};
+    const bidStabilization = safeListing.openlaneMetadata?.bidStabilization || {};
+    const bidLiveMonitor = safeListing.openlaneMetadata?.bidLiveMonitor || null;
+    const currentBidEvidence = safeListing.extractedFields?.currentBidEvidence
+      || safeListing.fieldEvidence?.currentBid?.[0]
+      || {};
+    const priceCandidates = Array.isArray(debug.priceCandidates) ? debug.priceCandidates : [];
+    const freshBidPanelCandidates = priceCandidates
+      .filter((candidate) => /bid_panel|top_row|current_bid|bid_history/i.test(`${candidate.sourceType || ""} ${candidate.sourceName || ""} ${candidate.label || ""}`) && !candidate.rejectedReason && !candidate.rejectionReason)
+      .map((candidate) => ({
+        value: candidate.value ?? null,
+        sourceType: candidate.sourceType || candidate.source || "",
+        sourceName: candidate.sourceName || candidate.label || "",
+        sourceText: redactSensitiveText(candidate.sourceText || "").slice(0, 300),
+      }))
+      .slice(0, 5);
+    const winningSource = currentBidEvidence.sourceType || currentBidEvidence.matchedLabel || priceDiagnostics.currentBidSource || "";
+    return {
+      winningCurrentBid: safeListing.currentBid ?? null,
+      winningCurrentBidSource: winningSource,
+      winningSource,
+      sourceText: redactSensitiveText(currentBidEvidence.sourceText || priceDiagnostics.currentBidSourceText || "").slice(0, 300),
+      freshBidPanelCandidates,
+      bidMonitorStatus: bidLiveMonitor,
+      lastBidUpdatedAt: bidLiveMonitor?.updatedAt || bidStabilization.bidUpdatedAt || currentBidEvidence.capturedAt || "",
+    };
+  }
+
   function contradictionDiagnostics(listing = {}, priceDiagnostics = buildPriceDiagnostics(listing)) {
     const rejectedMarkers = purchaseMarkerRejectedEvidence(listing);
     const conditionDebug = conditionCleanupDebug(listing);
@@ -513,6 +550,30 @@
         rejectionReason: candidate.rejectedReason || candidate.rejectionReason || "not_purchase_outcome_price",
       }))
       .slice(0, 8);
+  }
+
+  function isPurchaseOutcomeContext(listing = {}) {
+    return /purchase_detail|post_sale|fee_details|purchase_info/i.test(String(listing.pageType || ""))
+      || /candidate_outcome|verified_outcome/i.test(String(listing.captureKind || ""));
+  }
+
+  function requiredFieldsForPageType(listing = {}) {
+    if (isPurchaseOutcomeContext(listing)) return ["vin", "soldPriceCandidate", "purchaseEvidence"];
+    return ["vin"];
+  }
+
+  function listedPriceRequirementReason(listing = {}) {
+    if (isPurchaseOutcomeContext(listing)) {
+      return "listedPrice is not required on purchase/outcome pages; sold/acquisition outcome price is required.";
+    }
+    return "listedPrice is not required for active listing readiness; current bid is observation-only.";
+  }
+
+  function soldPriceParserStatus(listing = {}, priceDiagnostics = buildPriceDiagnostics(listing)) {
+    if (!isPurchaseOutcomeContext(listing)) return "not_purchase_context";
+    if (listing.soldPriceCandidate || listing.buyPriceAuction || listing.finalBidAmount) return "price_found";
+    if ((priceDiagnostics.rejectedOutcomePriceCandidates || []).length) return "rejected_candidates_only";
+    return "missing_sold_price";
   }
 
   function rejectedPriceCandidateLabel(candidate = {}) {

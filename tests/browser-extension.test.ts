@@ -355,6 +355,12 @@ test("Market Snap copy payload builder returns sanitized readiness and debug evi
         initialCurrentBid: 8500,
         finalCurrentBid: 13_700,
         bidStabilizationAttempts: 1,
+        bidUpdatedAt: "2026-05-20T12:00:00.000Z",
+      },
+      bidLiveMonitor: {
+        updatedAt: "2026-05-20T12:00:01.000Z",
+        currentBid: 13_700,
+        source: "bid_only_monitor",
       },
       networkEvidence: [],
       carfaxEvidence: [{ source: "network_json" }],
@@ -404,7 +410,11 @@ test("Market Snap copy payload builder returns sanitized readiness and debug evi
   assert.equal((payload.currentBidDebug as { winningCurrentBidSource?: string }).winningCurrentBidSource, "section_map");
   assert.match(JSON.stringify((payload.currentBidDebug as { staleActiveBidBarCandidate?: unknown }).staleActiveBidBarCandidate), /8500/);
   assert.match(JSON.stringify((payload.currentBidDebug as { bidPanelTopCandidate?: unknown }).bidPanelTopCandidate), /13700/);
+  assert.match(JSON.stringify((payload.currentBidDebug as { freshBidPanelCandidates?: unknown[] }).freshBidPanelCandidates), /13700/);
+  assert.match(JSON.stringify((payload.currentBidDebug as { bidMonitorStatus?: unknown }).bidMonitorStatus), /bid_only_monitor/);
+  assert.equal((payload.currentBidDebug as { lastBidUpdatedAt?: string }).lastBidUpdatedAt, "2026-05-20T12:00:01.000Z");
   assert.equal((payload.currentBidDebug as { bidStabilizationAttempts?: number }).bidStabilizationAttempts, 1);
+  assert.equal((payload.purchaseOutcomeDebug as { soldPriceParserStatus?: string }).soldPriceParserStatus, "not_purchase_context");
   assert.match(JSON.stringify((payload.purchaseOutcomeDebug as { purchaseMarkerRejectedReasons?: unknown[] }).purchaseMarkerRejectedReasons), /pickup_schedule_not_purchase_outcome/);
   assert.match(JSON.stringify((payload.purchaseOutcomeDebug as { purchaseMarkerSourceZones?: unknown[] }).purchaseMarkerSourceZones), /sellerNotes/);
   assert.match(JSON.stringify((payload.conditionCleanupDebug as { rejectedConditionLines?: unknown[] }).rejectedConditionLines), /bid_history_noise/);
@@ -421,6 +431,8 @@ test("Market Snap copy payload builder returns sanitized readiness and debug evi
   assert.match(JSON.stringify((payload.priceDiagnostics as { priceDiagnosticMessages?: string[] }).priceDiagnosticMessages), /Stale current bid candidate ignored: \$8,500/);
   assert.deepEqual((payload.readinessSummary as { ignoredNoisyZones?: string[] }).ignoredNoisyZones, ["sidebar", "marketGuide", "qaSection", "sellerNotes"]);
   assert.equal((payload.readinessSummary as { rejectedFieldCandidateCount?: number }).rejectedFieldCandidateCount, 2);
+  assert.deepEqual((payload.readinessSummary as { requiredFieldsForPageType?: string[] }).requiredFieldsForPageType, ["vin"]);
+  assert.match(String((payload.readinessSummary as { listedPriceRequirementReason?: string }).listedPriceRequirementReason), /not required/i);
   assert.match(JSON.stringify(payload.debugSummary), /Network JSON observed but no vehicle\/carfax\/price candidates/i);
   assert.match(JSON.stringify(payload.debugSummary), /Q&A\/sidebar\/market-guide text ignored/i);
   assert.equal((payload.valuation as { confidenceScore?: number }).confidenceScore, 88);
@@ -460,6 +472,7 @@ test("Market Snap copy payload exposes Kia purchase outcome fields without liste
   assert.equal(purchaseDebug.soldPriceCandidate, 4_000);
   assert.equal(purchaseDebug.buyPriceAuction, 4_000);
   assert.equal(purchaseDebug.purchaseEvidenceSource, "purchase_detail_panel");
+  assert.equal((purchaseDebug as { soldPriceParserStatus?: string }).soldPriceParserStatus, "price_found");
   assert.ok(Array.isArray(purchaseDebug.rejectedOutcomePriceCandidates));
   assert.match(JSON.stringify(payload), /soldPriceCandidate|buyPriceAuction|purchaseOutcomeDebug|rejectedOutcomePriceCandidates/);
 });
@@ -492,6 +505,9 @@ test("Market Snap widget debug UX explains purchased, active, Carfax, network, a
     "Carfax contradictions:",
     "Network contradictions:",
     "Purchase marker rejected reasons:",
+    "Sold price parser status:",
+    "Required fields for page type:",
+    "Listed price requirement:",
     "Rejected condition lines:",
     "Section boundary decisions:",
     "Listed price semantics:",
