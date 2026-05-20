@@ -207,12 +207,12 @@
       message,
       readiness.blockedReason ? `Capture blocked: ${readiness.blockedReason}` : "",
       ...diagnosticMessages(safeListing),
-      safeListing.carfaxUrlStatus === "text_only" ? "Carfax text found, but no URL is visible." : "",
+      safeListing.carfaxUrlStatus === "text_only" ? "Carfax text-only; URL not required." : "",
       listing && safeListing.captureLevel !== "deep_capture" ? "Deep Capture disabled: missing Dealer Flow URL or Organization ID, or disabled by user." : "",
       savedResultLabel(saveResult),
       ...conditionWarningItems(safeListing).slice(0, 3),
       ...(valuation?.warnings || safeListing.warnings || []).slice(0, 4),
-      ...(valuation?.missingData || safeListing.missingData || []).slice(0, 4).map((field) => `Missing: ${field}`),
+      ...(valuation?.missingData || safeListing.missingData || []).slice(0, 4).map((field) => missingFieldMessage(field)),
     ].filter(Boolean);
     if (items.length === 0) return "";
     return `<ul>${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
@@ -555,7 +555,7 @@
   }
 
   function isPurchaseOutcomeContext(listing = {}) {
-    return /purchase_detail|post_sale|fee_details|purchase_info/i.test(String(listing.pageType || ""))
+    return /purchase_detail|purchase_list|post_sale|fee_details|purchase_info/i.test(String(listing.pageType || ""))
       || /candidate_outcome|verified_outcome/i.test(String(listing.captureKind || ""));
   }
 
@@ -569,6 +569,18 @@
       return "listedPrice is not required on purchase/outcome pages; sold/acquisition outcome price is required.";
     }
     return "listedPrice is not required for active listing readiness; current bid is observation-only.";
+  }
+
+  function missingFieldMessage(field) {
+    if (field === "soldPriceCandidate") return "Missing sold price";
+    const label = {
+      buyPriceAuction: "auction buy price",
+      finalBidAmount: "final bid amount",
+      vin: "VIN",
+      listedPrice: "listed price",
+      currentBid: "current bid",
+    }[String(field || "")] || String(field || "data");
+    return `Missing ${label}`;
   }
 
   function soldPriceParserStatus(listing = {}, priceDiagnostics = buildPriceDiagnostics(listing)) {

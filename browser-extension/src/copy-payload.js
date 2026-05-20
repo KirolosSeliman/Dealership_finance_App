@@ -413,7 +413,7 @@
   }
 
   function isPurchaseOutcomeContext(listing = {}) {
-    return /purchase_detail|post_sale|fee_details|purchase_info/i.test(String(listing.pageType || ""))
+    return /purchase_detail|purchase_list|post_sale|fee_details|purchase_info/i.test(String(listing.pageType || ""))
       || /candidate_outcome|verified_outcome/i.test(String(listing.captureKind || ""));
   }
 

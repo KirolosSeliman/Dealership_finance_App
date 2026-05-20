@@ -584,6 +584,7 @@
   function readinessMessage(readiness = {}) {
     if (readiness.state === "unsupported_page") return "Vehicle data is still loading.";
     if (readiness.blockedReason === "missing_vin_openlane_preview_only") return "VIN missing. Preview only - capture blocked to avoid bad data.";
+    if (readiness.blockedReason === "missing_purchase_outcome_price") return "Missing sold price. Purchase/outcome capture is waiting for verified outcome price evidence.";
     if (readiness.state === "incomplete_identity" && readiness.vinStatus !== "found") return "VIN missing. Capture blocked to avoid bad data.";
     if (readiness.state === "incomplete_identity") return "OpenLane vehicle identity is incomplete. Waiting for stronger vehicle details before capture.";
     if (readiness.state === "pending_vehicle_data") return "Vehicle data is still loading.";

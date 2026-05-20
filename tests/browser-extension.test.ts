@@ -546,6 +546,8 @@ test("Market Snap widget debug UX explains purchased, active, Carfax, network, a
     "Purchased VDP detected from",
     "Active listing detected. Current bid is observation-only.",
     "Sold price extracted from purchase panel.",
+    "Missing sold price",
+    "Carfax text-only; URL not required.",
     "Transport estimate ignored as listing price.",
     "Carfax text found, but no URL is exposed.",
     "Network observer is enabled but no OpenLane vehicle JSON has been observed yet",

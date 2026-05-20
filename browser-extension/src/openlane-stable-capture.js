@@ -165,7 +165,7 @@
     const pageType = String(classifier.pageType || listing.pageType || "unknown");
     const identityConfidence = identityConfidenceFor(listing, vinStatus);
     const reliableContext = hasReliableCaptureContext(listing);
-    const missingData = Array.from(new Set([...(listing.missingData || []), vinStatus === "found" ? "" : "vin", carfaxStatus === "missing" ? "carfax" : ""].filter(Boolean)));
+    const missingData = contextMissingDataForReadiness(listing, pageType, vinStatus);
     const base = {
       readyToCapture: false,
       state: "pending_vehicle_data",
@@ -217,8 +217,25 @@
   }
 
   function isOutcomeCapture(listing = {}, pageType = "") {
-    return /purchase_detail|post_sale|fee_details|purchase_info/i.test(String(pageType || listing.pageType || ""))
+    return /purchase_detail|purchase_list|post_sale|fee_details|purchase_info/i.test(String(pageType || listing.pageType || ""))
       || /candidate_outcome|verified_outcome/i.test(String(listing.captureKind || ""));
+  }
+
+  function contextMissingDataForReadiness(listing = {}, pageType = "", vinStatus = "missing") {
+    const isOutcome = isOutcomeCapture(listing, pageType);
+    const ignoredByContext = new Set([
+      "carfax",
+      "carfaxUrl",
+      isOutcome ? "listedPrice" : "soldPriceCandidate",
+      isOutcome ? "currentBid" : "buyPriceAuction",
+      isOutcome ? "currentBid" : "finalBidAmount",
+    ].filter(Boolean));
+    const missing = (listing.missingData || []).filter((field) => !ignoredByContext.has(String(field || "")));
+    if (vinStatus !== "found" && !missing.includes("vin")) missing.push("vin");
+    if (isOutcome && !hasOutcomePriceEvidence(listing) && !missing.includes("soldPriceCandidate")) {
+      missing.push("soldPriceCandidate");
+    }
+    return Array.from(new Set(missing));
   }
 
   function hasOutcomePriceEvidence(listing = {}) {

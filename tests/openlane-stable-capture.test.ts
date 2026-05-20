@@ -112,6 +112,49 @@ test("OpenLane stable capture requires outcome price evidence on purchase pages"
   assert.equal(withOutcome.readyToCapture, true);
 });
 
+test("OpenLane stable capture applies purchase-list and Carfax readiness by context", () => {
+  const missingPurchaseList = stableCapture.evaluateOpenLaneReadiness(
+    {
+      sourceName: "OpenLane",
+      pageType: "purchase_list",
+      captureKind: "candidate_outcome",
+      title: "2017 Kia Forte",
+      vin: "3KPFL4A72HE119966",
+      year: 2017,
+      make: "Kia",
+      model: "Forte",
+      imageCount: 13,
+      missingData: ["listedPrice"],
+    },
+    { pageType: "purchase_list" },
+  );
+  const activeMissingCarfax = stableCapture.evaluateOpenLaneReadiness(
+    {
+      sourceName: "OpenLane",
+      pageType: "active_listing",
+      captureKind: "observation",
+      title: "2021 Toyota RAV4",
+      vin: "2T3R1RFV5MW123456",
+      year: 2021,
+      make: "Toyota",
+      model: "RAV4",
+      imageCount: 12,
+      currentBid: 18500,
+      missingData: ["carfax", "carfaxUrl", "soldPriceCandidate"],
+    },
+    { pageType: "active_listing" },
+  );
+
+  assert.equal(missingPurchaseList.readyToCapture, false);
+  assert.equal(missingPurchaseList.blockedReason, "missing_purchase_outcome_price");
+  assert.ok(missingPurchaseList.missingData.includes("soldPriceCandidate"));
+  assert.ok(!missingPurchaseList.missingData.includes("listedPrice"));
+  assert.equal(activeMissingCarfax.readyToCapture, true);
+  assert.ok(!activeMissingCarfax.missingData.includes("carfax"));
+  assert.ok(!activeMissingCarfax.missingData.includes("carfaxUrl"));
+  assert.ok(!activeMissingCarfax.missingData.includes("soldPriceCandidate"));
+});
+
 test("OpenLane stable capture keeps no-VIN listings preview-only even when identity is stable", async () => {
   const doc = fakeDocument("2017 Hyundai Tucson AWD Odometer 111,486 KM Current Bid $4,600 23 total photos CARFAX Canada");
   doc.images = Array.from({ length: 23 }, () => ({}));

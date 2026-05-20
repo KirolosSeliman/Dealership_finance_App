@@ -1182,7 +1182,7 @@
   }
 
   function buildMissingData(listing) {
-    const isOutcomePage = ["purchase_detail", "post_sale", "fee_details", "purchase_info"].includes(String(listing.pageType || ""))
+    const isOutcomePage = ["purchase_detail", "purchase_list", "post_sale", "fee_details", "purchase_info"].includes(String(listing.pageType || ""))
       || ["candidate_outcome", "verified_outcome"].includes(String(listing.captureKind || ""));
     const hasOutcomePrice = [
       listing.soldPriceCandidate,
