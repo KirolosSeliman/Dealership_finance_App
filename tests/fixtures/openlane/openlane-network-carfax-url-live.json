@@ -1,0 +1,13 @@
+{
+  "vehicle": {
+    "vin": "3KPFK4A77HE123456",
+    "year": 2017,
+    "make": "Kia",
+    "model": "Forte",
+    "odometerKm": 111486,
+    "carfaxReportUrl": "https://app.openlane.ca/vehicle-history/carfax/FORTE-LIVE-123?token=redacted-by-test",
+    "media": [
+      "https://pub-us.kar-media.com/vehicle/3KPFK4A77HE123456/front.jpg"
+    ]
+  }
+}

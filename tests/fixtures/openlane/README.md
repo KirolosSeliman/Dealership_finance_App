@@ -42,3 +42,10 @@ Fixtures in this folder must be sanitized snapshots of visible page structure on
 - `openlane-vdp-carfax-router-metadata.html`, `openlane-network-current-bid-carfax-diagnostics.json` - CARFAX router/network metadata fixtures for URL recovery diagnostics.
 - `openlane-vdp-active-current-bid-with-bid-count.html`, `openlane-vdp-active-current-bid-footer-fallback.html`, `openlane-vdp-active-current-bid-no-money.html` - Phase 7 exact current-bid fixtures for bid-count rejection, sticky footer fallback, and no-money protection.
 - `openlane-router-carfax-url.html`, `openlane-backend-bad-price-evidence.json` - Phase 7 exact CARFAX router and backend bad-price evidence fixtures.
+- `openlane-vdp-nissan-final-minute-bid-refresh.html` - live-bid evidence fixture for final-minute Nissan `$14,200` current bid beating stale sticky `$13,800` and rejecting `71 Bids`.
+- `openlane-vdp-kia-purchase-sold-price-picked-up-live.html` - live Kia purchase evidence fixture with VIN `3KPFL4A72HE119966`, `Sold price $4,000`, and `Mark as picked up`.
+- `openlane-vdp-carfax-text-only-live.html` - live CARFAX text-only evidence fixture with `Always view the CARFAX report` and no safe URL metadata.
+- `openlane-network-carfax-url-live.json` - allowed OpenLane vehicle JSON evidence containing a safe CARFAX URL with a token-like query parameter for sanitizer verification.
+- `openlane-vdp-condition-pollution-live.html` - condition pollution evidence fixture for mechanical/exterior/tire-wheel header bleed, bid rows, legal footer, and transport noise.
+- `openlane-network-observer-zero-evidence-live.json` - copied-debug style observer status showing enabled network observation but zero useful allowed evidence.
+- `openlane-vdp-hyundai-santa-fe-sport-live.html` - multi-word model evidence fixture for `2014 Hyundai Santa Fe Sport SE`.

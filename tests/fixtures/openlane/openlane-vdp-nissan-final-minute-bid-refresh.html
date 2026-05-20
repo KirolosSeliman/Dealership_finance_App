@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <body>
+    <main data-testid="vehicle-detail-page" class="vdp-page">
+      <section class="vehicle-hero" data-vin="1N6ED1EK0PN123456">
+        <h1>2023 Nissan Frontier Crew Cab SV</h1>
+        <button aria-label="Copy VIN 1N6ED1EK0PN123456">VIN 1N6ED1EK0PN123456</button>
+        <p>Odometer 42,118 KM</p>
+      </section>
+
+      <section class="bid-panel live-bid-panel" data-testid="bid-panel-current">
+        <h2>Bid panel</h2>
+        <div data-testid="current-bid-row">
+          <span>Current bid</span>
+          <strong>$14,200</strong>
+          <span>Under 1 min</span>
+          <span>71 Bids</span>
+        </div>
+      </section>
+
+      <section class="known-history">
+        <button type="button" aria-label="Always view the CARFAX report">CARFAX Canada</button>
+      </section>
+    </main>
+
+    <footer class="sticky-bid-footer" role="contentinfo">
+      <div class="active-bid-bar" data-testid="sticky-current-bid">
+        <span>Active</span>
+        <span>Current bid</span>
+        <strong>$13,800</strong>
+        <span>Last refreshed earlier</span>
+      </div>
+    </footer>
+  </body>
+</html>

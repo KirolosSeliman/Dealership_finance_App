@@ -1,0 +1,16 @@
+{
+  "status": {
+    "enabled": true,
+    "reason": "observing_page_generated_responses",
+    "pageHookInstalled": false,
+    "earlyHookInstalled": false,
+    "allowedEventCount": 0,
+    "deniedEventCount": 0,
+    "irrelevantJsonCount": 0,
+    "networkEvidenceCount": 0,
+    "observationCount": 0,
+    "lastAllowedEndpointPattern": "",
+    "lastDeniedEndpointPattern": "",
+    "lastDeniedEndpointReason": ""
+  }
+}
