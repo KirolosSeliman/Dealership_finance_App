@@ -1447,6 +1447,9 @@
     if (/^(BUYING|SELLING|Browse vehicles|Pending|Closing|Purchases|Create|Parked|Listings|Sold|Sent to Simulcast|PRO|Leads & customers|MyLot|Market guide|Terms & conditions|Privacy policy|Q&A|Q and A)$/i.test(text)) return true;
     if (/^(OPENLANE Inc\. All rights reserved\.?|Subscribe to Market guide\.?|Historical sales of similar vehicles\.?)$/i.test(text)) return true;
     if (/\b(Transport estimate|Transport Direct|Rate info|Vehicle location|Market guide|wholesale data, past \d+ days|Terms & conditions|Privacy policy|Subscribe to Market guide|OPENLANE Inc\. All rights reserved)\b/i.test(text)) return true;
+    if (/\b(Full bid history|Bidder\s+\d+|Current bid|Highest proxy applied|\d+\s+Bids?)\b/i.test(text)) return true;
+    if (/(?:CA\$|CAD|\$)\s*\d[\d,. ]*/i.test(text) && /\b(bid|bidder|transport|market guide|history)\b/i.test(text)) return true;
+    if (/^(Safety-related|In relation to safety|Mechanical|Exterior|Interior|Tires\s*&?\s*wheels?|OBD2 scan|Seller Broadcasts|Q&A|Market insights|Add'?l info)$/i.test(text)) return true;
     if (/^\b(19|20)\d{2}\b\s+[A-Za-z][A-Za-z -]+\b/.test(text)) return true;
     if (/^(VIN|NIV)\b|^[A-HJ-NPR-Z0-9]{17}$/i.test(text)) return true;
     if (/^Odometer\b|^Odom[eÃ¨]tre\b|^\d[\d,.\s]*\s*KM$/i.test(text)) return true;

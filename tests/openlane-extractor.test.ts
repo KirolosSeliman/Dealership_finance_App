@@ -1025,6 +1025,10 @@ test("OpenLane condition disclosure cleanup removes navigation legal transport a
         <p>As-is</p>
         <p>Red light</p>
         <p>Previously Registered Out Of Province</p>
+        <p>Full bid history</p>
+        <p>Bidder 1 $11,100</p>
+        <p>Current bid $10,300</p>
+        <p>59 Bids</p>
         <p>Transport estimate CAD $378 / 211km</p>
         <p>Market guide wholesale data, past 90 days</p>
         <p>Terms &amp; conditions</p>
@@ -1050,6 +1054,8 @@ test("OpenLane condition disclosure cleanup removes navigation legal transport a
   assert.ok(condition.exteriorDisclosures?.some((item) => /Rocker Panel \(dent\)/i.test(item)));
   assert.ok(condition.interiorDisclosures?.some((item) => /As-is/i.test(item)));
   assert.ok(condition.interiorDisclosures?.some((item) => /Previously Registered Out Of Province/i.test(item)));
+  assert.equal(condition.mechanicalDisclosures?.some((item) => /^Exterior$/i.test(item)), false);
+  assert.equal(condition.exteriorDisclosures?.some((item) => /^Interior$/i.test(item)), false);
   assert.match(String(condition.qaSummary), /Engine and transmission are good/i);
 
   const structuredText = [
@@ -1059,7 +1065,7 @@ test("OpenLane condition disclosure cleanup removes navigation legal transport a
     condition.conditionReportText || "",
   ].join(" | ");
   assert.doesNotMatch(structuredText, /BUYING|SELLING|Purchases|Listings|Leads & customers/i);
-  assert.doesNotMatch(structuredText, /Transport estimate|Market guide|wholesale data|Terms & conditions|OPENLANE Inc|Privacy policy|Q&A|Engine and transmission are good/i);
+  assert.doesNotMatch(structuredText, /Transport estimate|Market guide|wholesale data|Terms & conditions|OPENLANE Inc|Privacy policy|Q&A|Engine and transmission are good|Full bid history|Bidder 1|\$11,100|Current bid|59 Bids/i);
   assert.ok(String(condition.conditionReportText || "").length < 4000);
 });
 
