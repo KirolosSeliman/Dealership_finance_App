@@ -5,7 +5,7 @@
   const MAX_TEXT_LENGTH = 120000;
   const MAX_QUEUE_LENGTH = 10;
   const ALLOWED_HOST = /(^|\.)openlane\.(ca|com)$|kar-media\.com$/i;
-  const ALLOW_ENDPOINT = /\b(vdp|vehicle|vehicles|listing|inventory|purchase|purchases|condition|disclosure|media|photo|image|bid|offer|fee|fees|invoice|post-sale|sale)\b/i;
+  const ALLOW_ENDPOINT = /\b(vdp|vehicle|vehicles|listing|inventory|purchase|purchases|condition|disclosure|media|photo|image|bid|offer|fee|fees|invoice|post-sale|sale|carfax|history|report|reports|vehicle-history)\b/i;
   const DENY_ENDPOINT = /\b(auth|oauth|login|logout|session|profile|account|payment|billing|user|users|me|token|cookie|password)\b/i;
   const earlyQueue = [];
   let sequence = 0;

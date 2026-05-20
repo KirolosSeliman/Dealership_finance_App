@@ -243,6 +243,23 @@ test("OpenLane network observer maps Phase 7 fixture CARFAX URL evidence", () =>
   assert.ok(candidate?.sourceText.includes("vehicle-history/carfax/FORTE123"));
 });
 
+test("OpenLane network observer allows safe CARFAX report endpoints and strips sensitive query params", () => {
+  const payload = JSON.parse(readFileSync(join(process.cwd(), "tests/fixtures/openlane/openlane-network-carfax-url-live.json"), "utf8"));
+  const observed = networkObserver.rememberNetworkPayload(
+    JSON.stringify(payload),
+    "https://app.openlane.ca/api/carfax/report/FORTE-LIVE-123",
+    "application/json",
+    "phase-6-carfax-report-endpoint",
+  ) as { candidates?: { fieldCandidates?: Array<{ field?: string; value?: unknown }> } } | undefined;
+  const after = networkObserver.getOpenLaneNetworkObserverStatus();
+  const carfaxCandidate = observed?.candidates?.fieldCandidates?.find((item) => item.field === "carfaxUrl");
+
+  assert.ok(observed);
+  assert.equal(after.lastAllowedEndpointPattern, "app.openlane.ca/api/carfax/report/:id");
+  assert.equal(carfaxCandidate?.value, "https://app.openlane.ca/vehicle-history/carfax/FORTE-LIVE-123");
+  assert.doesNotMatch(JSON.stringify(observed), /token=|redacted-by-test/i);
+});
+
 test("OpenLane network merge fills missing fields but preserves verified fee outcomes", () => {
   const candidates = networkObserver.extractCandidatesFromNetworkPayload({
     vehicle: {
