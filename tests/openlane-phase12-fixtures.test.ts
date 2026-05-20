@@ -111,7 +111,7 @@ test("Phase 12 network diagnostics explain zero evidence and endpoint allow/deny
   });
   const status = networkObserver.getOpenLaneNetworkObserverStatus();
 
-  assert.match(String(readiness.networkObserverMessage), /no OpenLane vehicle JSON has been observed yet/i);
+  assert.match(String(readiness.networkObserverMessage), /page hook is not installed yet/i);
   assert.ok(allowed);
   assert.ok(Number(status.allowedEventCount || 0) >= 1);
   assert.ok(Number(status.deniedEventCount || 0) >= 1);

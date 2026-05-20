@@ -702,6 +702,8 @@
       `links ${Number(diagnostics.carfaxLinkCandidateCount || 0)}`,
       `data-href ${Number(diagnostics.carfaxDataHrefCandidateCount || 0)}`,
       `data-url ${Number(diagnostics.carfaxDataUrlCandidateCount || 0)}`,
+      `data-report-url ${Number(diagnostics.carfaxDataReportUrlCandidateCount || 0)}`,
+      `hydration ${Number(diagnostics.carfaxHydrationJsonCandidateCount || 0)}`,
       `html ${Number(diagnostics.carfaxHtmlZoneCandidateCount || 0)}`,
       `safe-attrs ${Number(diagnostics.carfaxSafeAttributeCandidateCount || 0)}`,
       `network ${Number(diagnostics.carfaxNetworkCandidateCount || 0)}`,
@@ -713,6 +715,12 @@
     const observer = runtime.networkObserver || {};
     const count = networkEvidenceCount(listing, runtime);
     if (observer.enabled && count === 0) {
+      if (!observer.pageHookInstalled && !observer.earlyHookInstalled) {
+        return "Network observer is enabled, but the OpenLane page hook is not installed yet.";
+      }
+      if (Number(observer.pageHookEventCount || 0) === 0) {
+        return "Network observer is enabled, but no OpenLane network responses have been observed yet.";
+      }
       if (Number(observer.deniedEventCount || 0) > 0 && Number(observer.allowedEventCount || 0) === 0) {
         return "Network events observed but denied by allowlist/denylist.";
       }

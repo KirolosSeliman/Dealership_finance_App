@@ -549,6 +549,7 @@ test("Market Snap widget debug UX explains purchased, active, Carfax, network, a
     "Transport estimate ignored as listing price.",
     "Carfax text found, but no URL is exposed.",
     "Network observer is enabled but no OpenLane vehicle JSON has been observed yet",
+    "Network observer is enabled, but the OpenLane page hook is not installed yet.",
     "Network events observed but denied by allowlist/denylist.",
     "Network JSON observed but no vehicle/carfax/price candidates found.",
     "Network diagnostics:",
@@ -776,6 +777,33 @@ test("Market Snap repository persists OpenLane media and Carfax metadata", () =>
     assert.match(repository, new RegExp(field));
     assert.match(migration, new RegExp(`add column if not exists ${field}`));
   }
+});
+
+test("Copy JSON diagnostics distinguish missing network hook from zero candidate responses", () => {
+  const copyPayload = require("../browser-extension/src/copy-payload.js") as {
+    buildReadinessSummary: (listing: Record<string, unknown>) => Record<string, unknown>;
+  };
+  const payload = copyPayload.buildReadinessSummary({
+    sourceName: "OpenLane",
+    openlaneMetadata: {
+      deepCaptureRuntime: {
+        active: true,
+        networkEvidenceCount: 0,
+        networkObserver: {
+          enabled: true,
+          pageHookInstalled: false,
+          earlyHookInstalled: false,
+          pageHookEventCount: 0,
+          allowedEventCount: 0,
+          deniedEventCount: 0,
+          irrelevantJsonCount: 0,
+        },
+      },
+    },
+  });
+
+  assert.match(String((payload as { networkObserverMessage?: string }).networkObserverMessage), /page hook is not installed yet/i);
+  assert.equal((payload as { networkObserverDiagnostics?: { pageHookInstalled?: boolean } }).networkObserverDiagnostics?.pageHookInstalled, false);
 });
 
 test("OpenLane extractor captures core vehicle, price, and auction fields", () => {

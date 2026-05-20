@@ -145,6 +145,12 @@
     const observer = runtime.networkObserver || {};
     const count = Number(runtime.networkEvidenceCount ?? observer.observationCount ?? listing.openlaneMetadata?.networkEvidence?.length ?? 0);
     if (observer.enabled && count === 0) {
+      if (!observer.pageHookInstalled && !observer.earlyHookInstalled) {
+        return "Network observer is enabled, but the OpenLane page hook is not installed yet.";
+      }
+      if (Number(observer.pageHookEventCount || 0) === 0) {
+        return "Network observer is enabled, but no OpenLane network responses have been observed yet.";
+      }
       if (Number(observer.deniedEventCount || 0) > 0 && Number(observer.allowedEventCount || 0) === 0) {
         return "Network events observed but denied by allowlist/denylist.";
       }

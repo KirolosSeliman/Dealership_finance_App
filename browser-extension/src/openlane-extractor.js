@@ -1285,9 +1285,10 @@
     for (const link of Array.from(doc.querySelectorAll?.("a[href]") || [])) {
       add("link_href", `${link.getAttribute("href")} ${link.innerText || ""} ${link.getAttribute("aria-label") || ""} ${link.getAttribute("title") || ""}`, { attributeName: "href" });
     }
-    for (const node of Array.from(doc.querySelectorAll?.("[aria-label], [title], [data-href], [data-url], button, [role='button']") || [])) {
+    for (const node of Array.from(doc.querySelectorAll?.("[aria-label], [title], [data-href], [data-url], [data-report-url], button, [role='button']") || [])) {
       add("data_href", [node.getAttribute?.("data-href"), node.innerText, node.getAttribute?.("aria-label")].filter(Boolean).join(" "), { attributeName: "data-href" });
       add("data_url", [node.getAttribute?.("data-url"), node.innerText, node.getAttribute?.("aria-label")].filter(Boolean).join(" "), { attributeName: "data-url" });
+      add("data_report_url", [node.getAttribute?.("data-report-url"), node.innerText, node.getAttribute?.("aria-label")].filter(Boolean).join(" "), { attributeName: "data-report-url" });
       add("dom_attribute", [
         node.getAttribute?.("aria-label"),
         node.getAttribute?.("title"),
@@ -1300,6 +1301,8 @@
     for (const evidence of extractCarfaxAttributeEvidenceFromHtml(doc.__openlaneHtml || "", "href")) add("link_href", evidence, { attributeName: "href" });
     for (const evidence of extractCarfaxAttributeEvidenceFromHtml(doc.__openlaneHtml || "", "data-href")) add("data_href", evidence, { attributeName: "data-href" });
     for (const evidence of extractCarfaxAttributeEvidenceFromHtml(doc.__openlaneHtml || "", "data-url")) add("data_url", evidence, { attributeName: "data-url" });
+    for (const evidence of extractCarfaxAttributeEvidenceFromHtml(doc.__openlaneHtml || "", "data-report-url")) add("data_report_url", evidence, { attributeName: "data-report-url" });
+    for (const evidence of extractCarfaxHydrationJsonEvidenceFromHtml(doc.__openlaneHtml || "")) add("hydration_json", evidence);
     for (const evidence of extractCarfaxZoneEvidenceFromHtml(doc.__openlaneHtml || "")) add("html_carfax_zone", evidence);
     for (const evidence of extractCarfaxEvidenceFromHtml(doc.__openlaneHtml || "")) add("html_node", evidence);
     add("html_attributes", extractAttributeText(doc.__openlaneHtml || ""));
@@ -1326,6 +1329,8 @@
       carfaxHrefCandidateCount: count((item) => item.attributeName === "href" || item.source === "link_href"),
       carfaxDataHrefCandidateCount: count((item) => item.source === "data_href"),
       carfaxDataUrlCandidateCount: count((item) => item.source === "data_url"),
+      carfaxDataReportUrlCandidateCount: count((item) => item.source === "data_report_url"),
+      carfaxHydrationJsonCandidateCount: count((item) => item.source === "hydration_json"),
       carfaxHtmlZoneCandidateCount: count((item) => item.source === "html_carfax_zone"),
       carfaxSafeAttributeCandidateCount: count((item) => item.source === "safe_dom_attributes"),
       carfaxNetworkCandidateCount: 0,
@@ -1340,7 +1345,7 @@
   }
 
   function carfaxConfidence(source, hasUrl) {
-    if (/link_href|data_href|data_url|safe_dom_attributes|html_carfax_zone/i.test(source)) return hasUrl ? 92 : 62;
+    if (/link_href|data_href|data_url|data_report_url|safe_dom_attributes|html_carfax_zone|hydration_json/i.test(source)) return hasUrl ? 92 : 62;
     if (/html_node|html_attributes/i.test(source)) return hasUrl ? 84 : 58;
     return hasUrl ? 70 : 50;
   }
@@ -1398,6 +1403,49 @@
       if (/carfax/i.test(`${match[1]} ${snippet}`)) evidence.push(`${match[1]} ${stripTags(snippet)}`.slice(0, 500));
     }
     return evidence.slice(0, 8);
+  }
+
+  function extractCarfaxHydrationJsonEvidenceFromHtml(html) {
+    const evidence = [];
+    const source = String(html || "");
+    for (const match of source.matchAll(/<script\b[^>]*type=["']application\/json["'][^>]*>([\s\S]{0,60000}?)<\/script>/gi)) {
+      const jsonText = stripJsonScript(match[1]);
+      if (!/carfax/i.test(jsonText)) continue;
+      let parsed;
+      try {
+        parsed = JSON.parse(jsonText);
+      } catch {
+        continue;
+      }
+      walkJson(parsed, (value, path) => {
+        if (evidence.length >= 8 || typeof value !== "string") return;
+        const keyPath = path.join(".");
+        if (isSensitiveText(keyPath)) return;
+        if (!isCarfaxReportKey(keyPath, value)) return;
+        const url = carfaxUrlCandidate(value);
+        if (!url) return;
+        evidence.push(`${keyPath}=${url} CARFAX`.slice(0, 500));
+      });
+    }
+    return Array.from(new Set(evidence)).slice(0, 8);
+  }
+
+  function stripJsonScript(value) {
+    return String(value || "").replace(/^\s*<!--/, "").replace(/-->\s*$/, "").trim();
+  }
+
+  function walkJson(value, visit, path = []) {
+    visit(value, path);
+    if (Array.isArray(value)) value.forEach((item, index) => walkJson(item, visit, path.concat(String(index))));
+    else if (value && typeof value === "object") Object.entries(value).forEach(([key, item]) => walkJson(item, visit, path.concat(key)));
+  }
+
+  function isCarfaxReportKey(keyPath, value = "") {
+    const normalized = String(keyPath || "").toLowerCase().replace(/[_\s-]/g, "");
+    if (/(carfaxurl|carfaxreporturl|vehiclehistoryurl|historyreporturl)$/.test(normalized)) return true;
+    if (!/(reporturl|reportlink|historyurl)$/.test(normalized)) return false;
+    return /carfax|vehiclehistory|historyreport|historyurl/.test(normalized)
+      || /carfax|vehicle-history|history-report|history\//i.test(String(value || ""));
   }
 
   function extractCarfaxZoneEvidenceFromHtml(html) {

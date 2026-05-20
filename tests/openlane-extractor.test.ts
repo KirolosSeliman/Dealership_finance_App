@@ -967,6 +967,56 @@ test("OpenLane Carfax and media extraction stays truthful for text-only and junk
   assert.ok(photos.every((photo) => !/data:image|favicon|openlane-logo|\/vdp\/null|fonts\.gstatic\.com|translate/i.test(photo.url)));
 });
 
+test("OpenLane Carfax extraction reads safe report metadata without inventing URLs", () => {
+  const dataReportUrl = extractor.extractOpenLaneFixture(`
+    <main>
+      <h1>2021 Toyota RAV4 LE</h1>
+      <p>VIN 2T3R1RFV5MW123456</p>
+      <p>Odometer 52,300 KM</p>
+      <button data-report-url="/vehicle-history/report/DATAREPORT123?token=secret&view=summary" aria-label="Open CARFAX report">CARFAX</button>
+    </main>
+  `, "https://app.openlane.ca/vdp/rav4");
+  const hydration = extractor.extractOpenLaneFixture(`
+    <main>
+      <h1>2020 Kia Stinger GT</h1>
+      <p>VIN KNAE55LC7J6040713</p>
+      <p>Odometer 44,200 KM</p>
+      <span>CARFAX Canada report available</span>
+      <script type="application/json">
+        {"props":{"pageProps":{"vehicle":{"vehicleHistoryUrl":"/vehicle-history/report/HYDRATION123?session=abc&view=summary","historyProvider":"CARFAX"}}}}
+      </script>
+    </main>
+  `, "https://app.openlane.ca/vdp/stinger");
+  const unrelatedReport = extractor.extractOpenLaneFixture(`
+    <main>
+      <h1>2020 Kia Stinger GT</h1>
+      <p>VIN KNAE55LC7J6040713</p>
+      <p>Odometer 44,200 KM</p>
+      <span>CARFAX Canada report available</span>
+      <script type="application/json">
+        {"props":{"pageProps":{"vehicle":{"reportUrl":"/reports/financial-summary/STINGER","historyProvider":"CARFAX"}}}}
+      </script>
+    </main>
+  `, "https://app.openlane.ca/vdp/stinger");
+
+  assert.equal(dataReportUrl.carfaxUrl, "https://app.openlane.ca/vehicle-history/report/DATAREPORT123?view=summary");
+  assert.equal(dataReportUrl.carfaxUrlStatus, "url_found");
+  assert.equal(
+    (dataReportUrl.openlaneMetadata as { carfaxDiagnostics?: { carfaxDataReportUrlCandidateCount?: number } }).carfaxDiagnostics?.carfaxDataReportUrlCandidateCount,
+    1,
+  );
+  assert.doesNotMatch(JSON.stringify(dataReportUrl), /token=secret/i);
+  assert.equal(hydration.carfaxUrl, "https://app.openlane.ca/vehicle-history/report/HYDRATION123?view=summary");
+  assert.equal(hydration.carfaxUrlStatus, "url_found");
+  assert.equal(
+    (hydration.openlaneMetadata as { carfaxDiagnostics?: { carfaxHydrationJsonCandidateCount?: number } }).carfaxDiagnostics?.carfaxHydrationJsonCandidateCount,
+    1,
+  );
+  assert.doesNotMatch(JSON.stringify(hydration), /session=abc/i);
+  assert.equal(unrelatedReport.carfaxUrl, undefined);
+  assert.equal(unrelatedReport.carfaxUrlStatus, "text_only");
+});
+
 test("OpenLane extractor captures condition reports and missing data", () => {
   const condition = extractor.extractOpenLaneFixture(fixture("openlane-condition-report.html"));
   const missing = extractor.extractOpenLaneFixture(fixture("openlane-missing-data.html"));
