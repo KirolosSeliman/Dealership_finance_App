@@ -1044,12 +1044,12 @@ test("OpenLane condition disclosure cleanup removes navigation legal transport a
     mechanicalDisclosures?: string[];
     exteriorDisclosures?: string[];
     interiorDisclosures?: string[];
+    obd2Status?: string;
     qaSummary?: string;
     conditionReportText?: string;
   };
 
-  assert.ok(condition.mechanicalDisclosures?.some((item) => /OBD2 scan/i.test(item)));
-  assert.ok(condition.mechanicalDisclosures?.some((item) => /not scanned/i.test(item)));
+  assert.equal(condition.obd2Status, "visible_text");
   assert.ok(condition.exteriorDisclosures?.some((item) => /Roof \(rust\)/i.test(item)));
   assert.ok(condition.exteriorDisclosures?.some((item) => /Rocker Panel \(dent\)/i.test(item)));
   assert.ok(condition.interiorDisclosures?.some((item) => /As-is/i.test(item)));
@@ -1067,6 +1067,45 @@ test("OpenLane condition disclosure cleanup removes navigation legal transport a
   assert.doesNotMatch(structuredText, /BUYING|SELLING|Purchases|Listings|Leads & customers/i);
   assert.doesNotMatch(structuredText, /Transport estimate|Market guide|wholesale data|Terms & conditions|OPENLANE Inc|Privacy policy|Q&A|Engine and transmission are good|Full bid history|Bidder 1|\$11,100|Current bid|59 Bids/i);
   assert.ok(String(condition.conditionReportText || "").length < 4000);
+});
+
+test("OpenLane live condition pollution fixture rejects header values, bid rows, attributes, and legal text", () => {
+  const listing = extractor.extractOpenLaneFixture(
+    fixture("openlane-vdp-condition-pollution-live.html"),
+    "https://app.openlane.ca/vdp/condition-pollution",
+  );
+  const condition = listing.condition as {
+    mechanicalDisclosures?: string[];
+    exteriorDisclosures?: string[];
+    tireWheelDisclosures?: string[];
+    conditionReportText?: string;
+    conditionDiagnostics?: {
+      rejectedConditionLines?: Array<{ rejectionReason?: string; sourceText?: string }>;
+      sectionBoundaryDecisions?: Array<{ startHeading?: string; stopHeading?: string }>;
+    };
+  };
+  const metadata = listing.openlaneMetadata as {
+    conditionDetails?: {
+      conditionDiagnostics?: {
+        rejectedConditionLines?: Array<{ rejectionReason?: string; sourceText?: string }>;
+        sectionBoundaryDecisions?: Array<{ startHeading?: string; stopHeading?: string }>;
+      };
+    };
+  };
+  const diagnostics = condition.conditionDiagnostics || metadata.conditionDetails?.conditionDiagnostics;
+  const structuredText = [
+    ...(condition.mechanicalDisclosures || []),
+    ...(condition.exteriorDisclosures || []),
+    ...(condition.tireWheelDisclosures || []),
+    condition.conditionReportText || "",
+  ].join(" | ");
+
+  assert.equal(Boolean(condition.mechanicalDisclosures?.some((item) => /^Exterior$/i.test(item))), false);
+  assert.equal(Boolean(condition.exteriorDisclosures?.some((item) => /^Interior$/i.test(item))), false);
+  assert.equal(Boolean(condition.tireWheelDisclosures?.some((item) => /^& wheels$/i.test(item))), false);
+  assert.doesNotMatch(structuredText, /Full bid history|Current bid|\$5,100|29 Bids|OPENLANE Inc|vehicle-detail-page|current-bid-panel|111,486 KM|Transport estimate/i);
+  assert.ok(diagnostics?.rejectedConditionLines?.some((item) => /bid_history_noise|legal_or_footer_noise|header_value_not_condition|attribute_noise/.test(String(item.rejectionReason))));
+  assert.ok(diagnostics?.sectionBoundaryDecisions?.some((item) => item.startHeading === "Mechanical" && item.stopHeading === "Exterior"));
 });
 
 test("OpenLane page classifier separates active observations from outcome pages", () => {

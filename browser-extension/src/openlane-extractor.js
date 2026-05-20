@@ -79,9 +79,9 @@
     const location = firstCanonicalLabel(scopedLabelValues.business, labelValues, OPENLANE_LABELS.location, "location", { allowFallback: true });
     const province = provinceFrom(location || mainVisibleText);
     const disclosureText = findDisclosureText(mainVisibleText);
-    const declarations = conditionDetails.knownHistoryItems || splitAnnouncements(labelValues.get("declarations") || findSectionText(mainVisibleText, "Declarations") || disclosureText);
-    const damageAnnouncements = conditionDetails.exteriorDisclosures || splitAnnouncements(findSectionText(mainVisibleText, "Damage"));
-    const mechanicalAnnouncements = conditionDetails.mechanicalDisclosures || splitAnnouncements(findSectionText(mainVisibleText, "Mechanical"));
+    const declarations = conditionDetails.knownHistoryItems || conditionItems(labelValues.get("declarations") || findSectionText(mainVisibleText, "Declarations") || disclosureText);
+    const damageAnnouncements = conditionDetails.exteriorDisclosures || conditionItems(findSectionText(mainVisibleText, "Damage"));
+    const mechanicalAnnouncements = conditionDetails.mechanicalDisclosures || conditionItems(findSectionText(mainVisibleText, "Mechanical"));
     const structuralAnnouncements = conditionDetails.safetyDisclosures || splitAnnouncements(findSectionText(mainVisibleText, "Structural"));
     const odometerAnnouncements = splitAnnouncements(findSectionText(mainVisibleText, "Odometer"));
     const disclosureCount = countNearLabel(mainVisibleText, "disclosures?");
@@ -160,7 +160,7 @@
       safetyDisclosures: conditionDetails.safetyDisclosures,
       interiorAnnouncements: conditionDetails.interiorDisclosures,
       odometerAnnouncements,
-      tireCondition: conditionDetails.tireWheelDisclosures?.join(" | ") || firstCanonicalLabel(scopedLabelValues.condition, labelValues, OPENLANE_LABELS.tireCondition, "tireCondition", { allowFallback: true }),
+      tireCondition: conditionDetails.tireWheelDisclosures?.join(" | ") || conditionItems(firstCanonicalLabel(scopedLabelValues.condition, labelValues, OPENLANE_LABELS.tireCondition, "tireCondition", { allowFallback: true })).join(" | ") || undefined,
       keysAvailable: firstCanonicalLabel(scopedLabelValues.specs, labelValues, OPENLANE_LABELS.keysAvailable, "keysAvailable", { allowFallback: true }),
       carfaxMentioned: carfax.carfaxMentioned,
       carfaxUrl: carfax.carfaxUrl,
@@ -1399,7 +1399,7 @@
     const exteriorDisclosures = conditionItems(subsectionText(disclosureText, ["Exterior", "Extérieur", "Exterieur"]));
     const interiorDisclosures = conditionItems(subsectionText(disclosureText, ["Interior", "Intérieur", "Interieur"]));
     const tireWheelDisclosures = conditionItems(subsectionText(disclosureText, ["Tires and wheels", "Pneus et roues"]));
-    const obd2Text = subsectionText(disclosureText, ["OBD2 Reader", "Lecteur OBD2"]);
+    const obd2Text = subsectionText(disclosureText, ["OBD2 Reader", "OBD2 scan", "Lecteur OBD2"]);
     const obd2Status = obd2Text ? (/nothing reported|rien n.a été signalé|rien n.a ete signale/i.test(obd2Text) ? "nothing_reported" : /non disponible|not available|not visible|unavailable/i.test(obd2Text) ? "not_visible" : "visible_text") : undefined;
     const fallbackDeclarations = conditionItems(labels.get("declarations"));
     const allConditionText = [
@@ -1456,7 +1456,7 @@
   function buildConditionDiagnostics(sectionTexts = {}) {
     const rejectedConditionLines = [];
     for (const [sourceZone, value] of Object.entries(sectionTexts)) {
-      for (const rawLine of String(value || "").replace(/\r/g, "\n").split(/\n|\s+\|\s+/)) {
+      for (const rawLine of conditionBoundaryText(value).split(/\n|\s+\|\s+/)) {
         const sourceText = cleanConditionLine(rawLine);
         if (!sourceText) continue;
         if (isConditionNoiseLine(sourceText, { keepQuestions: sourceZone === "qaSection" })) {
@@ -1477,13 +1477,8 @@
   }
 
   function conditionSectionBoundaryDecisions(text) {
-    const headings = [
-      "Known history", "Antecedents connus", "Disclosures and conditions", "Divulgations et condition",
-      "In relation to safety", "En relation avec la securite", "Mechanical", "Mecanique", "Exterior", "Exterieur",
-      "Interior", "Interieur", "Tires and wheels", "Pneus et roues", "OBD2 Reader", "Lecteur OBD2",
-      "Note from selling dealer", "Note du concessionnaire vendeur", "Q and A", "Q et R",
-    ];
-    const source = String(text || "");
+    const headings = conditionBoundaryHeadings();
+    const source = conditionBoundaryText(text);
     const found = headings
       .map((heading) => ({ heading, index: source.search(new RegExp(`(?:^|\\n)\\s*${escapeRegExp(heading)}\\b`, "i")) }))
       .filter((item) => item.index >= 0)
@@ -1501,6 +1496,8 @@
     if (/\b(Transport estimate|Transport Direct|Rate info|Vehicle location)\b/i.test(text)) return "transport_or_location_noise";
     if (/\b(Market guide|wholesale data|Subscribe to Market guide)\b/i.test(text)) return "market_guide_noise";
     if (/\b(Terms & conditions|Privacy policy|OPENLANE Inc\. All rights reserved)\b/i.test(text)) return "legal_or_footer_noise";
+    if (isConditionHeaderText(text) || /^(?:&|and)\s+wheels$/i.test(text) || /^and conditions$/i.test(text)) return "header_value_not_condition";
+    if (/\b(vehicle-detail-page|current-bid-panel|data-testid|vdp-page)\b/i.test(text)) return "attribute_noise";
     if (/^(VIN|NIV)\b|^[A-HJ-NPR-Z0-9]{17}$/i.test(text)) return "identity_line_not_condition";
     if (/^Odometer\b|^Odom[eÃƒÂ¨]tre\b|^\d[\d,.\s]*\s*KM$/i.test(text)) return "odometer_line_not_condition";
     if (/^Q:\s/i.test(text)) return "qa_line_not_condition";
@@ -1508,16 +1505,38 @@
   }
 
   function subsectionText(text, headings) {
-    const source = String(text || "");
+    const source = conditionBoundaryText(text);
     const headingPattern = headings.map(escapeRegExp).join("|");
-    const nextHeading = [
+    const nextHeading = conditionBoundaryHeadings().map(escapeRegExp).join("|");
+    const unusedConditionBoundaryHeadings = [
       "Known history", "Antécédents connus", "Disclosures and conditions", "Divulgations et condition",
       "In relation to safety", "En relation avec la sécurité", "Mechanical", "Mécanique", "Exterior", "Extérieur",
       "Interior", "Intérieur", "Tires and wheels", "Pneus et roues", "OBD2 Reader", "Lecteur OBD2",
       "Note from selling dealer", "Note du concessionnaire vendeur", "Q and A", "Q et R",
-    ].map(escapeRegExp).join("|");
+    ];
+    void unusedConditionBoundaryHeadings;
     const match = source.match(new RegExp(`(?:^|\\n)\\s*(?:${headingPattern})\\s*[:\\n]?\\s*([\\s\\S]{0,1200}?)(?=\\n\\s*(?:${nextHeading})\\b|$)`, "i"));
     return cleanConditionSection(match?.[1] || "");
+  }
+
+  function conditionBoundaryHeadings() {
+    return [
+      "Disclosures and conditions", "Divulgations et condition", "Known history", "Antecedents connus",
+      "Antécédents connus", "Safety-related", "In relation to safety", "En relation avec la sécurité",
+      "En relation avec la securite", "Mechanical", "Mécanique", "Mecanique",
+      "Exterior", "Extérieur", "Exterieur", "Interior", "Intérieur", "Interieur", "Tires and wheels", "Pneus et roues",
+      "OBD2 Reader", "OBD2 scan", "Lecteur OBD2", "Seller broadcasts", "Broadcasts", "Market insights",
+      "Add'l info", "Additional info", "Note from selling dealer", "Note du concessionnaire vendeur",
+      "Q and A", "Q&A", "Q et R",
+    ].sort((a, b) => b.length - a.length);
+  }
+
+  function conditionBoundaryText(text) {
+    let source = String(text || "").replace(/\r/g, "\n").replace(/&amp;/gi, "&");
+    for (const heading of conditionBoundaryHeadings()) {
+      source = source.replace(new RegExp(`\\b${escapeRegExp(heading)}\\b`, "gi"), "\n$&\n");
+    }
+    return source;
   }
 
   function conditionItems(text, headingsToRemove = []) {
@@ -1552,12 +1571,19 @@
     if (/\b(Transport estimate|Transport Direct|Rate info|Vehicle location|Market guide|wholesale data, past \d+ days|Terms & conditions|Privacy policy|Subscribe to Market guide|OPENLANE Inc\. All rights reserved)\b/i.test(text)) return true;
     if (/\b(Full bid history|Bidder\s+\d+|Current bid|Highest proxy applied|\d+\s+Bids?)\b/i.test(text)) return true;
     if (/(?:CA\$|CAD|\$)\s*\d[\d,. ]*/i.test(text) && /\b(bid|bidder|transport|market guide|history)\b/i.test(text)) return true;
-    if (/^(Safety-related|In relation to safety|Mechanical|Exterior|Interior|Tires\s*&?\s*wheels?|OBD2 scan|Seller Broadcasts|Q&A|Market insights|Add'?l info)$/i.test(text)) return true;
+    if (/^(?:CA\$|CAD|\$)\s*\d[\d,. ]*(?:\.\d{2})?$/i.test(text)) return true;
+    if (isConditionHeaderText(text) || /^(?:&|and)\s+wheels$/i.test(text) || /^and conditions$/i.test(text)) return true;
+    if (/\b(vehicle-detail-page|current-bid-panel|data-testid|vdp-page)\b/i.test(text)) return true;
     if (/^\b(19|20)\d{2}\b\s+[A-Za-z][A-Za-z -]+\b/.test(text)) return true;
     if (/^(VIN|NIV)\b|^[A-HJ-NPR-Z0-9]{17}$/i.test(text)) return true;
     if (/^Odometer\b|^Odom[eÃ¨]tre\b|^\d[\d,.\s]*\s*KM$/i.test(text)) return true;
     if (/^Q:\s/i.test(text) && !options.keepQuestions) return true;
     return false;
+  }
+
+  function isConditionHeaderText(text) {
+    const normalized = normalizeSpace(text).toLowerCase();
+    return conditionBoundaryHeadings().some((heading) => normalized === normalizeSpace(heading).toLowerCase());
   }
 
   function highRiskConditionTerms(text) {
@@ -1567,14 +1593,14 @@
 
   function extractConditionText(text, labels) {
     return [
-      labels.get("declarations"),
-      findSectionText(text, "Condition Report"),
-      findSectionText(text, "Announcements"),
-      findSectionText(text, "Damage"),
-      findSectionText(text, "Mechanical"),
-      findSectionText(text, "Structural"),
-      findSectionText(text, "Odometer"),
-    ].filter(Boolean).join(" | ").slice(0, 4000) || undefined;
+      conditionItems(labels.get("declarations")),
+      conditionItems(findSectionText(text, "Condition Report")),
+      conditionItems(findSectionText(text, "Announcements")),
+      conditionItems(findSectionText(text, "Damage")),
+      conditionItems(findSectionText(text, "Mechanical")),
+      conditionItems(findSectionText(text, "Structural")),
+      conditionItems(findSectionText(text, "Odometer")),
+    ].flat().filter(Boolean).join(" | ").slice(0, 4000) || undefined;
   }
 
   function findSectionText(text, heading) {
