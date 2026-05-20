@@ -114,6 +114,7 @@
   }
 
   function renderState(shadow, state) {
+    const renderListing = canonicalListing(state.listing);
     const panel = shadow.querySelector(".panel");
     panel.classList.toggle("collapsed", Boolean(state.collapsed));
     panel.classList.toggle("error", state.status === "error");
@@ -121,19 +122,20 @@
     panel.classList.toggle("saved", state.status === "saved");
     shadow.querySelector(".collapse").textContent = state.collapsed ? "+" : "-";
     shadow.querySelector(".status").textContent = statusText(state);
-    shadow.querySelector(".vehicle").textContent = vehicleLabel(state.listing);
-    shadow.querySelector(".metrics").innerHTML = state.valuation ? `${detectedHtml(state.listing)}${metricsHtml(state.valuation)}` : detectedHtml(state.listing);
-    shadow.querySelector(".meta").innerHTML = metaHtml(state.listing, state.valuation);
-    shadow.querySelector(".quality-body").innerHTML = dataQualityHtml(state.listing, state.valuation);
+    shadow.querySelector(".vehicle").textContent = vehicleLabel(renderListing);
+    shadow.querySelector(".metrics").innerHTML = state.valuation ? `${detectedHtml(renderListing)}${metricsHtml(state.valuation)}` : detectedHtml(renderListing);
+    shadow.querySelector(".meta").innerHTML = metaHtml(renderListing, state.valuation);
+    shadow.querySelector(".quality-body").innerHTML = dataQualityHtml(renderListing, state.valuation);
     shadow.querySelector(".data-quality").open = shouldOpenDebugPanel(state);
     shadow.querySelector(".settings-drawer").hidden = !state.settingsOpen;
-    shadow.querySelector(".messages").innerHTML = messagesHtml(state.listing, state.valuation, state.message, state.saveResult);
+    shadow.querySelector(".messages").innerHTML = messagesHtml(renderListing, state.valuation, state.message, state.saveResult);
     const saveButton = shadow.querySelector("[data-action='save']");
-    saveButton.disabled = state.status === "saving" || (state.listing && !readinessSummary(state.listing).readyToCapture);
+    saveButton.disabled = state.status === "saving" || (renderListing && !readinessSummary(renderListing).readyToCapture);
     saveButton.textContent = state.status === "saving" ? "Saving..." : "Save";
   }
 
   function statusText(state) {
+    const safeListing = canonicalListing(state.listing);
     if (state.status === "detecting") return "OpenLane vehicle detected.";
     if (state.status === "extracting") return "Extracting visible OpenLane data...";
     if (state.status === "saving") return "Saving to Deal Radar...";
@@ -143,8 +145,8 @@
     if (state.status === "error") return state.message || "Market Snap could not analyze this page.";
     if (state.status === "saved") return "Saved to Deal Radar.";
     if (state.valuation) return "Analysis ready.";
-    if (state.listing && readinessSummary(state.listing).readyToCapture) return "Ready to capture.";
-    if (state.listing) return "Vehicle detected. Waiting for analysis.";
+    if (safeListing && readinessSummary(safeListing).readyToCapture) return "Ready to capture.";
+    if (safeListing) return "Vehicle detected. Waiting for analysis.";
     return "Detecting OpenLane vehicle...";
   }
 
@@ -166,7 +168,7 @@
   }
 
   function detectedHtml(listing) {
-    const safeListing = listing || {};
+    const safeListing = canonicalListing(listing || {});
     if (!listing) return "";
     return [
       metric("Current bid", moneyOrDash(safeListing.currentBid || safeListing.listedPrice)),
@@ -186,7 +188,7 @@
   }
 
   function metaHtml(listing, valuation) {
-    const safeListing = listing || {};
+    const safeListing = canonicalListing(listing || {});
     if (!listing && !valuation) return "";
     return [
       pill("Carfax", carfaxLabel(safeListing)),
@@ -199,7 +201,7 @@
   }
 
   function messagesHtml(listing, valuation, message, saveResult) {
-    const safeListing = listing || {};
+    const safeListing = canonicalListing(listing || {});
     const readiness = readinessSummary(safeListing);
     const items = [
       message,
@@ -225,7 +227,7 @@
   }
 
   function dataQualityHtml(listing, valuation) {
-    const safeListing = listing || {};
+    const safeListing = canonicalListing(listing || {});
     if (!listing && !valuation) return "<p>No extraction yet.</p>";
     const warnings = valuation?.warnings || safeListing.warnings || [];
     const missing = valuation?.missingData || safeListing.missingData || [];
@@ -641,7 +643,7 @@
   }
 
   function carfaxStatusLabel(listing) {
-    const safeListing = listing || {};
+    const safeListing = canonicalListing(listing || {});
     if (!listing) return "-";
     if (safeListing.carfaxUrlStatus === "url_found") return "url_found";
     if (safeListing.carfaxUrlStatus === "text_only") return "text_only";
@@ -649,7 +651,7 @@
   }
 
   function carfaxEvidenceLabel(listing) {
-    const safeListing = listing || {};
+    const safeListing = canonicalListing(listing || {});
     const evidence = safeListing.openlaneMetadata?.carfaxEvidence || safeListing.carfax?.evidence || safeListing.extractedFields?.carfaxEvidence || [];
     const first = evidence?.[0];
     if (!first) return "-";
@@ -690,7 +692,7 @@
   }
 
   function networkEvidenceCount(listing, runtime = {}) {
-    const safeListing = listing || {};
+    const safeListing = canonicalListing(listing || {});
     return Number(runtime.networkEvidenceCount ?? runtime.networkObserver?.observationCount ?? safeListing.openlaneMetadata?.networkEvidence?.length ?? 0);
   }
 
@@ -738,7 +740,7 @@
   }
 
   function deepCaptureStatusLabel(listing) {
-    const safeListing = listing || {};
+    const safeListing = canonicalListing(listing || {});
     const runtime = safeListing.openlaneMetadata?.deepCaptureRuntime || {};
     const mode = safeListing.deepCaptureActivationMode || runtime.deepCaptureActivationMode;
     if (mode === "default_enabled_pending_consent_ui") return "Active by default";
@@ -762,7 +764,7 @@
   }
 
   function priceStateLabel(listing) {
-    const safeListing = listing || {};
+    const safeListing = canonicalListing(listing || {});
     const semantics = safeListing.priceSemantics || {};
     if (semantics.finalBidAmount || semantics.acceptedAmount || semantics.buyPriceAuction || semantics.totalInvoiceAmount) return "verified outcome";
     if (semantics.soldPriceCandidate || safeListing.captureKind === "candidate_outcome") return "candidate outcome";
@@ -771,12 +773,20 @@
   }
 
   function carfaxLabel(listing) {
-    const safeListing = listing || {};
+    const safeListing = canonicalListing(listing || {});
     if (!listing) return "Missing";
     if (safeListing.carfaxUrlStatus === "url_found") return "URL found";
     if (safeListing.carfaxUrlStatus === "text_only") return "visible, URL missing";
     if (safeListing.carfaxAvailable) return "Visible";
     return "Missing";
+  }
+
+  function canonicalListing(listing = {}) {
+    const safeListing = listing || {};
+    const canonical = safeListing.openlaneCanonicalState || safeListing.canonicalOpenLaneState;
+    const adapter = window.DealerFlowOpenLaneExtractionContract?.canonicalToLegacyPayload;
+    if (canonical && typeof adapter === "function") return adapter(canonical, safeListing);
+    return safeListing;
   }
 
   async function loadWidgetSettings(shadow, settingsOverride = null) {

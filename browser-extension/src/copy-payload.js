@@ -1,6 +1,6 @@
 (function () {
   function buildCopyPayload(listing = {}, state = {}) {
-    const safeListing = listing || {};
+    const safeListing = canonicalListing(listing || {});
     const classification = safeListing.openlaneMetadata?.classification || null;
     const outcomeEvidence = safeListing.outcomeEvidence || classification?.evidence || [];
     const debug = safeListing.extractedFields?.debug || {};
@@ -57,7 +57,7 @@
   }
 
   function buildReadinessSummary(listing = {}) {
-    const safeListing = listing || {};
+    const safeListing = canonicalListing(listing || {});
     const readiness = safeListing.openlaneMetadata?.stableCaptureReadiness || {};
     const runtime = safeListing.openlaneMetadata?.deepCaptureRuntime || {};
     return sanitizeDebugValue({
@@ -108,7 +108,7 @@
   }
 
   function buildDebugSummary(listing = {}) {
-    const safeListing = listing || {};
+    const safeListing = canonicalListing(listing || {});
     const runtime = safeListing.openlaneMetadata?.deepCaptureRuntime || {};
     return {
       pageType: safeListing.pageType || "",
@@ -179,9 +179,10 @@
   }
 
   function buildPriceDiagnostics(listing = {}) {
-    const debug = listing.extractedFields?.debug || {};
-    const currentBidEvidence = listing.extractedFields?.currentBidEvidence
-      || listing.fieldEvidence?.currentBid?.[0]
+    const safeListing = canonicalListing(listing || {});
+    const debug = safeListing.extractedFields?.debug || {};
+    const currentBidEvidence = safeListing.extractedFields?.currentBidEvidence
+      || safeListing.fieldEvidence?.currentBid?.[0]
       || {};
     const rejectedPriceCandidates = (debug.priceCandidates || [])
       .filter((candidate) => candidate.rejectedReason || candidate.rejectionReason)
@@ -217,7 +218,7 @@
       }))
       .slice(0, 6);
     return sanitizeDebugValue({
-      currentBid: listing.currentBid ?? null,
+      currentBid: safeListing.currentBid ?? null,
       currentBidSource: currentBidEvidence.sourceType || currentBidEvidence.matchedLabel || "",
       currentBidSourceText: currentBidEvidence.sourceText || "",
       currentBidConfidence: currentBidEvidence.confidenceScore ?? null,
@@ -225,25 +226,26 @@
       rejectedOutcomePriceCandidates: rejectedOutcomePriceCandidates(listing, rejectedPriceCandidates),
       lowerBidCandidates,
       staleCurrentBidCandidates,
-      listedPrice: listing.listedPrice ?? null,
+      listedPrice: safeListing.listedPrice ?? null,
       listedPriceSource: debug.listedPriceDecision?.source || "",
       listedPriceSemantics: listing.priceSemantics?.listedPrice || debug.listedPriceDecision?.semantics || "",
-      priceDiagnosticMessages: priceDiagnosticMessages(listing, rejectedPriceCandidates, lowerBidCandidates, staleCurrentBidCandidates),
+      priceDiagnosticMessages: priceDiagnosticMessages(safeListing, rejectedPriceCandidates, lowerBidCandidates, staleCurrentBidCandidates),
     });
   }
 
   function buildCurrentBidDebug(listing = {}, priceDiagnostics = buildPriceDiagnostics(listing)) {
-    const debug = listing.extractedFields?.debug || {};
-    const bidStabilization = listing.openlaneMetadata?.bidStabilization || {};
-    const bidLiveMonitor = listing.openlaneMetadata?.bidLiveMonitor || null;
+    const safeListing = canonicalListing(listing || {});
+    const debug = safeListing.extractedFields?.debug || {};
+    const bidStabilization = safeListing.openlaneMetadata?.bidStabilization || {};
+    const bidLiveMonitor = safeListing.openlaneMetadata?.bidLiveMonitor || null;
     const priceCandidates = Array.isArray(debug.priceCandidates) ? debug.priceCandidates : [];
-    const currentBidEvidence = listing.extractedFields?.currentBidEvidence
-      || listing.fieldEvidence?.currentBid?.[0]
+    const currentBidEvidence = safeListing.extractedFields?.currentBidEvidence
+      || safeListing.fieldEvidence?.currentBid?.[0]
       || {};
     const bidPanelTopCandidate = priceCandidates.find((candidate) => /bid_panel|top_row|bid_history/i.test(`${candidate.sourceType || ""} ${candidate.sourceName || ""} ${candidate.label || ""}`) && !candidate.rejectedReason && !candidate.rejectionReason);
     const winningSource = currentBidEvidence.sourceType || currentBidEvidence.matchedLabel || priceDiagnostics.currentBidSource || "";
     return sanitizeDebugValue({
-      winningCurrentBid: listing.currentBid ?? null,
+      winningCurrentBid: safeListing.currentBid ?? null,
       winningCurrentBidSource: winningSource,
       winningSource,
       sourceText: currentBidEvidence.sourceText || priceDiagnostics.currentBidSourceText || "",
@@ -263,13 +265,14 @@
   }
 
   function buildPurchaseOutcomeDebug(listing = {}, priceDiagnostics = buildPriceDiagnostics(listing)) {
-    const rejectedMarkers = purchaseMarkerRejectedEvidence(listing);
+    const safeListing = canonicalListing(listing || {});
+    const rejectedMarkers = purchaseMarkerRejectedEvidence(safeListing);
     return sanitizeDebugValue({
-      soldPriceCandidate: listing.soldPriceCandidate ?? null,
-      buyPriceAuction: listing.buyPriceAuction ?? null,
-      finalBidAmount: listing.finalBidAmount ?? null,
-      purchaseEvidenceSource: purchaseEvidenceSource(listing),
-      soldPriceParserStatus: soldPriceParserStatus(listing, priceDiagnostics),
+      soldPriceCandidate: safeListing.soldPriceCandidate ?? null,
+      buyPriceAuction: safeListing.buyPriceAuction ?? null,
+      finalBidAmount: safeListing.finalBidAmount ?? null,
+      purchaseEvidenceSource: purchaseEvidenceSource(safeListing),
+      soldPriceParserStatus: soldPriceParserStatus(safeListing, priceDiagnostics),
       purchaseMarkerRejectedReasons: [...new Set(rejectedMarkers.map((item) => item.rejectedReason || item.rejectionReason).filter(Boolean))].slice(0, 8),
       purchaseMarkerSourceZones: [...new Set(rejectedMarkers.map((item) => item.zone || item.sourceZone || item.marker).filter(Boolean))].slice(0, 8),
       rejectedOutcomePriceCandidates: priceDiagnostics.rejectedOutcomePriceCandidates || [],
@@ -277,10 +280,11 @@
   }
 
   function buildConditionCleanupDebug(listing = {}) {
-    const debug = listing.extractedFields?.debug || {};
-    const diagnostics = debug.conditionDiagnostics || listing.openlaneMetadata?.conditionDetails?.conditionDiagnostics || {};
+    const safeListing = canonicalListing(listing || {});
+    const debug = safeListing.extractedFields?.debug || {};
+    const diagnostics = debug.conditionDiagnostics || safeListing.openlaneMetadata?.conditionDetails?.conditionDiagnostics || {};
     return sanitizeDebugValue({
-      ignoredNoisyZones: ignoredNoisyZones(listing),
+      ignoredNoisyZones: ignoredNoisyZones(safeListing),
       rejectedConditionLines: (diagnostics.rejectedConditionLines || []).map((item) => ({
         sourceZone: item.sourceZone || item.zone || "",
         sourceText: sanitizeText(item.sourceText || item.text || ""),
@@ -295,28 +299,30 @@
   }
 
   function buildCarfaxDebug(listing = {}) {
-    const debug = listing.extractedFields?.debug || {};
+    const safeListing = canonicalListing(listing || {});
+    const debug = safeListing.extractedFields?.debug || {};
     const carfaxCandidates = Array.isArray(debug.carfaxCandidates) ? debug.carfaxCandidates : [];
     return sanitizeDebugValue({
-      carfaxUrlStatus: listing.carfaxUrlStatus || "missing",
-      carfaxUrl: listing.carfaxUrl || "",
-      carfaxCandidateCounts: listing.openlaneMetadata?.carfaxDiagnostics || {},
+      carfaxUrlStatus: safeListing.carfaxUrlStatus || "missing",
+      carfaxUrl: safeListing.carfaxUrl || "",
+      carfaxCandidateCounts: safeListing.openlaneMetadata?.carfaxDiagnostics || {},
       carfaxRejectedReasons: carfaxCandidates
         .map((candidate) => candidate.rejectedReason || candidate.rejectionReason)
         .filter(Boolean)
         .slice(0, 8),
-      networkObserverMessage: networkObserverMessage(listing.openlaneMetadata?.deepCaptureRuntime || {}, listing),
+      networkObserverMessage: networkObserverMessage(safeListing.openlaneMetadata?.deepCaptureRuntime || {}, safeListing),
     });
   }
 
   function buildContradictionDiagnostics(listing = {}, parts = {}) {
-    const priceDiagnostics = parts.priceDiagnostics || buildPriceDiagnostics(listing);
-    const purchaseOutcomeDebug = parts.purchaseOutcomeDebug || buildPurchaseOutcomeDebug(listing, priceDiagnostics);
-    const conditionCleanupDebug = parts.conditionCleanupDebug || buildConditionCleanupDebug(listing);
-    const carfaxDebug = parts.carfaxDebug || buildCarfaxDebug(listing);
-    const networkMessage = networkObserverMessage(listing.openlaneMetadata?.deepCaptureRuntime || {}, listing);
+    const safeListing = canonicalListing(listing || {});
+    const priceDiagnostics = parts.priceDiagnostics || buildPriceDiagnostics(safeListing);
+    const purchaseOutcomeDebug = parts.purchaseOutcomeDebug || buildPurchaseOutcomeDebug(safeListing, priceDiagnostics);
+    const conditionCleanupDebug = parts.conditionCleanupDebug || buildConditionCleanupDebug(safeListing);
+    const carfaxDebug = parts.carfaxDebug || buildCarfaxDebug(safeListing);
+    const networkMessage = networkObserverMessage(safeListing.openlaneMetadata?.deepCaptureRuntime || {}, safeListing);
     return sanitizeDebugValue({
-      classificationContradictions: purchaseMarkerRejectedEvidence(listing).map((item) => ({
+      classificationContradictions: purchaseMarkerRejectedEvidence(safeListing).map((item) => ({
         marker: item.marker || "",
         sourceZone: item.zone || item.sourceZone || "",
         sourceText: sanitizeText(item.sourceText || ""),
@@ -329,7 +335,7 @@
       ].slice(0, 12),
       conditionContradictions: conditionCleanupDebug.rejectedConditionLines || [],
       carfaxContradictions: [
-        listing.carfaxUrlStatus === "text_only" ? { carfaxUrlStatus: "text_only", reason: "carfax_text_visible_without_safe_url" } : null,
+        safeListing.carfaxUrlStatus === "text_only" ? { carfaxUrlStatus: "text_only", reason: "carfax_text_visible_without_safe_url" } : null,
         ...(carfaxDebug.carfaxRejectedReasons || []).map((reason) => ({ reason })),
       ].filter(Boolean).slice(0, 8),
       networkContradictions: networkMessage ? [{ message: networkMessage }] : [],
@@ -469,15 +475,25 @@
   }
 
   function diagnosticMessages(listing = {}) {
+    const safeListing = canonicalListing(listing || {});
     return [
-      classificationMessage(listing),
-      priceDiagnosticMessage(listing),
-      bidStabilizationMessage(listing),
-      transportIgnoredMessage(listing),
-      listing.carfaxUrlStatus === "text_only" ? "Carfax text found, but no URL is exposed." : "",
-      networkObserverMessage(listing.openlaneMetadata?.deepCaptureRuntime || {}, listing),
-      ignoredNoisyZones(listing).length ? "Q&A/sidebar/market-guide text ignored for canonical fields." : "",
+      classificationMessage(safeListing),
+      priceDiagnosticMessage(safeListing),
+      bidStabilizationMessage(safeListing),
+      transportIgnoredMessage(safeListing),
+      safeListing.carfaxUrlStatus === "text_only" ? "Carfax text found, but no URL is exposed." : "",
+      networkObserverMessage(safeListing.openlaneMetadata?.deepCaptureRuntime || {}, safeListing),
+      ignoredNoisyZones(safeListing).length ? "Q&A/sidebar/market-guide text ignored for canonical fields." : "",
     ].filter(Boolean);
+  }
+
+  function canonicalListing(listing = {}) {
+    const safeListing = listing || {};
+    const canonical = safeListing.openlaneCanonicalState || safeListing.canonicalOpenLaneState;
+    const root = typeof window !== "undefined" ? window : globalThis;
+    const adapter = root.DealerFlowOpenLaneExtractionContract?.canonicalToLegacyPayload;
+    if (canonical && typeof adapter === "function") return adapter(canonical, safeListing);
+    return safeListing;
   }
 
   function classificationMessage(listing = {}) {
@@ -533,7 +549,7 @@
       .slice(0, 1000);
   }
 
-  const api = { buildCopyPayload, buildReadinessSummary, sanitizeDebugValue };
+  const api = { buildCopyPayload, buildReadinessSummary, canonicalListing, sanitizeDebugValue };
   if (typeof window !== "undefined") window.DealerFlowMarketSnapCopyPayload = api;
   if (typeof module !== "undefined") module.exports = api;
 })();

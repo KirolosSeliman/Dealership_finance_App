@@ -477,10 +477,67 @@ test("Market Snap copy payload exposes Kia purchase outcome fields without liste
   assert.match(JSON.stringify(payload), /soldPriceCandidate|buyPriceAuction|purchaseOutcomeDebug|rejectedOutcomePriceCandidates/);
 });
 
+test("Market Snap copy payload uses canonical OpenLane state over stale legacy fields", () => {
+  const contract = require("../browser-extension/src/openlane-extraction-contract.js") as {
+    createCanonicalOpenLaneState: (overrides?: Record<string, unknown>) => Record<string, unknown>;
+  };
+  const copyPayload = require("../browser-extension/src/copy-payload.js") as {
+    buildCopyPayload: (listing: Record<string, unknown>, state?: Record<string, unknown>) => Record<string, unknown>;
+  };
+
+  const payload = copyPayload.buildCopyPayload({
+    sourceName: "OpenLane",
+    pageType: "active_listing",
+    captureKind: "observation",
+    currentBid: 13_800,
+    soldPriceCandidate: undefined,
+    carfaxUrlStatus: "text_only",
+    missingData: ["listedPrice"],
+    openlaneCanonicalState: contract.createCanonicalOpenLaneState({
+      pageContext: { pageType: "purchase_detail", captureKind: "candidate_outcome", outcomeConfidence: "high" },
+      activeAuction: {
+        currentBid: 14_200,
+        evidence: [{ field: "currentBid", sourceType: "section_map", sourceText: "Current bid $14,200" }],
+      },
+      purchaseOutcome: {
+        soldPriceCandidate: 4_000,
+        buyPriceAuction: 4_000,
+        evidence: [{ field: "soldPriceCandidate", sourceType: "purchase_detail_panel", sourceText: "Sold price $4,000" }],
+      },
+      carfax: {
+        urlStatus: "url_found",
+        url: "https://vhr.carfax.ca/report/example",
+        available: true,
+      },
+      readiness: {
+        ready: true,
+        state: "ready_to_capture",
+        missingData: [],
+      },
+    }),
+  });
+
+  const legacyPayload = payload.legacyPayload as { currentBid?: number; soldPriceCandidate?: number; carfaxUrlStatus?: string; missingData?: string[] };
+  const readiness = payload.readinessSummary as { currentBid?: number; soldPriceCandidate?: number; carfaxStatus?: string; missingData?: string[] };
+  const currentBidDebug = payload.currentBidDebug as { winningCurrentBid?: number };
+
+  assert.equal(legacyPayload.currentBid, 14_200);
+  assert.equal(legacyPayload.soldPriceCandidate, 4_000);
+  assert.equal(legacyPayload.carfaxUrlStatus, "url_found");
+  assert.deepEqual(legacyPayload.missingData, []);
+  assert.equal(readiness.currentBid, 14_200);
+  assert.equal(readiness.soldPriceCandidate, 4_000);
+  assert.equal(readiness.carfaxStatus, "url_found");
+  assert.deepEqual(readiness.missingData, []);
+  assert.equal(currentBidDebug.winningCurrentBid, 14_200);
+});
+
 test("Market Snap widget debug UX explains purchased, active, Carfax, network, and noisy fields", () => {
   const widget = readFileSync(join(repoRoot, "browser-extension/src/market-snap-widget.js"), "utf8");
 
   for (const marker of [
+    "canonicalListing",
+    "canonicalToLegacyPayload",
     "Purchased VDP detected from",
     "Active listing detected. Current bid is observation-only.",
     "Sold price extracted from purchase panel.",
@@ -536,7 +593,7 @@ test("Market Snap no-VIN OpenLane listings stay preview-only in the content scri
   assert.ok(queueCaptureIndex > readinessBlockIndex);
   assert.match(contentScript, /missing_vin_openlane_preview_only/);
   assert.match(contentScript, /VIN missing\. Preview only - capture blocked to avoid bad data\./);
-  assert.match(widget, /saveButton\.disabled\s*=\s*state\.status === "saving"\s*\|\|\s*\(state\.listing && !readinessSummary\(state\.listing\)\.readyToCapture\)/);
+  assert.match(widget, /saveButton\.disabled\s*=\s*state\.status === "saving"\s*\|\|\s*\(renderListing && !readinessSummary\(renderListing\)\.readyToCapture\)/);
 });
 
 test("Market Snap analyze and save routes support extension CORS preflight", () => {
@@ -670,7 +727,7 @@ test("Market Snap widget render helpers are null-safe when no extraction exists"
   assert.match(readinessBlock, /safeListing\.missingData/);
   assert.doesNotMatch(readinessBlock, /listing\.missingData/);
   assert.match(conditionBlock, /const safeListing = listing \|\| \{\}/);
-  assert.match(priceStateBlock, /const safeListing = listing \|\| \{\}/);
+  assert.match(priceStateBlock, /const safeListing = canonicalListing\(listing \|\| \{\}\)/);
 });
 
 test("Market Snap widget wraps async button actions and sanitizes action errors", () => {

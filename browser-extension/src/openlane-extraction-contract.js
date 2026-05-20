@@ -36,7 +36,7 @@
     const safeListing = sanitizeExtractionValue(listing);
     const structured = buildOpenLaneExtractionContract(safeListing);
     const fieldEvidence = buildFieldEvidence(safeListing, structured);
-    return compact({
+    const contracted = compact({
       ...safeListing,
       ...structured,
       fieldEvidence,
@@ -48,6 +48,14 @@
         ...(safeListing.openlaneMetadata || {}),
         extractionContractVersion: "openlane-deep-v1",
       },
+    });
+    const freshContracted = { ...contracted };
+    delete freshContracted.openlaneCanonicalState;
+    delete freshContracted.canonicalOpenLaneState;
+    const canonical = normalizeOpenLaneCanonicalState(freshContracted);
+    return canonicalToLegacyPayload(canonical, {
+      ...contracted,
+      openlaneCanonicalState: canonical,
     });
   }
 
@@ -233,6 +241,218 @@
       field,
       items.map(redactEvidence).sort(compareEvidence),
     ]));
+  }
+
+  function createCanonicalOpenLaneState(overrides = {}) {
+    return normalizeOpenLaneCanonicalState(overrides);
+  }
+
+  function normalizeOpenLaneCanonicalState(raw = {}) {
+    const listing = raw || {};
+    const source = raw?.openlaneCanonicalState || raw?.canonicalOpenLaneState || raw || {};
+    const pageContextSource = source.pageContext || listing.pageContext || {};
+    const identitySource = source.identity || listing.identity || {};
+    const activeAuctionSource = source.activeAuction || source.auctionObservation || listing.activeAuction || listing.auctionObservation || {};
+    const purchaseOutcomeSource = source.purchaseOutcome || listing.purchaseOutcome || {};
+    const carfaxSource = source.carfax || listing.carfax || {};
+    const conditionSource = source.condition || listing.condition || {};
+    const mediaSource = source.media || listing.media || {};
+    const networkSource = source.network || listing.network || {};
+    const readinessSource = source.readiness || listing.readiness || {};
+    const diagnosticsSource = source.diagnostics || listing.diagnostics || {};
+    const stableReadiness = listing.openlaneMetadata?.stableCaptureReadiness || {};
+    const debug = listing.extractedFields?.debug || {};
+    const canonical = {
+      identity: compact({
+        vin: firstDefined(identitySource.vin, listing.vin),
+        year: firstDefined(identitySource.year, listing.year),
+        make: firstDefined(identitySource.make, listing.make),
+        model: firstDefined(identitySource.model, listing.model),
+        trim: firstDefined(identitySource.trim, listing.trim),
+        mileageKm: firstDefined(identitySource.mileageKm, listing.mileageKm),
+        evidence: cappedArray(firstDefined(identitySource.evidence, [
+          ...(listing.fieldEvidence?.vin || []),
+          ...(listing.fieldEvidence?.mileageKm || []),
+          listing.extractedFields?.vinEvidence,
+          listing.extractedFields?.mileageEvidence,
+        ].filter(Boolean))),
+      }),
+      pageContext: compact({
+        pageType: firstDefined(pageContextSource.pageType, listing.pageType),
+        captureKind: firstDefined(pageContextSource.captureKind, listing.captureKind),
+        outcomeConfidence: firstDefined(pageContextSource.outcomeConfidence, listing.outcomeConfidence),
+        evidence: cappedArray(firstDefined(pageContextSource.evidence, listing.outcomeEvidence, listing.openlaneMetadata?.classification?.evidence)),
+        ignoredEvidence: cappedArray(firstDefined(pageContextSource.ignoredEvidence, listing.openlaneMetadata?.classification?.ignoredEvidence, debug.ignoredEvidence)),
+      }),
+      activeAuction: compact({
+        currentBid: firstDefined(activeAuctionSource.currentBid, listing.currentBid),
+        currentOffer: firstDefined(activeAuctionSource.currentOffer, listing.currentOffer),
+        bestOffer: firstDefined(activeAuctionSource.bestOffer, listing.bestOffer),
+        buyNowPrice: firstDefined(activeAuctionSource.buyNowPrice, listing.buyNowPrice),
+        evidence: cappedArray(firstDefined(activeAuctionSource.evidence, listing.fieldEvidence?.currentBid, listing.extractedFields?.currentBidEvidence)),
+        rejectedCandidates: cappedArray(firstDefined(activeAuctionSource.rejectedCandidates, debug.priceCandidates?.filter((candidate) => candidate?.rejectedReason || candidate?.rejectionReason))),
+        staleCandidates: cappedArray(firstDefined(activeAuctionSource.staleCandidates, debug.staleCurrentBidCandidates)),
+      }),
+      purchaseOutcome: compact({
+        soldPriceCandidate: firstDefined(purchaseOutcomeSource.soldPriceCandidate, listing.soldPriceCandidate),
+        buyPriceAuction: firstDefined(purchaseOutcomeSource.buyPriceAuction, listing.buyPriceAuction),
+        finalBidAmount: firstDefined(purchaseOutcomeSource.finalBidAmount, listing.finalBidAmount),
+        acceptedAmount: firstDefined(purchaseOutcomeSource.acceptedAmount, listing.acceptedAmount),
+        negotiatedAmount: firstDefined(purchaseOutcomeSource.negotiatedAmount, listing.negotiatedAmount),
+        totalInvoiceAmount: firstDefined(purchaseOutcomeSource.totalInvoiceAmount, listing.totalInvoiceAmount),
+        finalAcquisitionCost: firstDefined(purchaseOutcomeSource.finalAcquisitionCost, listing.finalAcquisitionCost),
+        evidence: cappedArray(firstDefined(purchaseOutcomeSource.evidence, listing.outcomeEvidence, listing.fieldEvidence?.soldPriceCandidate)),
+        rejectedCandidates: cappedArray(firstDefined(purchaseOutcomeSource.rejectedCandidates, debug.rejectedPurchaseOutcomeCandidates, debug.rejectedOutcomePriceCandidates)),
+      }),
+      carfax: compact({
+        status: firstDefined(carfaxSource.status, carfaxSource.urlStatus, listing.carfaxUrlStatus),
+        urlStatus: firstDefined(carfaxSource.urlStatus, listing.carfaxUrlStatus, listing.carfaxUrl ? "url_found" : listing.carfaxAvailable ? "text_only" : undefined),
+        url: firstDefined(carfaxSource.url, listing.carfaxUrl),
+        available: firstDefined(carfaxSource.available, carfaxSource.mentioned, listing.carfaxAvailable, listing.carfaxMentioned),
+        evidence: cappedArray(firstDefined(carfaxSource.evidence, listing.openlaneMetadata?.carfaxEvidence, listing.extractedFields?.carfaxEvidence)),
+        candidateCounts: firstDefined(carfaxSource.candidateCounts, listing.openlaneMetadata?.carfaxDiagnostics),
+        rejectedReasons: cappedArray(firstDefined(carfaxSource.rejectedReasons, (debug.carfaxCandidates || []).map((candidate) => candidate?.rejectedReason || candidate?.rejectionReason).filter(Boolean))),
+      }),
+      condition: compact({
+        knownHistory: firstDefined(conditionSource.knownHistory, conditionSource.knownHistoryItems, listing.declarations),
+        mechanical: firstDefined(conditionSource.mechanical, conditionSource.mechanicalDisclosures, listing.mechanicalAnnouncements),
+        exterior: firstDefined(conditionSource.exterior, conditionSource.exteriorDisclosures, listing.damageAnnouncements),
+        interior: firstDefined(conditionSource.interior, conditionSource.interiorDisclosures, listing.interiorAnnouncements),
+        tireWheel: firstDefined(conditionSource.tireWheel, conditionSource.tireWheelDisclosures, listing.tireCondition),
+        obd2: firstDefined(conditionSource.obd2, conditionSource.obd2Status, listing.diagnosticFeatures?.diagnosticCodesAvailable),
+        notes: firstDefined(conditionSource.notes, conditionSource.dealerNotes, listing.openlaneMetadata?.dealerNotes),
+        conditionReportText: firstDefined(listing.conditionReportText, conditionSource.conditionReportText),
+        evidence: cappedArray(firstDefined(conditionSource.evidence, listing.condition?.evidence)),
+        rejectedLines: cappedArray(firstDefined(conditionSource.rejectedLines, debug.conditionDiagnostics?.rejectedConditionLines, listing.openlaneMetadata?.conditionDetails?.conditionDiagnostics?.rejectedConditionLines)),
+      }),
+      media: compact({
+        photos: cappedArray(firstDefined(mediaSource.photos, listing.photos), 40),
+        videos: cappedArray(firstDefined(mediaSource.videos, listing.videos), 20),
+        photoCountVisible: firstDefined(mediaSource.photoCountVisible, mediaSource.imageCount, listing.imageCount),
+        videoCountVisible: firstDefined(mediaSource.videoCountVisible, mediaSource.videoCount, listing.videoCount),
+        evidence: cappedArray(firstDefined(mediaSource.evidence, listing.openlaneMetadata?.mediaCountEvidence)),
+      }),
+      network: compact({
+        observerStatus: firstDefined(networkSource.observerStatus, listing.openlaneMetadata?.deepCaptureRuntime?.networkObserver),
+        evidence: cappedArray(firstDefined(networkSource.evidence, listing.openlaneMetadata?.networkEvidence), 20),
+        diagnostics: firstDefined(networkSource.diagnostics, listing.openlaneMetadata?.deepCaptureRuntime),
+      }),
+      readiness: compact({
+        ready: firstDefined(readinessSource.ready, readinessSource.readyToCapture, stableReadiness.readyToCapture),
+        readyToCapture: firstDefined(readinessSource.readyToCapture, readinessSource.ready, stableReadiness.readyToCapture),
+        state: firstDefined(readinessSource.state, stableReadiness.state),
+        missingData: cappedArray(firstDefined(readinessSource.missingData, stableReadiness.missingData, listing.missingData)),
+        blockedReason: firstDefined(readinessSource.blockedReason, stableReadiness.blockedReason),
+      }),
+      diagnostics: compact({
+        contradictions: cappedArray(firstDefined(diagnosticsSource.contradictions, listing.debug?.contradictions)),
+        sourcePriorities: firstDefined(diagnosticsSource.sourcePriorities, listing.debug?.fieldEvidenceSummary),
+        debugMessages: cappedArray(firstDefined(diagnosticsSource.debugMessages, listing.warnings)),
+      }),
+    };
+
+    if (canonical.readiness.ready === undefined && canonical.readiness.readyToCapture !== undefined) {
+      canonical.readiness.ready = canonical.readiness.readyToCapture;
+    }
+    if (canonical.readiness.readyToCapture === undefined && canonical.readiness.ready !== undefined) {
+      canonical.readiness.readyToCapture = canonical.readiness.ready;
+    }
+    const explicitMissingData = firstDefined(readinessSource.missingData, stableReadiness.missingData, listing.missingData);
+    if (explicitMissingData !== undefined) canonical.readiness.missingData = cappedArray(explicitMissingData);
+    if (!canonical.carfax.status && canonical.carfax.urlStatus) canonical.carfax.status = canonical.carfax.urlStatus;
+    return sanitizeExtractionValue(canonical);
+  }
+
+  function canonicalToLegacyPayload(canonicalOrListing = {}, legacy = {}) {
+    const canonical = normalizeOpenLaneCanonicalState(canonicalOrListing);
+    const next = { ...(legacy || {}) };
+    const identity = canonical.identity || {};
+    const pageContext = canonical.pageContext || {};
+    const activeAuction = canonical.activeAuction || {};
+    const purchaseOutcome = canonical.purchaseOutcome || {};
+    const carfax = canonical.carfax || {};
+    const condition = canonical.condition || {};
+    const media = canonical.media || {};
+    const network = canonical.network || {};
+    const readiness = canonical.readiness || {};
+
+    setCanonical(next, "vin", identity.vin);
+    setCanonical(next, "year", identity.year);
+    setCanonical(next, "make", identity.make);
+    setCanonical(next, "model", identity.model);
+    setCanonical(next, "trim", identity.trim);
+    setCanonical(next, "mileageKm", identity.mileageKm);
+    setCanonical(next, "pageType", pageContext.pageType);
+    setCanonical(next, "captureKind", pageContext.captureKind);
+    setCanonical(next, "outcomeConfidence", pageContext.outcomeConfidence);
+    setCanonical(next, "currentBid", activeAuction.currentBid);
+    setCanonical(next, "currentOffer", activeAuction.currentOffer);
+    setCanonical(next, "bestOffer", activeAuction.bestOffer);
+    setCanonical(next, "buyNowPrice", activeAuction.buyNowPrice);
+    setCanonical(next, "soldPriceCandidate", purchaseOutcome.soldPriceCandidate);
+    setCanonical(next, "buyPriceAuction", purchaseOutcome.buyPriceAuction);
+    setCanonical(next, "finalBidAmount", purchaseOutcome.finalBidAmount);
+    setCanonical(next, "acceptedAmount", purchaseOutcome.acceptedAmount);
+    setCanonical(next, "negotiatedAmount", purchaseOutcome.negotiatedAmount);
+    setCanonical(next, "totalInvoiceAmount", purchaseOutcome.totalInvoiceAmount);
+    setCanonical(next, "finalAcquisitionCost", purchaseOutcome.finalAcquisitionCost);
+    setCanonical(next, "carfaxUrlStatus", carfax.urlStatus || carfax.status);
+    setCanonical(next, "carfaxUrl", carfax.url);
+    setCanonical(next, "carfaxAvailable", carfax.available);
+    setCanonical(next, "photos", media.photos);
+    setCanonical(next, "videos", media.videos);
+    setCanonical(next, "imageCount", media.photoCountVisible);
+    setCanonical(next, "videoCount", media.videoCountVisible);
+    setCanonical(next, "conditionReportText", condition.conditionReportText);
+    setCanonical(next, "missingData", readiness.missingData);
+
+    next.pageContext = compact({ ...(next.pageContext || {}), ...pageContext });
+    next.identity = compact({ ...(next.identity || {}), ...identity });
+    next.auctionObservation = compact({ ...(next.auctionObservation || {}), ...activeAuction });
+    next.activeAuction = compact({ ...(next.activeAuction || {}), ...activeAuction });
+    next.purchaseOutcome = compact({ ...(next.purchaseOutcome || {}), ...purchaseOutcome });
+    next.carfax = compact({ ...(next.carfax || {}), ...carfax });
+    next.condition = compact({ ...(next.condition || {}), ...condition });
+    next.media = compact({ ...(next.media || {}), ...media });
+    next.openlaneMetadata = {
+      ...(next.openlaneMetadata || {}),
+      ...(network.evidence || network.observerStatus || network.diagnostics ? {
+        networkEvidence: network.evidence || next.openlaneMetadata?.networkEvidence,
+        deepCaptureRuntime: network.diagnostics || next.openlaneMetadata?.deepCaptureRuntime,
+      } : {}),
+      ...(carfax.candidateCounts ? { carfaxDiagnostics: carfax.candidateCounts } : {}),
+      stableCaptureReadiness: compact({
+        ...(next.openlaneMetadata?.stableCaptureReadiness || {}),
+        readyToCapture: firstDefined(readiness.readyToCapture, readiness.ready),
+        ready: firstDefined(readiness.ready, readiness.readyToCapture),
+        state: readiness.state,
+        blockedReason: readiness.blockedReason,
+        missingData: readiness.missingData,
+      }),
+    };
+    next.openlaneCanonicalState = canonical;
+    const sanitized = sanitizeExtractionValue(compact(next));
+    if (readiness.missingData !== undefined) {
+      sanitized.missingData = cappedArray(readiness.missingData);
+      sanitized.openlaneMetadata = sanitized.openlaneMetadata || {};
+      sanitized.openlaneMetadata.stableCaptureReadiness = sanitized.openlaneMetadata.stableCaptureReadiness || {};
+      sanitized.openlaneMetadata.stableCaptureReadiness.missingData = cappedArray(readiness.missingData);
+    }
+    return sanitized;
+  }
+
+  function setCanonical(target, field, value) {
+    if (value !== undefined && value !== "") target[field] = value;
+  }
+
+  function firstDefined(...values) {
+    return values.find((value) => value !== undefined);
+  }
+
+  function cappedArray(value, limit = 20) {
+    if (value === undefined || value === null) return [];
+    const array = Array.isArray(value) ? value : [value];
+    return array.filter((item) => item !== undefined && item !== "").slice(0, limit);
   }
 
   function addFieldEvidence(map, field, value, options = {}) {
@@ -428,6 +648,9 @@
   const api = {
     applyOpenLaneExtractionContract,
     buildOpenLaneExtractionContract,
+    createCanonicalOpenLaneState,
+    normalizeOpenLaneCanonicalState,
+    canonicalToLegacyPayload,
     sanitizeExtractionValue,
     addFieldEvidence,
     chooseBestEvidence,

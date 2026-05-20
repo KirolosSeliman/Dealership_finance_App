@@ -8,6 +8,9 @@ const contract = require("../browser-extension/src/openlane-extraction-contract.
   applyOpenLaneExtractionContract: (listing: Record<string, unknown>) => Record<string, unknown>;
   addFieldEvidence: (map: Record<string, unknown[]>, field: string, value: unknown, options: Record<string, unknown>) => void;
   chooseBestEvidence: (items: Array<{ value: unknown; confidenceScore: number; sourceType: string }>) => { value: unknown; confidenceScore: number; sourceType: string };
+  canonicalToLegacyPayload: (canonical: Record<string, unknown>, legacy?: Record<string, unknown>) => Record<string, unknown>;
+  createCanonicalOpenLaneState: (overrides?: Record<string, unknown>) => Record<string, unknown>;
+  normalizeOpenLaneCanonicalState: (listing: Record<string, unknown>) => Record<string, unknown>;
   normalizeEvidenceValue: (field: string, value: unknown) => unknown;
   redactEvidence: (item: Record<string, unknown>) => Record<string, unknown>;
   scoreEvidence: (item: Record<string, unknown>) => number;
@@ -16,9 +19,113 @@ const contract = require("../browser-extension/src/openlane-extraction-contract.
 const organizationId = "63c47786-fb41-40c1-a573-71346969b9e0";
 
 test("OpenLane extraction contract exports evidence helpers", () => {
-  for (const helper of ["addFieldEvidence", "chooseBestEvidence", "normalizeEvidenceValue", "redactEvidence", "scoreEvidence"]) {
+  for (const helper of ["addFieldEvidence", "chooseBestEvidence", "createCanonicalOpenLaneState", "normalizeOpenLaneCanonicalState", "canonicalToLegacyPayload", "normalizeEvidenceValue", "redactEvidence", "scoreEvidence"]) {
     assert.equal(typeof contract[helper], "function");
   }
+});
+
+test("OpenLane canonical state derives legacy current bid purchase Carfax and readiness fields", () => {
+  const canonical = contract.createCanonicalOpenLaneState({
+    identity: {
+      vin: "3KPFK4A77HE123456",
+      year: 2017,
+      make: "Kia",
+      model: "Forte",
+      mileageKm: 111486,
+      evidence: [{ field: "vin", sourceType: "network_json", sourceText: "VIN 3KPFK4A77HE123456" }],
+    },
+    pageContext: {
+      pageType: "purchase_detail",
+      captureKind: "candidate_outcome",
+      outcomeConfidence: "high",
+      evidence: [{ sourceText: "Sold price $4,000" }],
+      ignoredEvidence: [{ sourceText: "Pickup scheduled", rejectionReason: "pickup_schedule_not_purchase_outcome" }],
+    },
+    activeAuction: {
+      currentBid: 14200,
+      evidence: [{ field: "currentBid", sourceType: "section_map", sourceText: "Current bid $14,200" }],
+      staleCandidates: [{ value: 13800, rejectionReason: "stale_current_bid_candidate" }],
+    },
+    purchaseOutcome: {
+      soldPriceCandidate: 4000,
+      buyPriceAuction: 4000,
+      finalBidAmount: null,
+      evidence: [{ field: "soldPriceCandidate", sourceType: "purchase_detail_panel", sourceText: "Sold price $4,000" }],
+    },
+    carfax: {
+      urlStatus: "url_found",
+      url: "https://vhr.carfax.ca/report/example",
+      available: true,
+      evidence: [{ source: "href", sourceText: "View CARFAX" }],
+      candidateCounts: { urlFoundCandidateCount: 1 },
+      rejectedReasons: ["logo_only"],
+    },
+    readiness: {
+      ready: true,
+      state: "ready_to_capture",
+      missingData: [],
+      blockedReason: "",
+    },
+  });
+
+  const legacy = contract.canonicalToLegacyPayload(canonical, {
+    currentBid: 13800,
+    soldPriceCandidate: undefined,
+    carfaxUrlStatus: "text_only",
+    missingData: ["listedPrice"],
+    openlaneMetadata: {
+      stableCaptureReadiness: {
+        readyToCapture: false,
+        state: "pending_vehicle_data",
+        missingData: ["listedPrice"],
+      },
+    },
+  });
+
+  assert.equal(legacy.currentBid, 14200);
+  assert.equal(legacy.soldPriceCandidate, 4000);
+  assert.equal(legacy.buyPriceAuction, 4000);
+  assert.equal(legacy.finalBidAmount, null);
+  assert.equal(legacy.carfaxUrlStatus, "url_found");
+  assert.equal(legacy.carfaxUrl, "https://vhr.carfax.ca/report/example");
+  assert.deepEqual(legacy.missingData, []);
+  assert.equal((legacy.openlaneMetadata as { stableCaptureReadiness: { readyToCapture: boolean; state: string } }).stableCaptureReadiness.readyToCapture, true);
+  assert.equal((legacy.openlaneMetadata as { stableCaptureReadiness: { state: string } }).stableCaptureReadiness.state, "ready_to_capture");
+  assert.equal((legacy.openlaneCanonicalState as { activeAuction: { currentBid: number } }).activeAuction.currentBid, 14200);
+});
+
+test("OpenLane canonical state can be normalized from an existing extraction contract payload", () => {
+  const listing = contract.applyOpenLaneExtractionContract({
+    sourceName: "OpenLane",
+    listingUrl: "https://app.openlane.ca/vdp/3KPFK4A77HE123456",
+    pageType: "active_listing",
+    captureKind: "observation",
+    vin: "3KPFK4A77HE123456",
+    year: 2017,
+    make: "Kia",
+    model: "Forte",
+    mileageKm: 111486,
+    currentBid: 14200,
+    carfaxAvailable: true,
+    carfaxUrlStatus: "text_only",
+    missingData: ["carfaxUrl"],
+    openlaneMetadata: {
+      stableCaptureReadiness: {
+        readyToCapture: false,
+        state: "incomplete_identity",
+        blockedReason: "carfax_url_missing",
+        missingData: ["carfaxUrl"],
+      },
+    },
+  });
+
+  const canonical = contract.normalizeOpenLaneCanonicalState(listing);
+
+  assert.equal((canonical.identity as { vin?: string }).vin, "3KPFK4A77HE123456");
+  assert.equal((canonical.activeAuction as { currentBid?: number }).currentBid, 14200);
+  assert.equal((canonical.carfax as { urlStatus?: string }).urlStatus, "text_only");
+  assert.deepEqual((canonical.readiness as { missingData?: string[] }).missingData, ["carfaxUrl"]);
+  assert.equal((canonical.readiness as { ready?: boolean }).ready, false);
 });
 
 test("OpenLane extraction contract creates normalized field evidence without breaking flat fields", () => {
