@@ -44,6 +44,7 @@ Fixtures in this folder must be sanitized snapshots of visible page structure on
 - `openlane-router-carfax-url.html`, `openlane-backend-bad-price-evidence.json` - Phase 7 exact CARFAX router and backend bad-price evidence fixtures.
 - `openlane-vdp-nissan-final-minute-bid-refresh.html` - live-bid evidence fixture for final-minute Nissan `$14,200` current bid beating stale sticky `$13,800` and rejecting `71 Bids`.
 - `openlane-vdp-kia-purchase-sold-price-picked-up-live.html` - live Kia purchase evidence fixture with VIN `3KPFL4A72HE119966`, `Sold price $4,000`, and `Mark as picked up`.
+- `openlane-purchase-list-sold-price-card-live.html` - sanitized purchase-list card fixture with visible `Sold price $4,000` candidate outcome evidence.
 - `openlane-vdp-carfax-text-only-live.html` - live CARFAX text-only evidence fixture with `Always view the CARFAX report` and no safe URL metadata.
 - `openlane-network-carfax-url-live.json` - allowed OpenLane vehicle JSON evidence containing a safe CARFAX URL with a token-like query parameter for sanitizer verification.
 - `openlane-vdp-condition-pollution-live.html` - condition pollution evidence fixture for mechanical/exterior/tire-wheel header bleed, bid rows, legal footer, and transport noise.
