@@ -15,7 +15,14 @@
   postDiagnostic("page_hook_installed");
 
   function emit(url, contentType, body) {
-    if (!isAllowedEndpoint(url)) return;
+    const decision = endpointDecision(url);
+    if (!decision.allowed) {
+      if (decision.reportable) postDiagnostic("endpoint_denied", {
+        endpointPattern: decision.endpointPattern,
+        reason: decision.reason,
+      });
+      return;
+    }
     const message = {
       source: "dealer-flow-openlane-network",
       eventId: `openlane-network-${Date.now()}-${++sequence}`,
@@ -90,20 +97,30 @@
     }
   }
 
-  function isAllowedEndpoint(url) {
+  function endpointDecision(url) {
     let parsed;
     try {
       parsed = new URL(String(url || ""), window.location.href);
     } catch {
-      return false;
+      return { allowed: false, reportable: false, reason: "invalid_url", endpointPattern: "" };
     }
     const target = `${parsed.hostname}${parsed.pathname}`.toLowerCase();
-    if (!ALLOWED_HOST.test(parsed.hostname)) return false;
-    if (DENY_ENDPOINT.test(target)) return false;
-    return ALLOW_ENDPOINT.test(target);
+    const pattern = endpointPattern(parsed);
+    if (!ALLOWED_HOST.test(parsed.hostname)) return { allowed: false, reportable: false, reason: "unsupported_host", endpointPattern: "" };
+    if (DENY_ENDPOINT.test(target)) return { allowed: false, reportable: true, reason: "denied_sensitive_endpoint", endpointPattern: pattern };
+    if (!ALLOW_ENDPOINT.test(target)) return { allowed: false, reportable: true, reason: "not_vehicle_listing_endpoint", endpointPattern: pattern };
+    return { allowed: true, reportable: false, reason: "allowed", endpointPattern: pattern };
   }
 
-  function postDiagnostic(type) {
+  function endpointPattern(parsed) {
+    const pathname = parsed.pathname
+      .split("/")
+      .map((segment) => /\d/.test(segment) && /^[A-Za-z0-9-]{3,}$/.test(segment) ? ":id" : segment)
+      .join("/");
+    return `${parsed.hostname}${pathname}`.slice(0, 180);
+  }
+
+  function postDiagnostic(type, details = {}) {
     try {
       window.postMessage({
         source: "dealer-flow-openlane-network-diagnostics",
@@ -111,6 +128,8 @@
         pageHookInstalled: true,
         earlyHookInstalled: Boolean(window.__dealerFlowOpenLaneEarlyNetworkHook),
         earlyQueueLength: earlyQueue.length,
+        endpointPattern: details.endpointPattern || "",
+        reason: details.reason || "",
       }, window.location.origin);
     } catch {
       // Passive diagnostics only; never break the OpenLane page.

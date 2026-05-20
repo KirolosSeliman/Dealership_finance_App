@@ -93,8 +93,10 @@ test("OpenLane early network hook is injection-only and keeps extraction in the 
   assert.doesNotMatch(earlyHook, /DealerFlowMarketSnapApi|chrome\.storage|fetch\s*\(|XMLHttpRequest|localStorage|sessionStorage|document\.body|querySelector/i);
   assert.match(pageHook, /MAX_QUEUE_LENGTH/);
   assert.match(pageHook, /dealer-flow-openlane-network-control/);
+  assert.match(pageHook, /endpointDecision/);
+  assert.match(pageHook, /endpoint_denied/);
   assert.match(observer, /flushEarlyPageHookQueue/);
-  assert.doesNotMatch(pageHook, /requestHeaders|getRequestHeader|setRequestHeader|credentials|authorization\s*:/i);
+  assert.doesNotMatch(pageHook, /requestHeaders|getRequestHeader|setRequestHeader|credentials|authorization\s*:|DealerFlowMarketSnapApi|chrome\.storage|saveListing|analyzeListing/i);
 });
 
 test("Market Snap extension uses in-page OpenLane widget instead of popup-only analysis", () => {

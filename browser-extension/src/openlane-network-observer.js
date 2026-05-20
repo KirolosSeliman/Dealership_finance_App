@@ -92,6 +92,9 @@
   }
 
   function rememberPageHookDiagnostic(data = {}) {
+    const diagnosticType = String(data.type || "");
+    const diagnosticEndpointPattern = sanitizeEndpointDiagnosticPattern(data.endpointPattern);
+    const diagnosticReason = sanitizeEndpointDiagnosticReason(data.reason);
     observerStatus = {
       ...observerStatus,
       pageHookInstalled: Boolean(data.pageHookInstalled || observerStatus.pageHookInstalled),
@@ -101,6 +104,16 @@
       pageHookEventCount: Number(observerStatus.pageHookEventCount || 0) + 1,
       lastPageHookEventAt: new Date().toISOString(),
     };
+    if (diagnosticType === "endpoint_denied" && diagnosticEndpointPattern) {
+      observerStatus = {
+        ...observerStatus,
+        deniedEventCount: Number(observerStatus.deniedEventCount || 0) + 1,
+        lastDeniedEndpointPattern: diagnosticEndpointPattern,
+        lastDeniedEndpointReason: diagnosticReason || "denied_by_page_hook",
+        lastObservedEndpointSample: diagnosticEndpointPattern,
+        observationCount: observations.length,
+      };
+    }
   }
 
   function onPageMessage(event) {
@@ -511,6 +524,18 @@
     }
   }
 
+  function sanitizeEndpointDiagnosticPattern(value) {
+    const pattern = String(value || "").replace(/[?#].*$/, "").slice(0, 180);
+    if (!pattern) return "";
+    if (SENSITIVE_KEY.test(pattern)) return "sensitive_endpoint";
+    return pattern;
+  }
+
+  function sanitizeEndpointDiagnosticReason(value) {
+    const reason = String(value || "").replace(/[^a-z0-9_-]/gi, "").slice(0, 80);
+    return reason || "";
+  }
+
   function looksLikeVehicleMedia(value) {
     return /^https?:\/\//i.test(value) && /\.(avif|webp|png|jpe?g)(\?|#|$)/i.test(value) && /kar-media|openlane|vehicle|photo|image/i.test(value) && !/logo|icon|favicon|sprite|translate|\.svg/i.test(value);
   }
@@ -642,7 +667,7 @@
       });
   }
 
-  const api = { startOpenLaneNetworkObserver, stopOpenLaneNetworkObserver, rememberNetworkPayload, getOpenLaneNetworkEvidence, getOpenLaneNetworkObserverStatus, extractCandidatesFromNetworkPayload, sanitizeNetworkPayload, mergeNetworkEvidenceIntoListing };
+  const api = { startOpenLaneNetworkObserver, stopOpenLaneNetworkObserver, rememberNetworkPayload, rememberPageHookDiagnostic, getOpenLaneNetworkEvidence, getOpenLaneNetworkObserverStatus, extractCandidatesFromNetworkPayload, sanitizeNetworkPayload, mergeNetworkEvidenceIntoListing };
   root.DealerFlowOpenLaneNetworkObserver = api;
   if (typeof module !== "undefined") module.exports = api;
 })(typeof window !== "undefined" ? window : globalThis);

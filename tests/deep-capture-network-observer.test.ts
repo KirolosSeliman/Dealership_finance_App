@@ -39,6 +39,7 @@ const networkObserver = require("../browser-extension/src/openlane-network-obser
   };
   sanitizeNetworkPayload: (payload: unknown) => unknown;
   mergeNetworkEvidenceIntoListing: (listing: Record<string, unknown>, evidence: unknown[]) => Record<string, unknown>;
+  rememberPageHookDiagnostic: (data: Record<string, unknown>) => void;
 };
 
 test("OpenLane network observer enables in temporary default mode only for OpenLane with required settings", () => {
@@ -156,6 +157,26 @@ test("OpenLane network observer ignores irrelevant and auth/session endpoints", 
   assert.equal(networkObserver.rememberNetworkPayload(body, "https://app.openlane.ca/api/user/vehicles/123", "application/json"), undefined);
   assert.ok(Number(networkObserver.getOpenLaneNetworkObserverStatus().deniedEventCount || 0) >= beforeDenied + 3);
   assert.equal(networkObserver.rememberNetworkPayload(body, "https://app.openlane.ca/api/vdp/123", "application/json") !== undefined, true);
+});
+
+test("OpenLane network observer records page-hook denied endpoint diagnostics without response bodies", () => {
+  const before = networkObserver.getOpenLaneNetworkObserverStatus();
+  networkObserver.rememberPageHookDiagnostic({
+    type: "endpoint_denied",
+    pageHookInstalled: true,
+    earlyHookInstalled: true,
+    endpointPattern: "app.openlane.ca/api/profile/me",
+    reason: "denied_sensitive_endpoint",
+  });
+  const after = networkObserver.getOpenLaneNetworkObserverStatus();
+
+  assert.equal(after.pageHookInstalled, true);
+  assert.equal(after.earlyHookInstalled, true);
+  assert.ok(Number(after.deniedEventCount || 0) >= Number(before.deniedEventCount || 0) + 1);
+  assert.equal(after.lastDeniedEndpointPattern, "app.openlane.ca/api/profile/me");
+  assert.equal(after.lastDeniedEndpointReason, "denied_sensitive_endpoint");
+  assert.equal(after.lastObservedEndpointSample, "app.openlane.ca/api/profile/me");
+  assert.doesNotMatch(JSON.stringify(after), /responseText|secret-token|authorization=|token=/i);
 });
 
 test("OpenLane network observer counts irrelevant JSON and parse errors without storing sensitive URL details", () => {
