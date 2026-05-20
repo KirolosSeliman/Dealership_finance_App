@@ -1348,8 +1348,10 @@
     const zones = sectionMap?.zones || {};
     const knownHistoryText = zones.knownHistory?.text || findSectionByHeadings(text, ["Known history", "Antécédents connus", "Antecedents connus"]);
     const disclosureText = zones.disclosuresCondition?.text || findSectionByHeadings(text, ["Disclosures and conditions", "Disclosures", "Divulgations et condition"]);
-    const dealerNotes = cleanConditionSection(zones.dealerNotes?.text || findSectionByHeadings(text, ["Note from selling dealer", "Note du concessionnaire vendeur", "Dealer notes"]));
-    const qaSummary = cleanConditionSection(zones.qaSection?.text || findSectionByHeadings(text, ["Q and A", "Q&A", "Q et R"]), { keepQuestions: true });
+    const dealerNotesRaw = zones.dealerNotes?.text || findSectionByHeadings(text, ["Note from selling dealer", "Note du concessionnaire vendeur", "Dealer notes"]);
+    const qaRaw = zones.qaSection?.text || findSectionByHeadings(text, ["Q and A", "Q&A", "Q et R"]);
+    const dealerNotes = cleanConditionSection(dealerNotesRaw);
+    const qaSummary = cleanConditionSection(qaRaw, { keepQuestions: true });
     const sellerBroadcasts = cleanConditionSection(findSectionByHeadings(text, ["Seller broadcasts", "Broadcasts", "Messages du vendeur"]));
     const knownHistoryItems = conditionItems(knownHistoryText, ["Known history", "Antécédents connus", "Antecedents connus"]);
     const safetyDisclosures = conditionItems(subsectionText(disclosureText, ["In relation to safety", "En relation avec la sécurité", "En relation avec la securite"]));
@@ -1372,6 +1374,12 @@
       fallbackDeclarations.length ? `Declarations: ${fallbackDeclarations.join(" | ")}` : "",
     ].filter(Boolean).join(" | ").slice(0, 4000);
     const highRiskTerms = highRiskConditionTerms(allConditionText);
+    const conditionDiagnostics = buildConditionDiagnostics({
+      knownHistory: knownHistoryText,
+      disclosuresCondition: disclosureText,
+      dealerNotes: dealerNotesRaw,
+      qaSection: qaRaw,
+    });
     const evidence = [
       knownHistoryText ? { source: "known_history_zone", sourceText: cleanConditionSection(knownHistoryText).slice(0, 500) } : undefined,
       disclosureText ? { source: "disclosures_condition_zone", sourceText: cleanConditionSection(disclosureText).slice(0, 800) } : undefined,
@@ -1393,6 +1401,7 @@
       conditionReportText: allConditionText || undefined,
       highRiskTerms,
       evidence,
+      conditionDiagnostics,
     });
   }
 
@@ -1402,6 +1411,60 @@
       if (found) return `${heading}\n${found}`;
     }
     return "";
+  }
+
+  function buildConditionDiagnostics(sectionTexts = {}) {
+    const rejectedConditionLines = [];
+    for (const [sourceZone, value] of Object.entries(sectionTexts)) {
+      for (const rawLine of String(value || "").replace(/\r/g, "\n").split(/\n|\s+\|\s+/)) {
+        const sourceText = cleanConditionLine(rawLine);
+        if (!sourceText) continue;
+        if (isConditionNoiseLine(sourceText, { keepQuestions: sourceZone === "qaSection" })) {
+          rejectedConditionLines.push({
+            sourceZone,
+            sourceText: sourceText.slice(0, 240),
+            rejectionReason: conditionNoiseReason(sourceText),
+          });
+        }
+        if (rejectedConditionLines.length >= 20) break;
+      }
+      if (rejectedConditionLines.length >= 20) break;
+    }
+    return compact({
+      rejectedConditionLines,
+      sectionBoundaryDecisions: conditionSectionBoundaryDecisions(sectionTexts.disclosuresCondition).slice(0, 12),
+    });
+  }
+
+  function conditionSectionBoundaryDecisions(text) {
+    const headings = [
+      "Known history", "Antecedents connus", "Disclosures and conditions", "Divulgations et condition",
+      "In relation to safety", "En relation avec la securite", "Mechanical", "Mecanique", "Exterior", "Exterieur",
+      "Interior", "Interieur", "Tires and wheels", "Pneus et roues", "OBD2 Reader", "Lecteur OBD2",
+      "Note from selling dealer", "Note du concessionnaire vendeur", "Q and A", "Q et R",
+    ];
+    const source = String(text || "");
+    const found = headings
+      .map((heading) => ({ heading, index: source.search(new RegExp(`(?:^|\\n)\\s*${escapeRegExp(heading)}\\b`, "i")) }))
+      .filter((item) => item.index >= 0)
+      .sort((a, b) => a.index - b.index);
+    return found.map((item, index) => ({
+      sourceZone: "disclosuresCondition",
+      startHeading: item.heading,
+      stopHeading: found[index + 1]?.heading || "section_end",
+    }));
+  }
+
+  function conditionNoiseReason(line) {
+    const text = normalizeSpace(line);
+    if (/\b(Full bid history|Bidder\s+\d+|Current bid|Highest proxy applied|\d+\s+Bids?)\b/i.test(text)) return "bid_history_noise";
+    if (/\b(Transport estimate|Transport Direct|Rate info|Vehicle location)\b/i.test(text)) return "transport_or_location_noise";
+    if (/\b(Market guide|wholesale data|Subscribe to Market guide)\b/i.test(text)) return "market_guide_noise";
+    if (/\b(Terms & conditions|Privacy policy|OPENLANE Inc\. All rights reserved)\b/i.test(text)) return "legal_or_footer_noise";
+    if (/^(VIN|NIV)\b|^[A-HJ-NPR-Z0-9]{17}$/i.test(text)) return "identity_line_not_condition";
+    if (/^Odometer\b|^Odom[eÃƒÂ¨]tre\b|^\d[\d,.\s]*\s*KM$/i.test(text)) return "odometer_line_not_condition";
+    if (/^Q:\s/i.test(text)) return "qa_line_not_condition";
+    return "condition_noise_line";
   }
 
   function subsectionText(text, headings) {

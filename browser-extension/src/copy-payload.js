@@ -16,6 +16,17 @@
     };
     const readinessSummary = buildReadinessSummary(safeListing);
     const priceDiagnostics = buildPriceDiagnostics(safeListing);
+    const currentBidDebug = buildCurrentBidDebug(safeListing, priceDiagnostics);
+    const purchaseOutcomeDebug = buildPurchaseOutcomeDebug(safeListing, priceDiagnostics);
+    const conditionCleanupDebug = buildConditionCleanupDebug(safeListing);
+    const carfaxDebug = buildCarfaxDebug(safeListing);
+    const contradictionDiagnostics = buildContradictionDiagnostics(safeListing, {
+      priceDiagnostics,
+      currentBidDebug,
+      purchaseOutcomeDebug,
+      conditionCleanupDebug,
+      carfaxDebug,
+    });
     const sectionMap = {
       summary: safeListing.openlaneMetadata?.sectionMapSummary || safeListing.debug?.sectionMapSummary || null,
       textRegions: safeListing.openlaneMetadata?.textRegions || null,
@@ -33,6 +44,11 @@
       networkEvidence: safeListing.openlaneMetadata?.networkEvidence || [],
       readinessSummary,
       priceDiagnostics,
+      contradictionDiagnostics,
+      currentBidDebug,
+      purchaseOutcomeDebug,
+      conditionCleanupDebug,
+      carfaxDebug,
       outcomeEvidence,
       debug,
       backendResponse: state.backendResponse,
@@ -110,6 +126,11 @@
       networkObserverMessage: networkObserverMessage(runtime, safeListing),
       carfaxStatus: safeListing.carfaxUrlStatus || "missing",
       carfaxDiagnostics: safeListing.openlaneMetadata?.carfaxDiagnostics || {},
+      contradictionDiagnostics: buildContradictionDiagnostics(safeListing),
+      currentBidDebug: buildCurrentBidDebug(safeListing),
+      purchaseOutcomeDebug: buildPurchaseOutcomeDebug(safeListing),
+      conditionCleanupDebug: buildConditionCleanupDebug(safeListing),
+      carfaxDebug: buildCarfaxDebug(safeListing),
       vinStatus: !safeListing.vin ? "missing" : /^[A-HJ-NPR-Z0-9]{17}$/i.test(String(safeListing.vin)) ? "found" : "invalid",
       vinEvidenceSource: safeListing.fieldEvidence?.vin?.[0]?.sourceType || safeListing.extractedFields?.vinEvidence?.matchedLabel || "",
       ignoredNoisyZones: ignoredNoisyZones(safeListing),
@@ -207,6 +228,119 @@
       listedPriceSemantics: listing.priceSemantics?.listedPrice || debug.listedPriceDecision?.semantics || "",
       priceDiagnosticMessages: priceDiagnosticMessages(listing, rejectedPriceCandidates, lowerBidCandidates, staleCurrentBidCandidates),
     });
+  }
+
+  function buildCurrentBidDebug(listing = {}, priceDiagnostics = buildPriceDiagnostics(listing)) {
+    const debug = listing.extractedFields?.debug || {};
+    const bidStabilization = listing.openlaneMetadata?.bidStabilization || {};
+    const priceCandidates = Array.isArray(debug.priceCandidates) ? debug.priceCandidates : [];
+    const currentBidEvidence = listing.extractedFields?.currentBidEvidence
+      || listing.fieldEvidence?.currentBid?.[0]
+      || {};
+    const bidPanelTopCandidate = priceCandidates.find((candidate) => /bid_panel|top_row|bid_history/i.test(`${candidate.sourceType || ""} ${candidate.sourceName || ""} ${candidate.label || ""}`) && !candidate.rejectedReason && !candidate.rejectionReason);
+    return sanitizeDebugValue({
+      winningCurrentBid: listing.currentBid ?? null,
+      winningCurrentBidSource: currentBidEvidence.sourceType || currentBidEvidence.matchedLabel || priceDiagnostics.currentBidSource || "",
+      staleActiveBidBarCandidate: priceDiagnostics.staleCurrentBidCandidates?.find((candidate) => /active_bid_bar/i.test(candidate.sourceType || candidate.sourceName || "")) || priceDiagnostics.staleCurrentBidCandidates?.[0] || null,
+      bidPanelTopCandidate: bidPanelTopCandidate ? compactPriceCandidate(bidPanelTopCandidate) : null,
+      rejectedPriceCandidates: priceDiagnostics.rejectedPriceCandidates || [],
+      lowerBidCandidates: priceDiagnostics.lowerBidCandidates || [],
+      bidStabilizationAttempts: Number(bidStabilization.bidStabilizationAttempts || 0),
+      bidStabilization,
+    });
+  }
+
+  function buildPurchaseOutcomeDebug(listing = {}, priceDiagnostics = buildPriceDiagnostics(listing)) {
+    const rejectedMarkers = purchaseMarkerRejectedEvidence(listing);
+    return sanitizeDebugValue({
+      soldPriceCandidate: listing.soldPriceCandidate ?? null,
+      buyPriceAuction: listing.buyPriceAuction ?? null,
+      finalBidAmount: listing.finalBidAmount ?? null,
+      purchaseEvidenceSource: purchaseEvidenceSource(listing),
+      purchaseMarkerRejectedReasons: [...new Set(rejectedMarkers.map((item) => item.rejectedReason || item.rejectionReason).filter(Boolean))].slice(0, 8),
+      purchaseMarkerSourceZones: [...new Set(rejectedMarkers.map((item) => item.zone || item.sourceZone || item.marker).filter(Boolean))].slice(0, 8),
+      rejectedOutcomePriceCandidates: priceDiagnostics.rejectedOutcomePriceCandidates || [],
+    });
+  }
+
+  function buildConditionCleanupDebug(listing = {}) {
+    const debug = listing.extractedFields?.debug || {};
+    const diagnostics = debug.conditionDiagnostics || listing.openlaneMetadata?.conditionDetails?.conditionDiagnostics || {};
+    return sanitizeDebugValue({
+      ignoredNoisyZones: ignoredNoisyZones(listing),
+      rejectedConditionLines: (diagnostics.rejectedConditionLines || []).map((item) => ({
+        sourceZone: item.sourceZone || item.zone || "",
+        sourceText: sanitizeText(item.sourceText || item.text || ""),
+        rejectionReason: item.rejectionReason || item.reason || "condition_noise_line",
+      })).slice(0, 12),
+      sectionBoundaryDecisions: (diagnostics.sectionBoundaryDecisions || []).map((item) => ({
+        sourceZone: item.sourceZone || item.zone || "",
+        startHeading: item.startHeading || item.heading || "",
+        stopHeading: item.stopHeading || item.nextHeading || "",
+      })).slice(0, 8),
+    });
+  }
+
+  function buildCarfaxDebug(listing = {}) {
+    const debug = listing.extractedFields?.debug || {};
+    const carfaxCandidates = Array.isArray(debug.carfaxCandidates) ? debug.carfaxCandidates : [];
+    return sanitizeDebugValue({
+      carfaxUrlStatus: listing.carfaxUrlStatus || "missing",
+      carfaxUrl: listing.carfaxUrl || "",
+      carfaxCandidateCounts: listing.openlaneMetadata?.carfaxDiagnostics || {},
+      carfaxRejectedReasons: carfaxCandidates
+        .map((candidate) => candidate.rejectedReason || candidate.rejectionReason)
+        .filter(Boolean)
+        .slice(0, 8),
+      networkObserverMessage: networkObserverMessage(listing.openlaneMetadata?.deepCaptureRuntime || {}, listing),
+    });
+  }
+
+  function buildContradictionDiagnostics(listing = {}, parts = {}) {
+    const priceDiagnostics = parts.priceDiagnostics || buildPriceDiagnostics(listing);
+    const purchaseOutcomeDebug = parts.purchaseOutcomeDebug || buildPurchaseOutcomeDebug(listing, priceDiagnostics);
+    const conditionCleanupDebug = parts.conditionCleanupDebug || buildConditionCleanupDebug(listing);
+    const carfaxDebug = parts.carfaxDebug || buildCarfaxDebug(listing);
+    const networkMessage = networkObserverMessage(listing.openlaneMetadata?.deepCaptureRuntime || {}, listing);
+    return sanitizeDebugValue({
+      classificationContradictions: purchaseMarkerRejectedEvidence(listing).map((item) => ({
+        marker: item.marker || "",
+        sourceZone: item.zone || item.sourceZone || "",
+        sourceText: sanitizeText(item.sourceText || ""),
+        rejectionReason: item.rejectedReason || item.rejectionReason || "rejected_purchase_marker",
+      })).slice(0, 8),
+      priceContradictions: [
+        ...(priceDiagnostics.staleCurrentBidCandidates || []),
+        ...(priceDiagnostics.lowerBidCandidates || []),
+        ...(priceDiagnostics.rejectedOutcomePriceCandidates || []),
+      ].slice(0, 12),
+      conditionContradictions: conditionCleanupDebug.rejectedConditionLines || [],
+      carfaxContradictions: [
+        listing.carfaxUrlStatus === "text_only" ? { carfaxUrlStatus: "text_only", reason: "carfax_text_visible_without_safe_url" } : null,
+        ...(carfaxDebug.carfaxRejectedReasons || []).map((reason) => ({ reason })),
+      ].filter(Boolean).slice(0, 8),
+      networkContradictions: networkMessage ? [{ message: networkMessage }] : [],
+      purchaseMarkerRejectedReasons: purchaseOutcomeDebug.purchaseMarkerRejectedReasons || [],
+    });
+  }
+
+  function purchaseMarkerRejectedEvidence(listing = {}) {
+    const classification = listing.openlaneMetadata?.classification || listing.extractedFields?.debug?.classifierDecision || {};
+    return (classification.ignoredEvidence || [])
+      .filter((item) => item?.rejectedReason || item?.rejectionReason || /purchase|pickup|paid|outcome|sold/i.test(`${item?.marker || ""} ${item?.sourceText || ""}`))
+      .slice(0, 12);
+  }
+
+  function compactPriceCandidate(candidate = {}) {
+    return {
+      field: candidate.field || candidate.label || "price",
+      value: candidate.value ?? null,
+      sourceType: candidate.sourceType || candidate.source || "",
+      sourceName: candidate.sourceName || candidate.label || "",
+      sourceText: sanitizeText(candidate.sourceText || ""),
+      confidenceScore: candidate.confidenceScore ?? null,
+      rejectionReason: candidate.rejectedReason || candidate.rejectionReason || "",
+    };
   }
 
   function rejectedOutcomePriceCandidates(listing = {}, rejectedPriceCandidates = []) {

@@ -260,8 +260,7 @@ test("Market Snap copy payload builder returns sanitized readiness and debug evi
     currentBid: 13_700,
     listedPrice: 13_700,
     priceSemantics: { currentBid: "observation", listedPrice: "observation_alias_current_bid" },
-    carfaxUrl: "https://www.carfax.ca/report/TUCSON123",
-    carfaxUrlStatus: "url_found",
+    carfaxUrlStatus: "text_only",
     extractionConfidenceScore: 92,
     fieldEvidence: {
       vin: [{ sourceType: "header_chip", sourceText: "VIN KM8J3CA46HU123456" }],
@@ -275,6 +274,7 @@ test("Market Snap copy payload builder returns sanitized readiness and debug evi
         mileageCandidates: [{ mileageKm: 185, sourceText: "Transport CAD $428 / 185km", rejectedReason: "transport_distance_not_odometer" }],
         priceCandidates: [
           { field: "currentBid", value: 13_700, sourceType: "section_map", sourceText: "$13,700", confidenceScore: 98 },
+          { field: "currentBid", value: 13_700, sourceType: "bid_panel_top_row", sourceText: "Bidder 1 $13,700", confidenceScore: 96 },
           { field: "currentBid", value: 4, sourceType: "section_map", sourceText: "Current bid 4 Bids", rejectedReason: "bid_count_not_money" },
           { field: "currentBid", value: 9, sourceType: "section_map", sourceText: "authorization=secret-token 9 Bids", rejectedReason: "bid_count_not_money" },
         ],
@@ -288,6 +288,14 @@ test("Market Snap copy payload builder returns sanitized readiness and debug evi
           { field: "currentBid", value: 8_500, sourceType: "active_bid_bar", sourceText: "Current bid $8,500 Last refreshed earlier", rejectedReason: "stale_current_bid_candidate" },
         ],
         listedPriceDecision: { source: "current_bid", semantics: "observation_alias_current_bid" },
+        conditionDiagnostics: {
+          rejectedConditionLines: [
+            { sourceZone: "disclosuresCondition", sourceText: "Full bid history Bidder 1 $13,700", rejectionReason: "bid_history_noise" },
+          ],
+          sectionBoundaryDecisions: [
+            { sourceZone: "disclosuresCondition", startHeading: "Mechanical", stopHeading: "Exterior" },
+          ],
+        },
         apiToken: "Bearer should-not-copy",
       },
     },
@@ -321,6 +329,12 @@ test("Market Snap copy payload builder returns sanitized readiness and debug evi
           lastObservedEndpointSample: "app.openlane.ca/api/vdp/:id",
         },
       },
+      bidStabilization: {
+        bidState: "unstable_candidate_conflict",
+        initialCurrentBid: 8500,
+        finalCurrentBid: 13_700,
+        bidStabilizationAttempts: 1,
+      },
       networkEvidence: [],
       carfaxEvidence: [{ source: "network_json" }],
       carfaxDiagnostics: {
@@ -334,7 +348,10 @@ test("Market Snap copy payload builder returns sanitized readiness and debug evi
         },
       },
       classification: {
-        ignoredEvidence: [{ zone: "qaSection", sourceText: "Q&A" }],
+        ignoredEvidence: [
+          { zone: "qaSection", sourceText: "Q&A" },
+          { marker: "picked up", zone: "sellerNotes", sourceText: "Pickup Monday-Friday", rejectedReason: "pickup_schedule_not_purchase_outcome" },
+        ],
       },
     },
   }, {
@@ -362,10 +379,26 @@ test("Market Snap copy payload builder returns sanitized readiness and debug evi
   assert.match(JSON.stringify((payload.priceDiagnostics as { lowerBidCandidates?: unknown[] }).lowerBidCandidates), /11100/);
   assert.match(JSON.stringify((payload.priceDiagnostics as { staleCurrentBidCandidates?: unknown[] }).staleCurrentBidCandidates), /stale_current_bid_candidate/);
   assert.match(JSON.stringify((payload.readinessSummary as { staleCurrentBidCandidates?: unknown[] }).staleCurrentBidCandidates), /stale_current_bid_candidate/);
+  assert.equal((payload.currentBidDebug as { winningCurrentBid?: number }).winningCurrentBid, 13_700);
+  assert.equal((payload.currentBidDebug as { winningCurrentBidSource?: string }).winningCurrentBidSource, "section_map");
+  assert.match(JSON.stringify((payload.currentBidDebug as { staleActiveBidBarCandidate?: unknown }).staleActiveBidBarCandidate), /8500/);
+  assert.match(JSON.stringify((payload.currentBidDebug as { bidPanelTopCandidate?: unknown }).bidPanelTopCandidate), /13700/);
+  assert.equal((payload.currentBidDebug as { bidStabilizationAttempts?: number }).bidStabilizationAttempts, 1);
+  assert.match(JSON.stringify((payload.purchaseOutcomeDebug as { purchaseMarkerRejectedReasons?: unknown[] }).purchaseMarkerRejectedReasons), /pickup_schedule_not_purchase_outcome/);
+  assert.match(JSON.stringify((payload.purchaseOutcomeDebug as { purchaseMarkerSourceZones?: unknown[] }).purchaseMarkerSourceZones), /sellerNotes/);
+  assert.match(JSON.stringify((payload.conditionCleanupDebug as { rejectedConditionLines?: unknown[] }).rejectedConditionLines), /bid_history_noise/);
+  assert.match(JSON.stringify((payload.conditionCleanupDebug as { sectionBoundaryDecisions?: unknown[] }).sectionBoundaryDecisions), /Mechanical/);
+  assert.match(JSON.stringify((payload.carfaxDebug as { carfaxCandidateCounts?: unknown }).carfaxCandidateCounts), /carfaxTextOnlyCandidateCount/);
+  assert.match(JSON.stringify((payload.carfaxDebug as { networkObserverMessage?: string }).networkObserverMessage), /no vehicle\/carfax\/price candidates/i);
+  assert.match(JSON.stringify((payload.contradictionDiagnostics as { classificationContradictions?: unknown[] }).classificationContradictions), /pickup_schedule_not_purchase_outcome/);
+  assert.match(JSON.stringify((payload.contradictionDiagnostics as { priceContradictions?: unknown[] }).priceContradictions), /stale_current_bid_candidate/);
+  assert.match(JSON.stringify((payload.contradictionDiagnostics as { conditionContradictions?: unknown[] }).conditionContradictions), /bid_history_noise/);
+  assert.match(JSON.stringify((payload.contradictionDiagnostics as { carfaxContradictions?: unknown[] }).carfaxContradictions), /text_only/);
+  assert.match(JSON.stringify((payload.contradictionDiagnostics as { networkContradictions?: unknown[] }).networkContradictions), /no vehicle\/carfax\/price candidates/i);
   assert.match(JSON.stringify((payload.priceDiagnostics as { priceDiagnosticMessages?: string[] }).priceDiagnosticMessages), /Rejected bid count as price: Current bid 4 Bids/);
   assert.match(JSON.stringify((payload.priceDiagnostics as { priceDiagnosticMessages?: string[] }).priceDiagnosticMessages), /Lower bid candidate ignored: \$11,100/);
   assert.match(JSON.stringify((payload.priceDiagnostics as { priceDiagnosticMessages?: string[] }).priceDiagnosticMessages), /Stale current bid candidate ignored: \$8,500/);
-  assert.deepEqual((payload.readinessSummary as { ignoredNoisyZones?: string[] }).ignoredNoisyZones, ["sidebar", "marketGuide", "qaSection"]);
+  assert.deepEqual((payload.readinessSummary as { ignoredNoisyZones?: string[] }).ignoredNoisyZones, ["sidebar", "marketGuide", "qaSection", "sellerNotes"]);
   assert.equal((payload.readinessSummary as { rejectedFieldCandidateCount?: number }).rejectedFieldCandidateCount, 2);
   assert.match(JSON.stringify(payload.debugSummary), /Network JSON observed but no vehicle\/carfax\/price candidates/i);
   assert.match(JSON.stringify(payload.debugSummary), /Q&A\/sidebar\/market-guide text ignored/i);
@@ -395,8 +428,18 @@ test("Market Snap widget debug UX explains purchased, active, Carfax, network, a
     "Lower bid candidates ignored:",
     "Stale current bid candidates ignored:",
     "Current bid updated from",
+    "Classification contradictions:",
+    "Price contradictions:",
+    "Condition contradictions:",
+    "Carfax contradictions:",
+    "Network contradictions:",
+    "Purchase marker rejected reasons:",
+    "Rejected condition lines:",
+    "Section boundary decisions:",
     "Listed price semantics:",
     "Rejected bid count as price:",
+    "contradictionDiagnostics",
+    "conditionCleanupDebug",
     "buildPriceDiagnostics",
     "purchaseEvidenceSource",
     "ignoredNoisyZones",

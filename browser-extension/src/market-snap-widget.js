@@ -240,6 +240,8 @@
     const vinCandidates = debug.vinCandidates || [];
     const rejectedFieldCandidates = rejectedFieldCandidateItems(safeListing);
     const priceDiagnostics = buildPriceDiagnostics(safeListing);
+    const contradictions = contradictionDiagnostics(safeListing, priceDiagnostics);
+    const conditionDebug = conditionCleanupDebug(safeListing);
     return [
       `<p>Page type: ${safeHtml(safeListing.pageType || "-")}</p>`,
       `<p>Capture kind: ${safeHtml(safeListing.captureKind || "-")}</p>`,
@@ -263,6 +265,11 @@
       `<p>Network diagnostics: ${safeHtml(networkObserverDiagnosticsLabel(deepCaptureRuntime))}</p>`,
       `<p>Network evidence count: ${safeHtml(String(networkEvidenceCount(safeListing, deepCaptureRuntime)))}</p>`,
       networkObserverDiagnosticMessage(safeListing, deepCaptureRuntime) ? `<p>Network diagnostic: ${safeHtml(networkObserverDiagnosticMessage(safeListing, deepCaptureRuntime))}</p>` : "",
+      `<p>Classification contradictions: ${safeHtml(String(contradictions.classificationContradictions.length))}</p>`,
+      `<p>Price contradictions: ${safeHtml(String(contradictions.priceContradictions.length))}</p>`,
+      `<p>Condition contradictions: ${safeHtml(String(contradictions.conditionContradictions.length))}</p>`,
+      `<p>Carfax contradictions: ${safeHtml(String(contradictions.carfaxContradictions.length))}</p>`,
+      `<p>Network contradictions: ${safeHtml(String(contradictions.networkContradictions.length))}</p>`,
       `<p>Price state: ${safeHtml(priceStateLabel(safeListing))}</p>`,
       `<p>Current bid: ${safeHtml(moneyOrDash(safeListing.currentBid))}</p>`,
       `<p>Current bid source: ${safeHtml(priceDiagnostics.currentBidSource || "-")}</p>`,
@@ -282,7 +289,10 @@
       `<p>Buy price auction: ${safeHtml(moneyOrDash(safeListing.buyPriceAuction))}</p>`,
       `<p>Final bid amount: ${safeHtml(moneyOrDash(safeListing.finalBidAmount))}</p>`,
       `<p>Purchase evidence source: ${safeHtml(purchaseEvidenceSource(safeListing))}</p>`,
+      `<p>Purchase marker rejected reasons: ${safeHtml(purchaseMarkerRejectedReasons(safeListing).join(", ") || "-")}</p>`,
       `<p>Ignored noisy zones: ${safeHtml(ignoredNoisyZonesLabel(safeListing))}</p>`,
+      `<p>Rejected condition lines: ${safeHtml(String(conditionDebug.rejectedConditionLines.length || 0))}</p>`,
+      `<p>Section boundary decisions: ${safeHtml(String(conditionDebug.sectionBoundaryDecisions.length || 0))}</p>`,
       `<p>Safe expansion: ${safeHtml(safeExpansion ? `${safeExpansion.clicked?.length || 0} opened / ${safeExpansion.skipped?.length || 0} skipped` : "-")}</p>`,
       `<p>Missing data: ${safeHtml(missing.join(", ") || "-")}</p>`,
       `<p>Extraction confidence: ${safeHtml(valuation?.confidenceScore ?? safeListing.extractionConfidenceScore ?? "-")}</p>`,
@@ -340,6 +350,7 @@
       priceDiagnosticMessage(safeListing),
       bidStabilizationMessage(safeListing),
       ...priceRejectionMessages(safeListing),
+      ...contradictionWarningItems(safeListing),
       transportIgnoredMessage(safeListing),
       safeListing.carfaxUrlStatus === "text_only" ? "Carfax text found, but no URL is exposed." : "",
       networkObserverDiagnosticMessage(safeListing, safeListing.openlaneMetadata?.deepCaptureRuntime || {}),
@@ -434,6 +445,57 @@
       listedPrice: safeListing.listedPrice ?? null,
       listedPriceSource: debug.listedPriceDecision?.source || "",
       listedPriceSemantics: safeListing.priceSemantics?.listedPrice || debug.listedPriceDecision?.semantics || "",
+    };
+  }
+
+  function contradictionDiagnostics(listing = {}, priceDiagnostics = buildPriceDiagnostics(listing)) {
+    const rejectedMarkers = purchaseMarkerRejectedEvidence(listing);
+    const conditionDebug = conditionCleanupDebug(listing);
+    const networkMessage = networkObserverDiagnosticMessage(listing, listing.openlaneMetadata?.deepCaptureRuntime || {});
+    return {
+      classificationContradictions: rejectedMarkers.map((item) => item.rejectedReason || item.rejectionReason || item.marker || "rejected_purchase_marker").slice(0, 8),
+      priceContradictions: [
+        ...(priceDiagnostics.staleCurrentBidCandidates || []),
+        ...(priceDiagnostics.lowerBidCandidates || []),
+        ...(priceDiagnostics.rejectedOutcomePriceCandidates || []),
+      ].slice(0, 12),
+      conditionContradictions: conditionDebug.rejectedConditionLines || [],
+      carfaxContradictions: listing.carfaxUrlStatus === "text_only" ? ["carfax_text_visible_without_safe_url"] : [],
+      networkContradictions: networkMessage ? [networkMessage] : [],
+    };
+  }
+
+  function contradictionWarningItems(listing = {}) {
+    const contradictions = contradictionDiagnostics(listing);
+    return [
+      contradictions.classificationContradictions.length ? `Purchase marker rejected: ${contradictions.classificationContradictions[0]}` : "",
+      contradictions.priceContradictions.length ? "Conflicting price evidence was rejected; see Capture debug." : "",
+      contradictions.conditionContradictions.length ? "Condition noise was rejected from disclosures." : "",
+      contradictions.networkContradictions.length ? contradictions.networkContradictions[0] : "",
+    ].filter(Boolean).slice(0, 4);
+  }
+
+  function purchaseMarkerRejectedEvidence(listing = {}) {
+    const classification = listing.openlaneMetadata?.classification || listing.extractedFields?.debug?.classifierDecision || {};
+    return (classification.ignoredEvidence || [])
+      .filter((item) => item?.rejectedReason || item?.rejectionReason || /purchase|pickup|paid|outcome|sold/i.test(`${item?.marker || ""} ${item?.sourceText || ""}`))
+      .slice(0, 12);
+  }
+
+  function purchaseMarkerRejectedReasons(listing = {}) {
+    return [...new Set(purchaseMarkerRejectedEvidence(listing)
+      .map((item) => item.rejectedReason || item.rejectionReason || item.marker)
+      .filter(Boolean))]
+      .slice(0, 8);
+  }
+
+  function conditionCleanupDebug(listing = {}) {
+    const debug = listing.extractedFields?.debug || {};
+    const diagnostics = debug.conditionDiagnostics || listing.openlaneMetadata?.conditionDetails?.conditionDiagnostics || {};
+    return {
+      ignoredNoisyZones: ignoredNoisyZones(listing),
+      rejectedConditionLines: (diagnostics.rejectedConditionLines || []).slice(0, 12),
+      sectionBoundaryDecisions: (diagnostics.sectionBoundaryDecisions || []).slice(0, 8),
     };
   }
 
