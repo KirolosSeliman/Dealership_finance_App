@@ -479,12 +479,40 @@
     const year = Number(title.match(/\b(19|20)\d{2}\b/)?.[0]);
     const clean = title.replace(/\b(19|20)\d{2}\b/, "").replace(/[|,-]/g, " ").trim();
     const words = clean.split(/\s+/).filter(Boolean);
+    const knownModel = matchKnownModel(words[0], words.slice(1));
     return {
       year: Number.isFinite(year) ? year : undefined,
       make: words[0],
-      model: words[1],
-      trim: words.slice(2, 7).join(" ") || undefined,
+      model: knownModel?.model || words[1],
+      trim: knownModel ? knownModel.trim : (words.slice(2, 7).join(" ") || undefined),
     };
+  }
+
+  const KNOWN_MODELS_BY_MAKE = {
+    Hyundai: ["Santa Fe Sport", "Santa Fe"],
+    Mazda: ["Mazda3"],
+    Kia: ["Stinger", "Forte"],
+    Nissan: ["Frontier"],
+    Toyota: ["Camry Hybrid", "Camry"],
+  };
+
+  function matchKnownModel(make, modelWords = []) {
+    const models = KNOWN_MODELS_BY_MAKE[canonicalMake(make)] || [];
+    for (const model of models) {
+      const modelParts = model.split(/\s+/);
+      const candidate = modelWords.slice(0, modelParts.length).join(" ");
+      if (candidate.toLowerCase() !== model.toLowerCase()) continue;
+      return {
+        model,
+        trim: modelWords.slice(modelParts.length, modelParts.length + 5).join(" ") || undefined,
+      };
+    }
+    return undefined;
+  }
+
+  function canonicalMake(make) {
+    const text = String(make || "").toLowerCase();
+    return Object.keys(KNOWN_MODELS_BY_MAKE).find((item) => item.toLowerCase() === text) || "";
   }
 
   function extractYearMakeModelTrim(value) {

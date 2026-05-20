@@ -528,6 +528,23 @@ test("OpenLane identity scoring rejects auction datetime titles and chooses vehi
   assert.ok((debug.debug?.titleCandidates || []).some((candidate) => /2026/.test(String(candidate.text)) && candidate.rejectedReason));
 });
 
+test("OpenLane title parser preserves known multi-word models and trims", () => {
+  const cases = [
+    ["2014 Hyundai Santa Fe Sport SE", { make: "Hyundai", model: "Santa Fe Sport", trim: "SE" }],
+    ["2018 Mazda Mazda3 GS Auto", { make: "Mazda", model: "Mazda3", trim: "GS Auto" }],
+    ["2018 Kia Stinger GT", { make: "Kia", model: "Stinger", trim: "GT" }],
+    ["2023 Nissan Frontier Crew Cab SV", { make: "Nissan", model: "Frontier", trim: "Crew Cab SV" }],
+    ["2020 Toyota Camry Hybrid XLE", { make: "Toyota", model: "Camry Hybrid", trim: "XLE" }],
+  ] as const;
+
+  for (const [title, expected] of cases) {
+    const parsed = extractor.extractYearMakeModelTrim(title);
+    assert.equal(parsed.make, expected.make, title);
+    assert.equal(parsed.model, expected.model, title);
+    assert.equal(parsed.trim, expected.trim, title);
+  }
+});
+
 test("OpenLane identity debug explains missing VIN when no candidate exists", () => {
   const listing = extractor.extractOpenLaneFixture(fixture("openlane-missing-data.html"), "https://www.openlane.ca/vehicle/missing");
   const fields = listing.extractedFields as { debug?: { vinCandidates?: unknown[] } };
