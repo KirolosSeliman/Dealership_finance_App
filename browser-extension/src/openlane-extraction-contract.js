@@ -124,6 +124,8 @@
         qaSummary: conditionDetails.qaSummary,
         highRiskTerms: conditionDetails.highRiskTerms,
         conditionReportText: conditionDetails.conditionReportText || listing.conditionReportText,
+        conditionExtractorMode: conditionDetails.conditionExtractorMode,
+        conditionDiagnostics: conditionDetails.conditionDiagnostics,
         evidence: conditionDetails.evidence || [
           listing.conditionReportText ? { source: "condition_report_text", sourceText: listing.conditionReportText.slice(0, 1000) } : undefined,
           ...(listing.declarations || []).slice(0, 10).map((item) => ({ source: "declarations", sourceText: item })),

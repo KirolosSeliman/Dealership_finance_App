@@ -48,7 +48,8 @@
     const mediaCounts = extractMediaCounts(mainVisibleText);
     const carfax = extractCarfaxInfo(doc, href, rawVisibleText);
     const conditionDetails = extractConditionDetails(textRegions.sectionMap, mainVisibleText, scopedLabelValues.condition);
-    const conditionReportText = [conditionDetails.conditionReportText, extractConditionText(mainVisibleText, scopedLabelValues.condition)].filter(Boolean).join(" | ") || undefined;
+    const fallbackConditionReportText = hasCanonicalConditionSections(conditionDetails) ? "" : extractConditionText(mainVisibleText, scopedLabelValues.condition);
+    const conditionReportText = [conditionDetails.conditionReportText, fallbackConditionReportText].filter(Boolean).join(" | ") || undefined;
     const purchaseEconomics = extractPurchaseEconomics(mainVisibleText, classification, textRegions.sectionMap, options.networkEvidence);
     const postSaleOutcome = extractPostSaleOutcome(mainVisibleText, classification);
     const isPurchaseOutcomePage = ["fee_details", "purchase_detail", "purchase_info", "purchase_list", "post_sale"].includes(classification.pageType);
@@ -1466,16 +1467,18 @@
     const disclosureText = zones.disclosuresCondition?.text || findSectionByHeadings(text, ["Disclosures and conditions", "Disclosures", "Divulgations et condition"]);
     const dealerNotesRaw = zones.dealerNotes?.text || findSectionByHeadings(text, ["Note from selling dealer", "Note du concessionnaire vendeur", "Dealer notes"]);
     const qaRaw = zones.qaSection?.text || findSectionByHeadings(text, ["Q and A", "Q&A", "Q et R"]);
+    const conditionAst = buildConditionSectionAst(disclosureText);
     const dealerNotes = cleanConditionSection(dealerNotesRaw);
     const qaSummary = cleanConditionSection(qaRaw, { keepQuestions: true });
     const sellerBroadcasts = cleanConditionSection(findSectionByHeadings(text, ["Seller broadcasts", "Broadcasts", "Messages du vendeur"]));
-    const knownHistoryItems = conditionItems(knownHistoryText, ["Known history", "Antécédents connus", "Antecedents connus"]);
-    const safetyDisclosures = conditionItems(subsectionText(disclosureText, ["In relation to safety", "En relation avec la sécurité", "En relation avec la securite"]));
-    const mechanicalDisclosures = conditionItems(subsectionText(disclosureText, ["Mechanical", "Mécanique", "Mecanique"]));
-    const exteriorDisclosures = conditionItems(subsectionText(disclosureText, ["Exterior", "Extérieur", "Exterieur"]));
-    const interiorDisclosures = conditionItems(subsectionText(disclosureText, ["Interior", "Intérieur", "Interieur"]));
-    const tireWheelDisclosures = conditionItems(subsectionText(disclosureText, ["Tires and wheels", "Pneus et roues"]));
-    const obd2Text = subsectionText(disclosureText, ["OBD2 Reader", "OBD2 scan", "Lecteur OBD2"]);
+    const astKnownHistoryItems = conditionSectionItems(conditionAst, ["knownHistory"], "", []);
+    const knownHistoryItems = astKnownHistoryItems.length ? astKnownHistoryItems : conditionItems(knownHistoryText, ["Known history", "Antécédents connus", "Antecedents connus"]);
+    const safetyDisclosures = conditionSectionItems(conditionAst, ["safetyRelated"], disclosureText, ["Safety-related", "In relation to safety", "En relation avec la sécurité", "En relation avec la securite"]);
+    const mechanicalDisclosures = conditionSectionItems(conditionAst, ["mechanical"], disclosureText, ["Mechanical", "Mécanique", "Mecanique"]);
+    const exteriorDisclosures = conditionSectionItems(conditionAst, ["exterior"], disclosureText, ["Exterior", "Extérieur", "Exterieur"]);
+    const interiorDisclosures = conditionSectionItems(conditionAst, ["interior"], disclosureText, ["Interior", "Intérieur", "Interieur"]);
+    const tireWheelDisclosures = conditionSectionItems(conditionAst, ["tiresAndWheels"], disclosureText, ["Tires and wheels", "Tire & wheels", "Tires & wheels", "Pneus et roues"]);
+    const obd2Text = conditionSectionText(conditionAst, ["obd2"]) || subsectionText(disclosureText, ["OBD2 Reader", "OBD2 scan", "Lecteur OBD2"]);
     const obd2Status = obd2Text ? (/nothing reported|rien n.a été signalé|rien n.a ete signale/i.test(obd2Text) ? "nothing_reported" : /non disponible|not available|not visible|unavailable/i.test(obd2Text) ? "not_visible" : "visible_text") : undefined;
     const fallbackDeclarations = conditionItems(labels.get("declarations"));
     const allConditionText = [
@@ -1495,7 +1498,7 @@
       disclosuresCondition: disclosureText,
       dealerNotes: dealerNotesRaw,
       qaSection: qaRaw,
-    });
+    }, conditionAst);
     const evidence = [
       knownHistoryText ? { source: "known_history_zone", sourceText: cleanConditionSection(knownHistoryText).slice(0, 500) } : undefined,
       disclosureText ? { source: "disclosures_condition_zone", sourceText: cleanConditionSection(disclosureText).slice(0, 800) } : undefined,
@@ -1517,8 +1520,14 @@
       conditionReportText: allConditionText || undefined,
       highRiskTerms,
       evidence,
+      conditionExtractorMode: conditionDiagnostics.conditionExtractorMode,
       conditionDiagnostics,
     });
+  }
+
+  function hasCanonicalConditionSections(conditionDetails = {}) {
+    return (conditionDetails.conditionDiagnostics?.conditionSectionTree || [])
+      .some((section) => section.lineCount > 0 && /knownHistory|safetyRelated|mechanical|exterior|interior|tiresAndWheels|obd2/i.test(section.canonicalKey || ""));
   }
 
   function findSectionByHeadings(text, headings) {
@@ -1529,7 +1538,7 @@
     return "";
   }
 
-  function buildConditionDiagnostics(sectionTexts = {}) {
+  function buildConditionDiagnostics(sectionTexts = {}, conditionAst = { sections: [], boundaries: [] }) {
     const rejectedConditionLines = [];
     for (const [sourceZone, value] of Object.entries(sectionTexts)) {
       for (const rawLine of conditionBoundaryText(value).split(/\n|\s+\|\s+/)) {
@@ -1547,9 +1556,66 @@
       if (rejectedConditionLines.length >= 20) break;
     }
     return compact({
+      conditionExtractorMode: "dom_ast",
+      conditionSectionTree: (conditionAst.sections || []).map((section) => ({
+        heading: section.heading,
+        canonicalKey: section.canonicalKey,
+        lineCount: section.lines.length,
+      })).slice(0, 20),
       rejectedConditionLines,
-      sectionBoundaryDecisions: conditionSectionBoundaryDecisions(sectionTexts.disclosuresCondition).slice(0, 12),
+      sectionBoundaryDecisions: (conditionAst.boundaries?.length ? conditionAst.boundaries : conditionSectionBoundaryDecisions(sectionTexts.disclosuresCondition)).slice(0, 12),
     });
+  }
+
+  function buildConditionSectionAst(text) {
+    const sections = [];
+    const boundaries = [];
+    let current = null;
+    for (const rawLine of conditionBoundaryText(text).split(/\n|\s+\|\s+/)) {
+      const line = cleanConditionLine(rawLine);
+      if (!line) continue;
+      const canonicalKey = canonicalConditionSectionKey(line);
+      if (canonicalKey) {
+        const section = { heading: line, canonicalKey, lines: [] };
+        if (current) boundaries.push({ sourceZone: "disclosuresCondition", startHeading: current.heading, stopHeading: line });
+        sections.push(section);
+        current = section;
+        continue;
+      }
+      if (!current || isConditionNoiseLine(line)) continue;
+      current.lines.push(line);
+    }
+    if (current) boundaries.push({ sourceZone: "disclosuresCondition", startHeading: current.heading, stopHeading: "section_end" });
+    return { sections, boundaries };
+  }
+
+  function conditionSectionItems(ast, keys, fallbackText, fallbackHeadings) {
+    if (ast.sections?.length) return conditionItems(conditionSectionText(ast, keys));
+    return conditionItems(subsectionText(fallbackText, fallbackHeadings));
+  }
+
+  function conditionSectionText(ast, keys) {
+    const keySet = new Set(keys || []);
+    return (ast.sections || [])
+      .filter((section) => keySet.has(section.canonicalKey))
+      .flatMap((section) => section.lines)
+      .join("\n");
+  }
+
+  function canonicalConditionSectionKey(heading) {
+    const text = normalizeSpace(heading).toLowerCase();
+    if (/^(disclosures? and conditions?|divulgations? et condition|condition report|rapport de condition)$/i.test(text)) return "conditionRoot";
+    if (/^(known history|ant[eé]c[eé]dents connus|antecedents connus|vehicle history)$/i.test(text)) return "knownHistory";
+    if (/^(safety-related|in relation to safety|en relation avec la s[eé]curit[eé]|en relation avec la securite)$/i.test(text)) return "safetyRelated";
+    if (/^(mechanical|m[eé]canique|mecanique)$/i.test(text)) return "mechanical";
+    if (/^(exterior|ext[eé]rieur|exterieur)$/i.test(text)) return "exterior";
+    if (/^(interior|int[eé]rieur|interieur)$/i.test(text)) return "interior";
+    if (/^(tires? (?:and|&) wheels?|tire (?:and|&) wheels?|pneus et roues)$/i.test(text)) return "tiresAndWheels";
+    if (/^(obd2 reader|obd2 scan|lecteur obd2)$/i.test(text)) return "obd2";
+    if (/^(note from selling dealer|note du concessionnaire vendeur|seller notes?|dealer notes?)$/i.test(text)) return "sellerNotes";
+    if (/^(q and a|q&a|q et r)$/i.test(text)) return "qaSummary";
+    if (/^(market insights?|market guide|add'l info|additional info)$/i.test(text)) return "marketInsights";
+    return "";
   }
 
   function conditionSectionBoundaryDecisions(text) {
@@ -1576,7 +1642,7 @@
     if (/\b(vehicle-detail-page|current-bid-panel|data-testid|vdp-page)\b/i.test(text)) return "attribute_noise";
     if (/^(VIN|NIV)\b|^[A-HJ-NPR-Z0-9]{17}$/i.test(text)) return "identity_line_not_condition";
     if (/^Odometer\b|^Odom[eÃƒÂ¨]tre\b|^\d[\d,.\s]*\s*KM$/i.test(text)) return "odometer_line_not_condition";
-    if (/^Q:\s/i.test(text)) return "qa_line_not_condition";
+    if (/^[QA]:\s/i.test(text)) return "qa_line_not_condition";
     return "condition_noise_line";
   }
 
@@ -1653,7 +1719,7 @@
     if (/^\b(19|20)\d{2}\b\s+[A-Za-z][A-Za-z -]+\b/.test(text)) return true;
     if (/^(VIN|NIV)\b|^[A-HJ-NPR-Z0-9]{17}$/i.test(text)) return true;
     if (/^Odometer\b|^Odom[eÃ¨]tre\b|^\d[\d,.\s]*\s*KM$/i.test(text)) return true;
-    if (/^Q:\s/i.test(text) && !options.keepQuestions) return true;
+    if (/^[QA]:\s/i.test(text) && !options.keepQuestions) return true;
     return false;
   }
 

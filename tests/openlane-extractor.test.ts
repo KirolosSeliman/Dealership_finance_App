@@ -1173,6 +1173,52 @@ test("OpenLane live condition pollution fixture rejects header values, bid rows,
   assert.doesNotMatch(structuredText, /Full bid history|Current bid|\$5,100|29 Bids|OPENLANE Inc|vehicle-detail-page|current-bid-panel|111,486 KM|Transport estimate/i);
   assert.ok(diagnostics?.rejectedConditionLines?.some((item) => /bid_history_noise|legal_or_footer_noise|header_value_not_condition|attribute_noise/.test(String(item.rejectionReason))));
   assert.ok(diagnostics?.sectionBoundaryDecisions?.some((item) => item.startHeading === "Mechanical" && item.stopHeading === "Exterior"));
+  assert.equal((diagnostics as { conditionExtractorMode?: string })?.conditionExtractorMode, "dom_ast");
+  assert.ok((diagnostics as { conditionSectionTree?: Array<{ canonicalKey?: string; lineCount?: number }> })?.conditionSectionTree?.some((item) => item.canonicalKey === "exterior"));
+});
+
+test("OpenLane condition AST prevents broad fallback from reintroducing Q&A and bid history", () => {
+  const listing = extractor.extractOpenLaneFixture(`
+    <main>
+      <h1>2021 Toyota RAV4 LE</h1>
+      <p>VIN 2T3R1RFV5MW123456</p>
+      <p>Odometer 52,300 KM</p>
+      <section class="disclosures-condition">
+        <h2>Disclosures and conditions</h2>
+        <h3>Known history</h3>
+        <p>Previous Accident History</p>
+        <h3>Mechanical</h3>
+        <p>Red light - engine noise</p>
+        <h3>Exterior</h3>
+        <p>Windshield - Cracked</p>
+      </section>
+      <section class="qa-section">
+        <h2>Q&A</h2>
+        <p>Q: Is the engine and transmission good?</p>
+        <p>A: Please review disclosures and condition report.</p>
+      </section>
+      <section class="bid-panel">
+        <h2>Full bid history</h2>
+        <p>Current bid $5,100</p>
+        <p>Bidder 1 $4,900</p>
+      </section>
+    </main>
+  `, "https://app.openlane.ca/vdp/rav4");
+  const condition = listing.condition as {
+    knownHistoryItems?: string[];
+    mechanicalDisclosures?: string[];
+    exteriorDisclosures?: string[];
+    conditionReportText?: string;
+    qaSummary?: string;
+    conditionDiagnostics?: { conditionExtractorMode?: string };
+  };
+
+  assert.equal(condition.conditionDiagnostics?.conditionExtractorMode, "dom_ast");
+  assert.ok(condition.knownHistoryItems?.some((item) => /Previous Accident History/i.test(item)));
+  assert.ok(condition.mechanicalDisclosures?.some((item) => /Red light - engine noise/i.test(item)));
+  assert.ok(condition.exteriorDisclosures?.some((item) => /Windshield - Cracked/i.test(item)));
+  assert.match(String(condition.qaSummary), /engine and transmission good/i);
+  assert.doesNotMatch(String(condition.conditionReportText), /Q:|A:|Full bid history|Current bid|Bidder 1|\$5,100/i);
 });
 
 test("OpenLane page classifier separates active observations from outcome pages", () => {
