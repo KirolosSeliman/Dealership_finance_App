@@ -209,6 +209,8 @@
           candidateScores: titleResult.candidates,
           priceCandidates: [...(currentBidResult.candidates || []), ...(purchaseEconomics.priceCandidates || []), ...(postSaleOutcome.priceCandidates || [])],
           rejectedPurchaseOutcomeCandidates: purchaseEconomics.rejectedCandidates,
+          rejectedOutcomePriceCandidates: purchaseEconomics.rejectedCandidates,
+          purchaseEvidenceSource: purchaseEconomics.purchaseEvidenceSource,
           lowerBidCandidates: currentBidResult.lowerBidCandidates,
           staleCurrentBidCandidates: currentBidResult.staleCurrentBidCandidates,
           currentBidDiagnostics: currentBidResult.diagnostics,
@@ -1616,6 +1618,7 @@
     const verifiedWholesale = purchaseOutcomePrice.verifiedWholesale || /\b(retrieved|mark as picked up|picked up|paid|final|finalized|completed|purchase confirmed|invoice)\b/i.test(`${purchaseStatus || ""} ${text}`);
     const buyPriceAuction = purchaseOutcomePrice.buyPriceAuction;
     const outcomeEvidence = purchaseOutcomePrice.evidence;
+    const purchaseEvidenceSource = purchaseOutcomePrice.purchaseEvidenceSource;
     const priceSemantics = soldPriceCandidate || buyPriceAuction || transactionFee || vehicleHistoryFee || subtotal || taxes || totalInvoiceAmount ? compact({
       soldPriceCandidate: soldPriceCandidate ? "candidate_wholesale_label" : undefined,
       buyPriceAuction: buyPriceAuction ? (verifiedWholesale ? "verified_wholesale_label" : "candidate_wholesale_label") : undefined,
@@ -1638,10 +1641,12 @@
       purchaseStatus,
       priceSemantics,
       outcomeEvidence,
+      purchaseEvidenceSource,
       fieldEvidence: purchaseOutcomePrice.fieldEvidence,
       priceCandidates,
       rejectedCandidates: purchaseOutcomePrice.rejectedCandidates,
       metadata: compact({
+        purchaseEvidenceSource,
         currency: /\bCA\$|CAD\b/i.test(text) ? "CAD" : undefined,
         releaseFormStatus: cleanStatusValue(valueNearTextLabel(text, "Release Form")),
         titleStatus: cleanStatusValue(valueNearTextLabel(text, "Title Status")),
@@ -1663,6 +1668,7 @@
     const verifiedWholesale = Boolean(selectedSold) && hasVerifiedPurchaseCompletionEvidence(sources, outcomeConfidence);
     const selectedBuy = explicitBuyCandidate || (verifiedWholesale ? selectedSold : undefined);
     const evidenceCandidate = selectedBuy || selectedSold;
+    const purchaseEvidenceSource = evidenceCandidate?.sourceType;
     const evidence = evidenceCandidate ? [{
       evidenceType: verifiedWholesale ? "purchase_document" : evidenceTypeForPurchaseSource(evidenceCandidate.sourceType),
       sourceText: evidenceCandidate.sourceText,
@@ -1688,6 +1694,7 @@
       candidates,
       fieldEvidence,
       verifiedWholesale,
+      purchaseEvidenceSource,
       rejectedCandidates,
     });
   }
@@ -1718,21 +1725,41 @@
   function firstTrustedPurchaseMoneyCandidate(sources, labels, field) {
     for (const source of sources) {
       for (const label of labels) {
-        const localCandidates = [];
-        const value = moneyNearLabel(source.text, label, localCandidates);
-        if (!value) continue;
-        const candidate = localCandidates[0] || { label, value, sourceText: purchaseEvidenceSnippet(source.text, label) || `${label} ${value}` };
+        const candidate = purchaseMoneyCandidateNearLabel(source.text, label);
+        if (!candidate?.value) continue;
         if (isRejectedPurchasePriceSource(candidate.sourceText)) continue;
         return {
           field,
           label,
-          value,
-          sourceText: purchaseEvidenceSnippet(source.text, label) || candidate.sourceText,
+          value: candidate.value,
+          sourceText: candidate.sourceText,
           sourceName: source.name,
           sourceType: source.sourceType,
           confidenceScore: source.sourceType === "fee_details_page" ? 96 : 92,
         };
       }
+    }
+    return undefined;
+  }
+
+  function purchaseMoneyCandidateNearLabel(text, label) {
+    const localCandidates = [];
+    const value = moneyNearLabel(text, label, localCandidates);
+    if (value) {
+      const first = localCandidates[0];
+      const sourceText = purchaseEvidenceSnippet(text, label, first?.sourceText) || first?.sourceText || `${label} ${value}`;
+      return { label, value, sourceText };
+    }
+    const source = String(text || "");
+    const labelRegex = new RegExp(escapeRegExp(label), "ig");
+    for (const match of source.matchAll(labelRegex)) {
+      const after = source.slice(match.index || 0, (match.index || 0) + 180);
+      const moneyMatch = after.match(moneyRegex());
+      const money = moneyFrom(moneyMatch?.[0]);
+      if (!money) continue;
+      const end = moneyMatch ? (moneyMatch.index || 0) + moneyMatch[0].length : after.length;
+      const sourceText = normalizeSpace(after.slice(0, end)).slice(0, 240);
+      return { label, value: money, sourceText };
     }
     return undefined;
   }

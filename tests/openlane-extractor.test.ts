@@ -1217,6 +1217,35 @@ test("OpenLane purchased VDP extracts sold price as outcome and ignores transpor
   assert.ok(fieldEvidence.buyPriceAuction?.some((item) => item.sourceType === "purchase_detail_panel" && Number(item.confidenceScore) >= 90));
 });
 
+test("OpenLane live Kia purchase fixture maps sold price into structured outcome fields with source evidence", () => {
+  const listing = extractor.extractOpenLaneFixture(
+    fixture("openlane-vdp-kia-purchase-sold-price-picked-up-live.html"),
+    "https://app.openlane.ca/vdp/3KPFL4A72HE119966",
+  );
+  const metadata = listing.openlaneMetadata as { purchaseEconomics?: { purchaseEvidenceSource?: string } };
+  const fields = listing.extractedFields as {
+    debug?: {
+      purchaseEvidenceSource?: string;
+      rejectedOutcomePriceCandidates?: Array<{ rejectedReason?: string; value?: number }>;
+    };
+  };
+  const fieldEvidence = listing.fieldEvidence as Record<string, Array<{ sourceType?: string; sourceText?: string; confidenceScore?: number }>>;
+
+  assert.equal(listing.pageType, "purchase_detail");
+  assert.equal(listing.captureKind, "verified_outcome");
+  assert.equal(listing.outcomeConfidence, "verified");
+  assert.equal(listing.soldPriceCandidate, 4000);
+  assert.equal(listing.buyPriceAuction, 4000);
+  assert.equal(listing.finalBidAmount, undefined);
+  assert.equal((listing.priceSemantics as Record<string, string>).soldPriceCandidate, "candidate_wholesale_label");
+  assert.equal((listing.priceSemantics as Record<string, string>).buyPriceAuction, "verified_wholesale_label");
+  assert.equal(metadata.purchaseEconomics?.purchaseEvidenceSource, "purchase_detail_panel");
+  assert.equal(fields.debug?.purchaseEvidenceSource, "purchase_detail_panel");
+  assert.ok(fieldEvidence.soldPriceCandidate?.some((item) => item.sourceType === "purchase_detail_panel" && /Sold price\s+\$4,000/i.test(String(item.sourceText))));
+  assert.ok(fieldEvidence.buyPriceAuction?.some((item) => item.sourceType === "purchase_detail_panel" && Number(item.confidenceScore) >= 90));
+  assert.match(JSON.stringify(listing.outcomeEvidence), /Sold price|Mark as picked up/i);
+});
+
 test("OpenLane purchase outcome resolver uses trusted zones and rejects active bid, bid count, and transport money", () => {
   const sectionMapResult = sectionMap.buildOpenLaneSectionMapFromHtml(`
     <main data-testid="vehicle-detail-page">
@@ -1249,6 +1278,43 @@ test("OpenLane purchase outcome resolver uses trusted zones and rejects active b
   assert.equal(result.finalBidAmount, undefined);
   assert.ok((result.evidence as Array<{ sourceText?: string }>).some((item) => /Sold price\s+\$4,000/i.test(String(item.sourceText))));
   assert.ok((result.rejectedCandidates as Array<{ rejectedReason?: string }>).some((item) => /active_current_bid|bid_count|transport_estimate/.test(String(item.rejectedReason))));
+});
+
+test("OpenLane purchase outcome resolver accepts sold price in noisy order history and keeps active bid rejected", () => {
+  const sectionMapResult = sectionMap.buildOpenLaneSectionMapFromHtml(`
+    <main data-testid="vehicle-detail-page">
+      <section class="vehicle-hero" data-vin="3KPFL4A72HE119966">
+        <h1>2017 Kia Forte 4dr Sdn.</h1>
+        <p>Odometer 158,569 KM</p>
+      </section>
+      <section class="bid-panel"><h2>Current bid</h2><p>$21,900</p><p>15 Bids</p></section>
+      <section class="purchase-order-history">
+        <h2>Order history</h2>
+        <p>Current bid $21,900</p>
+        <p>Sold price $4,000</p>
+        <p>15 Bids</p>
+        <p>Transport estimate CAD $378 / 211km</p>
+        <button>Mark as picked up</button>
+      </section>
+    </main>
+  `, "https://app.openlane.ca/vdp/3KPFL4A72HE119966");
+
+  const result = extractor.extractPurchaseOutcomePrice({
+    pageContext: "purchase_detail",
+    captureKind: "verified_outcome",
+    outcomeConfidence: "verified",
+    confidenceScore: 96,
+    sectionMap: sectionMapResult,
+    text: sectionMapResult.mainText,
+  });
+
+  assert.equal(result.soldPriceCandidate, 4000);
+  assert.equal(result.buyPriceAuction, 4000);
+  assert.equal(result.finalBidAmount, undefined);
+  assert.ok(["purchase_detail_panel", "post_sale_page"].includes(String(result.purchaseEvidenceSource)));
+  assert.ok((result.rejectedCandidates as Array<{ value?: number; rejectedReason?: string }>).some((item) => item.value === 21900 && item.rejectedReason === "active_current_bid_not_purchase_outcome"));
+  assert.ok((result.rejectedCandidates as Array<{ value?: number; rejectedReason?: string }>).some((item) => item.value === 15 && item.rejectedReason === "bid_count_not_purchase_outcome_price"));
+  assert.ok((result.rejectedCandidates as Array<{ value?: number; rejectedReason?: string }>).some((item) => item.value === 378 && item.rejectedReason === "transport_estimate_not_purchase_outcome"));
 });
 
 test("OpenLane active VDP keeps current bid observational and rejects transport estimate as listed price", () => {
