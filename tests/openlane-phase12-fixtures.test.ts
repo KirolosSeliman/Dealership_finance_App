@@ -36,7 +36,8 @@ const organizationId = "63c47786-fb41-40c1-a573-71346969b9e0";
 
 test("Phase 12 required OpenLane live fixtures lock latest extraction regressions", () => {
   const nissan = extract("openlane-vdp-nissan-final-minute-bid-refresh.html", "https://app.openlane.ca/vdp/1N6ED1EK0PN123456");
-  const kia = extract("openlane-vdp-kia-purchase-sold-price-picked-up-live.html", "https://app.openlane.ca/vdp/3KPFK4A77HE123456");
+  const kia = extract("openlane-vdp-kia-purchase-detail-sold-price-picked-up.html", "https://app.openlane.ca/vdp/3KPFK4A77HE123456");
+  const kiaPurchaseList = extract("openlane-vdp-kia-purchase-list-sold-price-card.html", "https://app.openlane.ca/purchases");
   const condition = extract("openlane-vdp-condition-section-boundary-noise.html", "https://app.openlane.ca/vdp/KM8J3CA46HU123456");
   const carfaxTextOnly = extract("openlane-vdp-carfax-text-only-live.html", "https://app.openlane.ca/vdp/3KPFK4A77HE123456");
   const hyundai = extract("openlane-vdp-hyundai-santa-fe-sport-title.html", "https://app.openlane.ca/vdp/5XYZUDLB8EG123456");
@@ -51,6 +52,12 @@ test("Phase 12 required OpenLane live fixtures lock latest extraction regression
   assert.equal(kia.soldPriceCandidate, 4_000);
   assert.equal(kia.buyPriceAuction, 4_000);
   assert.ok(!((kia.missingData as string[] | undefined) || []).includes("listedPrice"));
+
+  assert.equal(kiaPurchaseList.pageType, "purchase_list");
+  assert.equal(kiaPurchaseList.captureKind, "candidate_outcome");
+  assert.equal(kiaPurchaseList.soldPriceCandidate, 4_000);
+  assert.equal(kiaPurchaseList.buyPriceAuction, undefined);
+  assert.ok(!((kiaPurchaseList.missingData as string[] | undefined) || []).includes("listedPrice"));
 
   const conditionDetails = (condition.openlaneMetadata as { conditionDetails?: Record<string, unknown> }).conditionDetails || {};
   const canonicalCondition = JSON.stringify({
