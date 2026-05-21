@@ -365,7 +365,11 @@
       }),
     };
 
-    canonical.condition = cleanCanonicalConditionState(canonical.condition || {});
+    canonical.condition = cleanCanonicalConditionState(canonical.condition || {}, listing);
+    if (!canonical.condition.obd2) {
+      const fallbackObd2 = normalizeCanonicalObd2(listing.openlaneMetadata?.conditionDetails?.obd2Status, listing.openlaneMetadata?.conditionDetails || {}, listing);
+      if (fallbackObd2) canonical.condition.obd2 = fallbackObd2;
+    }
     canonical.rejectedEvidence = buildRejectedEvidence(canonical, debug);
     canonical.mlFeatures = buildOpenLaneMlFeatures(canonical);
     if (canonical.readiness.ready === undefined && canonical.readiness.readyToCapture !== undefined) {
@@ -419,13 +423,15 @@
   }
 
   function normalizeObd2Status(value) {
-    const text = String(value || "");
+    const text = String(value && typeof value === "object"
+      ? firstDefined(value.status, value.obd2Status, value.value, value.rawText)
+      : value || "");
     if (!text) return "unknown";
     if (/not_visible|not available|not_scanned|nothing_reported/i.test(text)) return "not_scanned";
     return "scanned";
   }
 
-  function cleanCanonicalConditionState(condition = {}) {
+  function cleanCanonicalConditionState(condition = {}, rawListing = {}) {
     const knownHistory = cleanCanonicalConditionItems(condition.knownHistory);
     const mechanical = cleanCanonicalConditionItems(condition.mechanical);
     const exterior = cleanCanonicalConditionItems(condition.exterior);
@@ -433,6 +439,7 @@
     const tireWheel = cleanCanonicalConditionItems(condition.tireWheel);
     const notes = cleanCanonicalConditionItems(condition.notes);
     const reportTextItems = cleanCanonicalConditionItems(splitConditionText(condition.conditionReportText));
+    const obd2 = normalizeCanonicalObd2(condition.obd2, condition, rawListing);
     const reportParts = [
       knownHistory.length ? `Known history: ${knownHistory.join(" | ")}` : "",
       mechanical.length ? `Mechanical: ${mechanical.join(" | ")}` : "",
@@ -448,10 +455,11 @@
       exterior,
       interior,
       tireWheel,
-      obd2: condition.obd2,
+      obd2,
       notes,
       highRiskTerms: cleanCanonicalConditionItems(condition.highRiskTerms),
       conditionReportText: reportParts.join(" | ") || undefined,
+      cleanConditionSummary: reportParts.join(" | ") || undefined,
       conditionExtractorMode: condition.conditionExtractorMode,
       conditionDiagnostics: condition.conditionDiagnostics ? compact({
         rejectedConditionLineCount: cappedArray(condition.conditionDiagnostics.rejectedConditionLines).length,
@@ -473,6 +481,27 @@
       .slice(0, 20);
   }
 
+  function normalizeCanonicalObd2(value, condition = {}, rawListing = {}) {
+    if (value && typeof value === "object") {
+      const statusText = String(firstDefined(value.status, value.obd2Status, value.value, value.rawText) || "");
+      if (/not_visible|not available|not[_\s-]scanned|nothing[_\s-]reported/i.test(statusText)) return { status: "not_scanned" };
+      if (/\b(scanned|visible_text|available|code|codes|dtc)\b/i.test(statusText)) {
+        return compact({
+          status: "scanned",
+          rawText: value.rawText ? cleanCanonicalConditionItems([value.rawText])[0] : undefined,
+        });
+      }
+    }
+    const text = `${normalizeConditionFeatureText(value)} ${JSON.stringify(condition.evidence || [])} ${condition.conditionReportText || ""} ${JSON.stringify(rawListing.openlaneMetadata?.conditionDetails || {})} ${rawListing.rawVisibleText || ""}`;
+    if (/\b(this vehicle was not scanned|not[_\s-]scanned|was not scanned|not available|nothing reported|rien n.a ete signale|rien n.a été signalé)\b/i.test(text)) {
+      return { status: "not_scanned" };
+    }
+    if (/\b(obd2|obdii|diagnostic)\b/i.test(text) && /\b(scanned|code|codes|dtc)\b/i.test(text)) {
+      return { status: "scanned", rawText: cleanCanonicalConditionItems([text])[0] };
+    }
+    return undefined;
+  }
+
   function splitConditionText(value) {
     return String(value || "")
       .split(/\s+\|\s+|[\n\r•]+/g)
@@ -491,8 +520,10 @@
     if (!text || text.length < 3) return true;
     if (/^[a-z]{1,2}$/i.test(text)) return true;
     if (/\b(condition,\s*or\s*safety\s*of\s*any\s*vehicle|openlane\s+does\s+not\s+guarantee|privacy\s+policy|terms\s*&?\s*conditions?)\b/i.test(text)) return true;
-    if (/\b(home|buying|selling|purchase|browse|closing|on hold|vehicle media|copy vin|order-history|live-offer-row|bid-panel-current)\b/i.test(text)) return true;
-    if (/\b(carfax|transport estimate|vehicle location|current bid|full bid history|bids?|bidder|watchlist|outbid)\b/i.test(text)) return true;
+    if (/\b(home|buying|selling|purchase|browse|closing|on hold|vehicle media|copy vin|order-history|live-offer-row|bid-panel-current|notes from the seller|seller notes?)\b/i.test(text)) return true;
+    if (/\b(carfax|transport estimate|vehicle location|current bid|full bid history|bids?|bidder|watchlist|outbid|obd2 reader|obd2 scan)\b/i.test(text)) return true;
+    if (/^expected\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2},\s+\d{4}$/i.test(text)) return true;
+    if (/\b(?:CAD|CA\$|\$)\s*\$?\s*\d[\d,.\s]*\s*\/\s*\d+\s*km\b/i.test(text)) return true;
     if (/\b[A-HJ-NPR-Z0-9]{17}\b/i.test(text)) return true;
     if (/^\d{1,3}(?:,\d{3})?\s*km$/i.test(text)) return true;
     if (/\b\d{4}\s+[A-Za-z][A-Za-z-]+\s+[A-Za-z0-9-]+/i.test(text)) return true;

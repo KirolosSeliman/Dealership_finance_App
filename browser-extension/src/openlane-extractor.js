@@ -1573,7 +1573,7 @@
     const interiorDisclosures = conditionSectionItems(conditionAst, ["interior"], disclosureText, ["Interior", "Intérieur", "Interieur"]);
     const tireWheelDisclosures = conditionSectionItems(conditionAst, ["tiresAndWheels"], disclosureText, ["Tires and wheels", "Tire & wheels", "Tires & wheels", "Pneus et roues"]);
     const obd2Text = conditionSectionText(conditionAst, ["obd2"]) || subsectionText(disclosureText, ["OBD2 Reader", "OBD2 scan", "Lecteur OBD2"]);
-    const obd2Status = obd2Text ? (/nothing reported|rien n.a été signalé|rien n.a ete signale/i.test(obd2Text) ? "nothing_reported" : /non disponible|not available|not visible|unavailable/i.test(obd2Text) ? "not_visible" : "visible_text") : undefined;
+    const obd2Status = obd2Text ? (/this vehicle was not scanned|not scanned|nothing reported|rien n.a été signalé|rien n.a ete signale/i.test(obd2Text) ? "not_scanned" : /non disponible|not available|not visible|unavailable/i.test(obd2Text) ? "not_visible" : "visible_text") : undefined;
     const fallbackDeclarations = conditionItems(labels.get("declarations"));
     const allConditionText = [
       knownHistoryItems.length ? `Known history: ${knownHistoryItems.join(" | ")}` : "",

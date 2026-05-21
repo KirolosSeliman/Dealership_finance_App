@@ -138,6 +138,36 @@ test("Phase 4 canonical state exposes clean ML features without raw OpenLane pol
   assert.equal(lexus.mlFeatures?.activeCurrentBid, 13_200);
 });
 
+test("Phase 5 canonical condition sanitizer preserves high-risk facts and audits rejected pollution", () => {
+  const kia = extract("openlane-vdp-kia-purchase-detail-cleanup-baseline.html", "https://app.openlane.ca/vdp/3KPFL4A72HE119966").openlaneCanonicalState as {
+    condition?: Record<string, unknown>;
+    diagnostics?: { conditionRejectedLines?: Array<{ sourceText?: string; rejectionReason?: string }> };
+    mlFeatures?: Record<string, unknown>;
+  };
+  const lexus = extract("openlane-vdp-lexus-active-bid-conflict-baseline.html", "https://app.openlane.ca/vdp/JTJBARBZ7H2120574").openlaneCanonicalState as {
+    condition?: Record<string, unknown>;
+    diagnostics?: { conditionRejectedLines?: Array<{ sourceText?: string; rejectionReason?: string }> };
+    mlFeatures?: Record<string, unknown>;
+  };
+
+  assert.doesNotMatch(JSON.stringify(kia.condition?.mechanical || []), /condition, or safety of any vehicle|\bme\b/i);
+  assert.doesNotMatch(JSON.stringify(kia.condition?.knownHistory || []), /Notes from the seller/i);
+  assert.match(JSON.stringify(kia.condition?.interior), /Roof \(rust\)|Rocker Panel \(dent\)/i);
+  assert.equal((kia.condition?.obd2 as { status?: string } | undefined)?.status, "not_scanned");
+  assert.doesNotMatch(String(kia.condition?.cleanConditionSummary), /condition, or safety of any vehicle|Notes from the seller/i);
+  assert.equal(kia.mlFeatures?.hasRust, true);
+
+  assert.match(JSON.stringify(lexus.condition?.knownHistory), /Any Previous Damage Exceeding \$3,000|Previous Accident History/i);
+  assert.doesNotMatch(JSON.stringify(lexus.condition?.knownHistory || []), /ZUMA MOTORS|Expected May 22, 2026|Vehicle location|Transport disclosures|Notes from the seller|CARFAX report/i);
+  assert.doesNotMatch(JSON.stringify(lexus.condition?.mechanical || []), /condition, or safety of any vehicle|\bg\b/i);
+  assert.equal((lexus.condition?.obd2 as { status?: string } | undefined)?.status, "not_scanned");
+  assert.equal(lexus.mlFeatures?.hasAccidentHistory, true);
+  assert.equal(lexus.mlFeatures?.hasDamageOver3000, true);
+
+  const rejected = JSON.stringify([...(kia.diagnostics?.conditionRejectedLines || []), ...(lexus.diagnostics?.conditionRejectedLines || [])]);
+  assert.match(rejected, /disclaimer|seller_name_noise|auction_date_noise|transport_or_location_noise|header_value_not_condition|condition_noise_line/i);
+});
+
 function extract(name: string, href: string) {
   return extractor.extractOpenLaneFixture(fixture(name), href);
 }

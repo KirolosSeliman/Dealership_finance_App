@@ -1129,7 +1129,7 @@ test("OpenLane condition disclosure cleanup removes navigation legal transport a
     conditionReportText?: string;
   };
 
-  assert.equal(condition.obd2Status, "visible_text");
+  assert.equal(condition.obd2Status, "not_scanned");
   assert.ok(condition.exteriorDisclosures?.some((item) => /Roof \(rust\)/i.test(item)));
   assert.ok(condition.exteriorDisclosures?.some((item) => /Rocker Panel \(dent\)/i.test(item)));
   assert.ok(condition.interiorDisclosures?.some((item) => /As-is/i.test(item)));
