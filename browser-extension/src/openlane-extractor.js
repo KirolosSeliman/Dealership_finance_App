@@ -817,6 +817,8 @@
         endpointPattern: accepted.endpointPattern,
         confidenceScore: accepted.confidenceScore,
         selectionScore: accepted.selectionScore,
+        selectionReason: accepted.selectionReason,
+        supersededCandidate: accepted.supersededCandidate,
         recencyText: accepted.recencyText,
         freshnessScore: accepted.freshnessScore,
         isStale: accepted.isStale,
@@ -830,6 +832,10 @@
         winningSourceName: accepted?.sourceName,
         winningSourceText: accepted?.sourceText,
         winningSelectionScore: accepted ? currentBidSelectionScore(accepted) : undefined,
+        selectionReason: accepted?.selectionReason,
+        bidPanelTopCandidate: summarizeCurrentBidCandidate(findBestFreshBidPanelCandidate(candidates)),
+        freshBidPanelCandidates: candidates.filter(isFreshBidPanelCandidate).sort((a, b) => currentBidSelectionScore(b) - currentBidSelectionScore(a)).slice(0, 4).map(summarizeCurrentBidCandidate),
+        supersededActiveBidBarCandidate: accepted?.supersededCandidate,
         candidateCount: candidates.length,
         rejectedCandidateCount: candidates.filter((candidate) => candidate.rejectedReason).length,
         lowerBidCandidateCount: lowerBidCandidates.length,
@@ -1033,17 +1039,39 @@
   }
 
   function selectCurrentBidCandidate(candidates) {
-    return candidates
+    const valid = candidates
       .filter((candidate) => !candidate.rejectedReason && candidate.value)
       .sort((a, b) => currentBidSelectionScore(b) - currentBidSelectionScore(a)
+        || Number(b.value || 0) - Number(a.value || 0));
+    const activeBidBar = valid
+      .filter(isActiveBidBarCandidate)
+      .sort((a, b) => currentBidSelectionScore(b) - currentBidSelectionScore(a)
         || Number(b.value || 0) - Number(a.value || 0))[0];
+    const freshBidPanelTop = valid
+      .filter(isFreshBidPanelCandidate)
+      .sort((a, b) => currentBidSelectionScore(b) - currentBidSelectionScore(a)
+        || Number(b.value || 0) - Number(a.value || 0))[0];
+
+    if (activeBidBar && freshBidPanelTop && Number(freshBidPanelTop.value) > Number(activeBidBar.value)) {
+      return {
+        ...freshBidPanelTop,
+        selectionReason: "fresh_bid_panel_supersedes_lower_active_bid_bar",
+        supersededCandidate: summarizeCurrentBidCandidate(activeBidBar),
+      };
+    }
+
+    const accepted = valid[0];
+    return accepted ? {
+      ...accepted,
+      selectionReason: accepted.selectionReason || "highest_scored_current_bid_candidate",
+    } : undefined;
   }
 
   function currentBidSelectionScore(candidate = {}) {
     const sourceType = String(candidate.sourceType || "");
     let score = Number(candidate.confidenceScore || 0) + Number(candidate.freshnessScore || 0);
     if (sourceType === "network_json") score += 12;
-    if (sourceType === "section_map" && /bidPanel/i.test(String(candidate.sourceName || ""))) score += 10;
+    if (isBidPanelSource(candidate)) score += 10;
     if (sourceType === "active_bid_bar" && !candidate.isStale) score += 8;
     if (sourceType === "active_bid_bar" && candidate.isStale) score -= 36;
     return score;
@@ -1055,9 +1083,52 @@
     const isStale = /\b(last refreshed earlier|refreshed earlier|stale|previous|earlier)\b/i.test(text);
     let freshnessScore = 0;
     if (/\b(under\s+1\s+min|just now|updated now)\b/i.test(text)) freshnessScore += 18;
-    if (/bidPanel/i.test(String(candidate.sourceName || ""))) freshnessScore += 4;
+    if (isBidPanelSource(candidate)) freshnessScore += 4;
     if (isStale) freshnessScore -= 32;
     return compact({ recencyText, freshnessScore, isStale });
+  }
+
+  function isBidPanelSource(candidate = {}) {
+    return /bid[_\s-]?panel|bid[_\s-]?list|bid-list/i.test(`${candidate.sourceType || ""} ${candidate.sourceName || ""}`);
+  }
+
+  function isActiveBidBarCandidate(candidate = {}) {
+    return String(candidate.sourceType || "") === "active_bid_bar" || /activeBidBar|active[_\s-]?bid[_\s-]?bar/i.test(String(candidate.sourceName || ""));
+  }
+
+  function isFreshBidPanelCandidate(candidate = {}) {
+    const sourceText = String(candidate.sourceText || "");
+    const hasFreshText = /\b(under\s+1\s+min|just now|updated now|\bnow\b|seconds?\s+ago)\b/i.test(sourceText);
+    return Boolean(
+      candidate.value
+      && candidate.isVisible !== false
+      && !candidate.isStale
+      && isBidPanelSource(candidate)
+      && (hasFreshText || Number(candidate.freshnessScore || 0) >= 18)
+    );
+  }
+
+  function findBestFreshBidPanelCandidate(candidates = []) {
+    return candidates
+      .filter((candidate) => !candidate.rejectedReason && isFreshBidPanelCandidate(candidate))
+      .sort((a, b) => currentBidSelectionScore(b) - currentBidSelectionScore(a)
+        || Number(b.value || 0) - Number(a.value || 0))[0];
+  }
+
+  function summarizeCurrentBidCandidate(candidate) {
+    if (!candidate) return undefined;
+    return compact({
+      field: "currentBid",
+      value: candidate.value,
+      sourceType: candidate.sourceType,
+      sourceName: candidate.sourceName,
+      sourceText: candidate.sourceText,
+      recencyText: candidate.recencyText,
+      confidenceScore: candidate.confidenceScore,
+      selectionScore: candidate.selectionScore ?? currentBidSelectionScore(candidate),
+      freshnessScore: candidate.freshnessScore,
+      rejectedReason: candidate.rejectedReason,
+    });
   }
 
   function identifyLowerBidCandidates(candidates, accepted) {

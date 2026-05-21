@@ -487,8 +487,10 @@
       || safeListing.fieldEvidence?.currentBid?.[0]
       || {};
     const priceCandidates = Array.isArray(debug.priceCandidates) ? debug.priceCandidates : [];
-    const freshBidPanelCandidates = priceCandidates
-      .filter((candidate) => /bid_panel|top_row|current_bid|bid_history/i.test(`${candidate.sourceType || ""} ${candidate.sourceName || ""} ${candidate.label || ""}`) && !candidate.rejectedReason && !candidate.rejectionReason)
+    const currentBidDiagnostics = debug.currentBidDiagnostics || {};
+    const freshBidPanelCandidates = (Array.isArray(currentBidDiagnostics.freshBidPanelCandidates)
+      ? currentBidDiagnostics.freshBidPanelCandidates
+      : priceCandidates.filter((candidate) => /bid[_\s-]?panel|top_row|current_bid|bid_history/i.test(`${candidate.sourceType || ""} ${candidate.sourceName || ""} ${candidate.label || ""}`) && !candidate.rejectedReason && !candidate.rejectionReason))
       .map((candidate) => ({
         value: candidate.value ?? null,
         sourceType: candidate.sourceType || candidate.source || "",
@@ -501,7 +503,10 @@
       winningCurrentBid: safeListing.currentBid ?? null,
       winningCurrentBidSource: winningSource,
       winningSource,
+      selectionReason: currentBidEvidence.selectionReason || currentBidDiagnostics.selectionReason || "",
       sourceText: redactSensitiveText(currentBidEvidence.sourceText || priceDiagnostics.currentBidSourceText || "").slice(0, 300),
+      bidPanelTopCandidate: currentBidDiagnostics.bidPanelTopCandidate || null,
+      supersededActiveBidBarCandidate: currentBidDiagnostics.supersededActiveBidBarCandidate || currentBidEvidence.supersededCandidate || null,
       freshBidPanelCandidates,
       bidMonitorStatus: bidLiveMonitor,
       lastBidUpdatedAt: bidLiveMonitor?.updatedAt || bidStabilization.bidUpdatedAt || currentBidEvidence.capturedAt || "",

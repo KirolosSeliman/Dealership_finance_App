@@ -311,7 +311,7 @@ test("Market Snap copy payload builder returns sanitized readiness and debug evi
       currentBid: [{ sourceType: "section_map", sourceText: "$13,700 token=should-not-copy", confidenceScore: 98 }],
     },
     extractedFields: {
-      currentBidEvidence: { sourceType: "section_map", sourceText: "$13,700", confidenceScore: 98 },
+      currentBidEvidence: { sourceType: "section_map", sourceName: "section-map:bidPanel", sourceText: "$13,700", confidenceScore: 98, selectionReason: "fresh_bid_panel_supersedes_lower_active_bid_bar" },
       debug: {
         vinCandidates: [{ vin: "KM8J3CA46HU123456", sourceText: "VIN KM8J3CA46HU123456" }],
         titleCandidates: [{ text: "2017 Hyundai Tucson", score: 85 }, { text: "OpenLane Auction", rejectedReason: "non_vehicle_title" }],
@@ -331,6 +331,12 @@ test("Market Snap copy payload builder returns sanitized readiness and debug evi
         staleCurrentBidCandidates: [
           { field: "currentBid", value: 8_500, sourceType: "active_bid_bar", sourceText: "Current bid $8,500 Last refreshed earlier", rejectedReason: "stale_current_bid_candidate" },
         ],
+        currentBidDiagnostics: {
+          selectionReason: "fresh_bid_panel_supersedes_lower_active_bid_bar",
+          bidPanelTopCandidate: { field: "currentBid", value: 13_700, sourceType: "section_map", sourceName: "section-map:bidPanel", sourceText: "$13,700 Under 1 min" },
+          freshBidPanelCandidates: [{ field: "currentBid", value: 13_700, sourceType: "section_map", sourceName: "section-map:bidPanel", sourceText: "$13,700 Under 1 min" }],
+          supersededActiveBidBarCandidate: { field: "currentBid", value: 8_500, sourceType: "active_bid_bar", sourceText: "Current bid $8,500 Last refreshed earlier" },
+        },
         listedPriceDecision: { source: "current_bid", semantics: "observation_alias_current_bid" },
         conditionDiagnostics: {
           rejectedConditionLines: [
@@ -431,7 +437,9 @@ test("Market Snap copy payload builder returns sanitized readiness and debug evi
   assert.match(JSON.stringify((payload.readinessSummary as { staleCurrentBidCandidates?: unknown[] }).staleCurrentBidCandidates), /stale_current_bid_candidate/);
   assert.equal((payload.currentBidDebug as { winningCurrentBid?: number }).winningCurrentBid, 13_700);
   assert.equal((payload.currentBidDebug as { winningCurrentBidSource?: string }).winningCurrentBidSource, "section_map");
+  assert.equal((payload.currentBidDebug as { selectionReason?: string }).selectionReason, "fresh_bid_panel_supersedes_lower_active_bid_bar");
   assert.match(JSON.stringify((payload.currentBidDebug as { staleActiveBidBarCandidate?: unknown }).staleActiveBidBarCandidate), /8500/);
+  assert.match(JSON.stringify((payload.currentBidDebug as { supersededActiveBidBarCandidate?: unknown }).supersededActiveBidBarCandidate), /8500/);
   assert.match(JSON.stringify((payload.currentBidDebug as { bidPanelTopCandidate?: unknown }).bidPanelTopCandidate), /13700/);
   assert.match(JSON.stringify((payload.currentBidDebug as { freshBidPanelCandidates?: unknown[] }).freshBidPanelCandidates), /13700/);
   assert.match(JSON.stringify((payload.currentBidDebug as { bidMonitorStatus?: unknown }).bidMonitorStatus), /bid_only_monitor/);

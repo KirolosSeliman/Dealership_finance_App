@@ -270,20 +270,26 @@
     const bidStabilization = safeListing.openlaneMetadata?.bidStabilization || {};
     const bidLiveMonitor = safeListing.openlaneMetadata?.bidLiveMonitor || null;
     const priceCandidates = Array.isArray(debug.priceCandidates) ? debug.priceCandidates : [];
+    const currentBidDiagnostics = debug.currentBidDiagnostics || {};
     const currentBidEvidence = safeListing.extractedFields?.currentBidEvidence
       || safeListing.fieldEvidence?.currentBid?.[0]
       || {};
-    const bidPanelTopCandidate = priceCandidates.find((candidate) => /bid_panel|top_row|bid_history/i.test(`${candidate.sourceType || ""} ${candidate.sourceName || ""} ${candidate.label || ""}`) && !candidate.rejectedReason && !candidate.rejectionReason);
+    const bidPanelTopCandidate = currentBidDiagnostics.bidPanelTopCandidate
+      || priceCandidates.find((candidate) => /bid[_\s-]?panel|top_row|bid_history/i.test(`${candidate.sourceType || ""} ${candidate.sourceName || ""} ${candidate.label || ""}`) && !candidate.rejectedReason && !candidate.rejectionReason);
     const winningSource = currentBidEvidence.sourceType || currentBidEvidence.matchedLabel || priceDiagnostics.currentBidSource || "";
+    const freshBidPanelCandidates = Array.isArray(currentBidDiagnostics.freshBidPanelCandidates)
+      ? currentBidDiagnostics.freshBidPanelCandidates
+      : priceCandidates.filter((candidate) => /bid[_\s-]?panel|top_row|current_bid|bid_history/i.test(`${candidate.sourceType || ""} ${candidate.sourceName || ""} ${candidate.label || ""}`) && !candidate.rejectedReason && !candidate.rejectionReason);
     return sanitizeDebugValue({
       winningCurrentBid: safeListing.currentBid ?? null,
       winningCurrentBidSource: winningSource,
       winningSource,
+      selectionReason: currentBidEvidence.selectionReason || currentBidDiagnostics.selectionReason || "",
       sourceText: currentBidEvidence.sourceText || priceDiagnostics.currentBidSourceText || "",
-      staleActiveBidBarCandidate: priceDiagnostics.staleCurrentBidCandidates?.find((candidate) => /active_bid_bar/i.test(candidate.sourceType || candidate.sourceName || "")) || priceDiagnostics.staleCurrentBidCandidates?.[0] || null,
+      staleActiveBidBarCandidate: currentBidDiagnostics.supersededActiveBidBarCandidate || priceDiagnostics.staleCurrentBidCandidates?.find((candidate) => /active_bid_bar/i.test(candidate.sourceType || candidate.sourceName || "")) || priceDiagnostics.staleCurrentBidCandidates?.[0] || null,
+      supersededActiveBidBarCandidate: currentBidDiagnostics.supersededActiveBidBarCandidate || currentBidEvidence.supersededCandidate || null,
       bidPanelTopCandidate: bidPanelTopCandidate ? compactPriceCandidate(bidPanelTopCandidate) : null,
-      freshBidPanelCandidates: priceCandidates
-        .filter((candidate) => /bid_panel|top_row|current_bid|bid_history/i.test(`${candidate.sourceType || ""} ${candidate.sourceName || ""} ${candidate.label || ""}`) && !candidate.rejectedReason && !candidate.rejectionReason)
+      freshBidPanelCandidates: freshBidPanelCandidates
         .map(compactPriceCandidate)
         .slice(0, 5),
       rejectedPriceCandidates: priceDiagnostics.rejectedPriceCandidates || [],

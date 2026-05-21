@@ -58,8 +58,13 @@ test("Phase 1 baseline records Lexus active bid conflict and fresh bid-panel win
     "https://app.openlane.ca/vdp/JTJBARBZ7H2120574",
   );
   const fields = listing.extractedFields as {
-    currentBidEvidence?: { sourceType?: string; sourceName?: string; sourceText?: string };
+    currentBidEvidence?: { sourceType?: string; sourceName?: string; sourceText?: string; selectionReason?: string };
     debug?: {
+      currentBidDiagnostics?: {
+        selectionReason?: string;
+        bidPanelTopCandidate?: { value?: number; sourceText?: string };
+        supersededActiveBidBarCandidate?: { value?: number; sourceType?: string; sourceText?: string };
+      };
       currentBidCandidates?: Array<{ value?: number; sourceType?: string; sourceName?: string; sourceText?: string; freshnessScore?: number }>;
       staleCurrentBidCandidates?: Array<{ value?: number; sourceType?: string; sourceName?: string; rejectedReason?: string }>;
     };
@@ -76,6 +81,10 @@ test("Phase 1 baseline records Lexus active bid conflict and fresh bid-panel win
   assert.equal(listing.currentBid, 13_200);
   assert.equal(listing.listedPrice, 13_200);
   assert.match(String(fields.currentBidEvidence?.sourceName || fields.currentBidEvidence?.sourceType || ""), /bidPanel|section_map/i);
+  assert.equal(fields.currentBidEvidence?.selectionReason, "fresh_bid_panel_supersedes_lower_active_bid_bar");
+  assert.equal(fields.debug?.currentBidDiagnostics?.selectionReason, "fresh_bid_panel_supersedes_lower_active_bid_bar");
+  assert.equal(fields.debug?.currentBidDiagnostics?.bidPanelTopCandidate?.value, 13_200);
+  assert.equal(fields.debug?.currentBidDiagnostics?.supersededActiveBidBarCandidate?.value, 13_100);
   assert.match(String(fields.currentBidEvidence?.sourceText), /Under 1 min/i);
   assert.ok((fields.debug?.staleCurrentBidCandidates || []).some((item) => item.value === 13_100 && item.sourceType === "active_bid_bar"));
 });
