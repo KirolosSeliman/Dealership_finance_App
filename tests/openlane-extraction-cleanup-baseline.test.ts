@@ -34,6 +34,10 @@ test("Phase 1 baseline locks Kia verified purchase outcome and noisy rejected pr
   assert.equal(listing.mileageKm, 158_569);
   assert.equal(listing.soldPriceCandidate, 4_000);
   assert.equal(listing.buyPriceAuction, 4_000);
+  assert.notEqual(listing.currentBid, 31_500);
+  assert.notEqual((listing.activeAuction as { currentBid?: number } | undefined)?.currentBid, 31_500);
+  assert.equal((listing.purchaseOutcome as { soldPriceCandidate?: number; buyPriceAuction?: number } | undefined)?.soldPriceCandidate, 4_000);
+  assert.equal((listing.purchaseOutcome as { soldPriceCandidate?: number; buyPriceAuction?: number } | undefined)?.buyPriceAuction, 4_000);
   assert.equal(listing.imageCount, 13);
   assert.equal(listing.videoCount, 1);
   assert.equal(listing.carfaxUrlStatus, "text_only");
@@ -43,6 +47,9 @@ test("Phase 1 baseline locks Kia verified purchase outcome and noisy rejected pr
   assert.match(debugText, /active_current_bid_not_purchase_outcome/i);
   assert.match(debugText, /transport_estimate_not_purchase_outcome/i);
   assert.match(debugText, /bid_count_not_purchase_outcome_price/i);
+  assert.match(JSON.stringify((listing.purchaseOutcome as { rejectedCandidates?: unknown[] } | undefined)?.rejectedCandidates || []), /\$31,500|31500/);
+  assert.match(JSON.stringify((listing.purchaseOutcome as { rejectedCandidates?: unknown[] } | undefined)?.rejectedCandidates || []), /CAD \$378|378/);
+  assert.match(JSON.stringify((listing.purchaseOutcome as { rejectedCandidates?: unknown[] } | undefined)?.rejectedCandidates || []), /15 Bids|15/);
 });
 
 test("Phase 1 baseline records Lexus active bid conflict and fresh bid-panel winner", () => {

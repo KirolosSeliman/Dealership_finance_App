@@ -235,6 +235,24 @@ test("Market Snap widget exposes draggable, settings, and data-quality controls"
   assert.match(widget, /pointer-events:\s*auto/);
 });
 
+test("Market Snap widget separates purchase outcome primary metrics from active auction metrics", () => {
+  const widget = readFileSync(join(repoRoot, "browser-extension/src/market-snap-widget.js"), "utf8");
+
+  assert.match(widget, /purchaseOutcomeDetectedMetrics/);
+  assert.match(widget, /activeListingDetectedMetrics/);
+  assert.match(widget, /isPurchaseOutcomeContext\(safeListing\)\s*\?\s*purchaseOutcomeDetectedMetrics\(safeListing\)\s*:\s*activeListingDetectedMetrics\(safeListing\)/);
+
+  const purchaseMetricsBlock = widget.slice(
+    widget.indexOf("function purchaseOutcomeDetectedMetrics"),
+    widget.indexOf("function activeListingDetectedMetrics"),
+  );
+  assert.match(purchaseMetricsBlock, /Sold price/);
+  assert.match(purchaseMetricsBlock, /Buy price auction/);
+  assert.match(purchaseMetricsBlock, /Final bid amount/);
+  assert.doesNotMatch(purchaseMetricsBlock, /Current bid/);
+  assert.doesNotMatch(purchaseMetricsBlock, /Best offer/);
+});
+
 test("Market Snap copy JSON includes normalized extraction, runtime evidence, and backend responses", () => {
   const contentScript = readFileSync(join(repoRoot, "browser-extension/src/content-script.js"), "utf8");
   const copyPayload = readFileSync(join(repoRoot, "browser-extension/src/copy-payload.js"), "utf8");

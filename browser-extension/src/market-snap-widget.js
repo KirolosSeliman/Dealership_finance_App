@@ -171,20 +171,32 @@
     const safeListing = canonicalListing(listing || {});
     if (!listing) return "";
     return [
-      metric("Current bid", moneyOrDash(safeListing.currentBid || safeListing.listedPrice)),
-      metric("Current offer", moneyOrDash(safeListing.currentOffer)),
-      metric("Best offer", moneyOrDash(safeListing.bestOffer)),
-      metric("Buy now", moneyOrDash(safeListing.buyNowPrice)),
-      metric("Sold price", moneyOrDash(safeListing.soldPriceCandidate)),
-      metric("Buy price auction", moneyOrDash(safeListing.buyPriceAuction)),
-      metric("Final bid amount", moneyOrDash(safeListing.finalBidAmount)),
-      metric("Invoice total", moneyOrDash(safeListing.totalInvoiceAmount || safeListing.finalAcquisitionCost)),
-      metric("Price state", priceStateLabel(safeListing)),
+      ...(isPurchaseOutcomeContext(safeListing) ? purchaseOutcomeDetectedMetrics(safeListing) : activeListingDetectedMetrics(safeListing)),
       metric("pageType", safeListing.pageType || "-"),
       metric("captureKind", safeListing.captureKind || "-"),
       metric("Mileage", safeListing.mileageKm ? `${number(safeListing.mileageKm)} km` : "-"),
       metric("VIN", safeListing.vin || "-"),
     ].join("");
+  }
+
+  function purchaseOutcomeDetectedMetrics(safeListing) {
+    return [
+      metric("Sold price", moneyOrDash(safeListing.soldPriceCandidate)),
+      metric("Buy price auction", moneyOrDash(safeListing.buyPriceAuction)),
+      metric("Final bid amount", moneyOrDash(safeListing.finalBidAmount)),
+      metric("Invoice total", moneyOrDash(safeListing.totalInvoiceAmount || safeListing.finalAcquisitionCost)),
+      metric("Price state", priceStateLabel(safeListing)),
+    ];
+  }
+
+  function activeListingDetectedMetrics(safeListing) {
+    return [
+      metric("Current bid", moneyOrDash(safeListing.currentBid || safeListing.listedPrice)),
+      metric("Current offer", moneyOrDash(safeListing.currentOffer)),
+      metric("Best offer", moneyOrDash(safeListing.bestOffer)),
+      metric("Buy now", moneyOrDash(safeListing.buyNowPrice)),
+      metric("Price state", priceStateLabel(safeListing)),
+    ];
   }
 
   function metaHtml(listing, valuation) {
