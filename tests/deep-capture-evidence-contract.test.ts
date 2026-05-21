@@ -94,6 +94,51 @@ test("OpenLane canonical state derives legacy current bid purchase Carfax and re
   assert.equal((legacy.openlaneCanonicalState as { activeAuction: { currentBid: number } }).activeAuction.currentBid, 14200);
 });
 
+test("OpenLane canonical state derives active listing aliases and clean condition text only from canonical data", () => {
+  const canonical = contract.createCanonicalOpenLaneState({
+    pageContext: {
+      pageType: "active_listing",
+      captureKind: "observation",
+    },
+    activeAuction: {
+      currentBid: 13_200,
+      evidence: [{
+        field: "currentBid",
+        sourceType: "section_map",
+        sourceName: "fresh bid panel",
+        sourceText: "Current bid $13,200 Under 1 min",
+        confidenceScore: 92,
+      }],
+    },
+    condition: {
+      mechanical: ["Transmission hesitation"],
+      conditionReportText: "Transmission hesitation | Full bid history Current bid $13,100 | Transport estimate CAD $378 / 211km",
+    },
+    carfax: {
+      urlStatus: "text_only",
+      mentioned: true,
+      evidence: [{ source: "visible_text", sourceText: "CARFAX Canada" }],
+    },
+  });
+
+  const legacy = contract.canonicalToLegacyPayload(canonical, {
+    listedPrice: 31_500,
+    conditionReportText: "Full bid history Current bid $13,100 Transport estimate CAD $378 / 211km",
+    carfaxAvailable: true,
+    carfaxUrlStatus: "url_found",
+  });
+
+  assert.equal(legacy.currentBid, 13_200);
+  assert.equal(legacy.listedPrice, 13_200);
+  assert.equal((legacy.priceSemantics as { listedPrice?: string }).listedPrice, "observation_alias_current_bid");
+  assert.equal(legacy.carfaxAvailable, false);
+  assert.equal(legacy.carfaxMentioned, true);
+  assert.equal(legacy.carfaxUrlStatus, "text_only");
+  assert.match(String(legacy.conditionReportText), /Transmission hesitation/);
+  assert.doesNotMatch(String(legacy.conditionReportText), /Full bid history|Current bid|Transport estimate|CAD \$378/i);
+  assert.equal((legacy.openlaneCanonicalState as { mlFeatures?: { activeCurrentBid?: number } }).mlFeatures?.activeCurrentBid, 13_200);
+});
+
 test("OpenLane canonical state can be normalized from an existing extraction contract payload", () => {
   const listing = contract.applyOpenLaneExtractionContract({
     sourceName: "OpenLane",

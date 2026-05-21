@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { persistOpenLaneCapture } from "../src/lib/market-snap/repository";
+import { persistOpenLaneCapture, saveListingToDealRadar } from "../src/lib/market-snap/repository";
 import type { MarketListingInput } from "../src/types/market-snap";
 
 const repoRoot = process.cwd();
@@ -101,6 +101,74 @@ test("OpenLane verified outcomes without VIN remain non-training preview records
   assert.equal(outcome.model_improvement_opted_in, true);
   assert.equal(outcome.is_training_eligible, false);
   assert.ok(Number(outcome.data_quality_score) < 90);
+});
+
+test("Deal Radar storage keeps canonical OpenLane schema, clean ML features, and legacy aliases", async () => {
+  const client = new FakeCaptureClient();
+  await saveListingToDealRadar(client as never, {
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "active_listing",
+    captureKind: "observation",
+    title: "2017 Lexus NX 200t",
+    year: 2017,
+    make: "Lexus",
+    model: "NX 200t",
+    vin: "JTJBARBZ7H2120574",
+    mileageKm: 98_400,
+    currentBid: 13_200,
+    listedPrice: 13_200,
+    conditionReportText: "Accident history over $3,000",
+    priceSemantics: {
+      currentBid: "observation",
+      listedPrice: "observation_alias_current_bid",
+    },
+    carfaxMentioned: true,
+    carfaxAvailable: false,
+    carfaxUrlStatus: "text_only",
+    openlaneCanonicalState: {
+      schemaVersion: "openlane-canonical-v2",
+      pageContext: { pageType: "active_listing", captureKind: "observation" },
+      identity: { vin: "JTJBARBZ7H2120574", year: 2017, make: "Lexus", model: "NX 200t", mileageKm: 98_400 },
+      activeAuction: { currentBid: 13_200 },
+      condition: { conditionReportText: "Accident history over $3,000" },
+      carfax: { urlStatus: "text_only", mentioned: true, actionable: false },
+      mlFeatures: {
+        activeCurrentBid: 13_200,
+        hasAccidentHistory: true,
+        hasDamageOver3000: true,
+      },
+    },
+  }, undefined);
+
+  const saved = client.tables.deal_radar_saved_listings.rows[0];
+  const normalized = saved.normalized_payload as {
+    currentBid?: number;
+    listedPrice?: number;
+    priceSemantics?: { listedPrice?: string };
+    conditionReportText?: string;
+    openlaneCanonicalState?: {
+      schemaVersion?: string;
+      mlFeatures?: Record<string, unknown>;
+    };
+  };
+  const metadata = saved.openlane_metadata as {
+    extractionContract?: {
+      schemaVersion?: string;
+      mlFeatures?: Record<string, unknown>;
+    };
+  };
+
+  assert.equal(normalized.currentBid, 13_200);
+  assert.equal(normalized.listedPrice, 13_200);
+  assert.equal(normalized.priceSemantics?.listedPrice, "observation_alias_current_bid");
+  assert.match(String(normalized.conditionReportText), /Accident history/);
+  assert.doesNotMatch(JSON.stringify(normalized), /Full bid history|Transport estimate|authorization|cookie|token/i);
+  assert.equal(normalized.openlaneCanonicalState?.schemaVersion, "openlane-canonical-v2");
+  assert.equal(normalized.openlaneCanonicalState?.mlFeatures?.activeCurrentBid, 13_200);
+  assert.equal(metadata.extractionContract?.schemaVersion, "openlane-canonical-v2");
+  assert.equal(metadata.extractionContract?.mlFeatures?.hasDamageOver3000, true);
 });
 
 test("OpenLane missing VIN lowers persisted capture quality gates", async () => {
@@ -304,6 +372,7 @@ class FakeCaptureClient {
     openlane_vehicle_identities: { rows: [] },
     openlane_observations: { rows: [] },
     openlane_outcomes: { rows: [] },
+    deal_radar_saved_listings: { rows: [] },
   };
 
   from(table: string) {

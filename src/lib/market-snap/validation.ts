@@ -401,6 +401,8 @@ const marketListingPayloadBaseSchema = z.object({
   media: safeDeepRecord(40_000, 240).optional(),
   carfax: safeDeepRecord(12_000).optional(),
   debug: safeDeepRecord(30_000, 160).optional(),
+  openlaneCanonicalState: safeDeepRecord(60_000, 240).optional(),
+  canonicalOpenLaneState: safeDeepRecord(60_000, 240).optional(),
   fieldEvidence: z.record(z.string(), z.array(extractionFieldEvidenceSchema).max(20)).optional(),
   openlaneMetadata: safeDeepRecord(40_000, 200).optional(),
   extractedFields: safeDeepRecord(30_000, 160).optional(),

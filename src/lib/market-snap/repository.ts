@@ -382,8 +382,14 @@ function capRawVisibleText(value?: string) {
   return text ? text.slice(0, 12_000) : null;
 }
 
+function canonicalOpenLaneState(input: MarketListingInput) {
+  return input.openlaneCanonicalState ?? input.canonicalOpenLaneState;
+}
+
 function openLaneMetadata(input: MarketListingInput) {
   const baseMetadata = capOpenLaneStorageValue(input.openlaneMetadata ?? {});
+  const canonicalState = canonicalOpenLaneState(input);
+  const canonicalRecord = canonicalState && typeof canonicalState === "object" ? canonicalState as Record<string, unknown> : undefined;
   return {
     ...(typeof baseMetadata === "object" && !Array.isArray(baseMetadata) ? baseMetadata : {}),
     pageType: input.pageType,
@@ -449,7 +455,11 @@ function openLaneMetadata(input: MarketListingInput) {
     extractedFields: capOpenLaneStorageValue(input.extractedFields ?? {}),
     missingData: input.missingData ?? [],
     videoCount: input.videoCount ?? input.videos?.length ?? 0,
+    schemaVersion: stringOrUndefined(canonicalRecord?.schemaVersion),
+    mlFeatures: capOpenLaneStorageValue(canonicalRecord?.mlFeatures ?? {}),
+    openlaneCanonicalState: capOpenLaneStorageValue(canonicalState ?? {}),
     extractionContract: capOpenLaneStorageValue({
+      schemaVersion: canonicalRecord?.schemaVersion,
       pageContext: input.pageContext,
       identity: input.identity,
       auctionObservation: input.auctionObservation,
@@ -457,6 +467,8 @@ function openLaneMetadata(input: MarketListingInput) {
       condition: input.condition,
       media: input.media,
       carfax: input.carfax,
+      mlFeatures: canonicalRecord?.mlFeatures,
+      fieldEvidence: input.fieldEvidence,
       debug: input.debug,
     }),
   };
@@ -743,6 +755,7 @@ function cappedOpenLanePayload(input: MarketListingInput) {
     trim: input.trim,
     vin: input.vin,
     mileageKm: input.mileageKm,
+    listedPrice: input.listedPrice,
     currentBid: input.currentBid,
     currentOffer: input.currentOffer,
     bestOffer: input.bestOffer,
@@ -765,6 +778,8 @@ function cappedOpenLanePayload(input: MarketListingInput) {
 }
 
 function marketListingStoragePayload(input: MarketListingInput, valuation?: VehicleValuation) {
+  const canonicalState = canonicalOpenLaneState(input);
+  const canonicalRecord = canonicalState && typeof canonicalState === "object" ? canonicalState as Record<string, unknown> : undefined;
   return capOpenLaneStorageValue({
     organizationId: input.organizationId,
     sourceName: input.sourceName,
@@ -792,6 +807,10 @@ function marketListingStoragePayload(input: MarketListingInput, valuation?: Vehi
     buyPriceAuction: input.buyPriceAuction,
     totalInvoiceAmount: input.totalInvoiceAmount,
     finalAcquisitionCost: input.finalAcquisitionCost,
+    schemaVersion: canonicalRecord?.schemaVersion,
+    openlaneCanonicalState: canonicalState,
+    canonicalOpenLaneState: input.canonicalOpenLaneState,
+    mlFeatures: canonicalRecord?.mlFeatures,
     pageType: input.pageType,
     captureKind: input.captureKind,
     captureLevel: input.captureLevel,

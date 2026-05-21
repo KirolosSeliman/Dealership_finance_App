@@ -479,6 +479,52 @@ test("Market Snap validation preserves valid low OpenLane current bids with stro
   assert.equal(withBidCountNearby.data?.currentBid, 4);
 });
 
+test("Market Snap validation preserves canonical OpenLane state and ML features during save parsing", () => {
+  const result = saveListingSchema.safeParse({
+    organizationId,
+    listing: {
+      sourceName: "OpenLane",
+      sourceType: "auction",
+      pageType: "active_listing",
+      captureKind: "observation",
+      title: "2017 Lexus NX 200t",
+      year: 2017,
+      make: "Lexus",
+      model: "NX 200t",
+      vin: "JTJBARBZ7H2120574",
+      mileageKm: 98400,
+      currentBid: 13_200,
+      listedPrice: 13_200,
+      priceSemantics: {
+        currentBid: "observation",
+        listedPrice: "observation_alias_current_bid",
+      },
+      openlaneCanonicalState: {
+        schemaVersion: "openlane-canonical-v2",
+        pageContext: { pageType: "active_listing", captureKind: "observation" },
+        activeAuction: { currentBid: 13_200 },
+        condition: { conditionReportText: "Accident history over $3,000" },
+        carfax: { urlStatus: "text_only", mentioned: true, actionable: false },
+        mlFeatures: {
+          activeCurrentBid: 13_200,
+          hasAccidentHistory: true,
+        },
+      },
+    },
+    valuation: null,
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.data?.valuation, undefined);
+  const canonical = result.data?.listing.openlaneCanonicalState as {
+    schemaVersion?: string;
+    mlFeatures?: { activeCurrentBid?: number; hasAccidentHistory?: boolean };
+  } | undefined;
+  assert.equal(canonical?.schemaVersion, "openlane-canonical-v2");
+  assert.equal(canonical?.mlFeatures?.activeCurrentBid, 13_200);
+  assert.equal(canonical?.mlFeatures?.hasAccidentHistory, true);
+});
+
 test("Market Snap validation accepts live money current bid with nearby bid count as observation", () => {
   const result = marketListingPayloadSchema.safeParse({
     organizationId,

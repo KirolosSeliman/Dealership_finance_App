@@ -325,6 +325,8 @@ export interface MarketListingInput {
   media?: Record<string, unknown>;
   carfax?: Record<string, unknown>;
   debug?: Record<string, unknown>;
+  openlaneCanonicalState?: Record<string, unknown>;
+  canonicalOpenLaneState?: Record<string, unknown>;
   fieldEvidence?: Record<string, ExtractionFieldEvidence[]>;
   openlaneMetadata?: Record<string, unknown>;
   extractedFields?: Record<string, unknown>;

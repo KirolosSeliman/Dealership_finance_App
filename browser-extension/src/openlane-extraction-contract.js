@@ -344,7 +344,7 @@
         tireWheel: firstDefined(conditionSource.tireWheel, conditionSource.tireWheelDisclosures, listing.tireCondition),
         obd2: firstDefined(conditionSource.obd2, conditionSource.obd2Status, listing.diagnosticFeatures?.diagnosticCodesAvailable),
         notes: firstDefined(conditionSource.notes, conditionSource.dealerNotes, listing.openlaneMetadata?.dealerNotes),
-        conditionReportText: firstDefined(listing.conditionReportText, conditionSource.conditionReportText),
+        conditionReportText: firstDefined(listing.conditionReportText, conditionSource.cleanConditionSummary, conditionSource.conditionReportText),
         evidence: cappedArray(firstDefined(conditionSource.evidence, listing.condition?.evidence)),
       }),
       media: compact({
@@ -611,6 +611,9 @@
     setCanonical(next, "captureKind", pageContext.captureKind);
     setCanonical(next, "outcomeConfidence", pageContext.outcomeConfidence);
     setCanonical(next, "currentBid", activeAuction.currentBid);
+    if (isActiveObservationContext(pageContext) && activeAuction.currentBid !== undefined && activeAuction.buyNowPrice === undefined) {
+      setCanonical(next, "listedPrice", activeAuction.currentBid);
+    }
     setCanonical(next, "currentOffer", activeAuction.currentOffer);
     setCanonical(next, "bestOffer", activeAuction.bestOffer);
     setCanonical(next, "buyNowPrice", activeAuction.buyNowPrice);
@@ -643,6 +646,7 @@
       totalInvoiceAmount: purchaseOutcome.totalInvoiceAmount !== undefined ? "acquisition_cost" : undefined,
       finalAcquisitionCost: purchaseOutcome.finalAcquisitionCost !== undefined ? "acquisition_cost" : undefined,
       ...previousPriceSemantics,
+      listedPrice: isActiveObservationContext(pageContext) && activeAuction.currentBid !== undefined && activeAuction.buyNowPrice === undefined ? "observation_alias_current_bid" : previousPriceSemantics.listedPrice,
       currentBid: activeAuction.currentBid !== undefined ? "observation" : previousPriceSemantics.currentBid,
       currentOffer: activeAuction.currentOffer !== undefined ? "observation" : previousPriceSemantics.currentOffer,
       bestOffer: activeAuction.bestOffer !== undefined ? "observation" : previousPriceSemantics.bestOffer,
@@ -686,6 +690,11 @@
 
   function setCanonical(target, field, value) {
     if (value !== undefined && value !== "") target[field] = value;
+  }
+
+  function isActiveObservationContext(pageContext = {}) {
+    return /active_listing|watchlist/i.test(String(pageContext.pageType || ""))
+      || /observation/i.test(String(pageContext.captureKind || ""));
   }
 
   function firstDefined(...values) {
