@@ -54,3 +54,10 @@ Fixtures in this folder must be sanitized snapshots of visible page structure on
 - `openlane-network-observer-zero-evidence-live.json` - copied-debug style observer status showing enabled network observation but zero useful allowed evidence.
 - `openlane-vdp-hyundai-santa-fe-sport-live.html` - multi-word model evidence fixture for `2014 Hyundai Santa Fe Sport SE`.
 - `openlane-vdp-hyundai-santa-fe-sport-title.html` - Phase 12 exact multi-word title fixture for `2014 Hyundai Santa Fe Sport SE`.
+
+## OpenLane Extraction Cleanup Baseline
+
+- `openlane-vdp-kia-purchase-detail-cleanup-baseline.html` - Phase 1 baseline fixture for the Kia verified purchase outcome. It preserves visible `Sold price $4,000`, VIN `3KPFL4A72HE119966`, `158,569 KM`, 13 photos, 1 video, CARFAX text-only evidence, and rejected noise such as `Current bid $31,500`, `CAD $378 / 211km`, and `15 Bids`.
+- `openlane-vdp-lexus-active-bid-conflict-baseline.html` - Phase 1 baseline fixture for the Lexus active listing conflict. It preserves the stale sticky `Current bid $13,100`, fresher bid-panel `$13,200` with `Under 1 min`, VIN `JTJBARBZ7H2120574`, and raw condition/history pollution snippets for later canonical cleanup checks.
+
+These fixtures intentionally keep raw noisy text in the source HTML. Canonical extraction tests must reject or quarantine the noise instead of deleting the baseline evidence.
