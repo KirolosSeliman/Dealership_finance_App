@@ -168,6 +168,29 @@ test("Phase 5 canonical condition sanitizer preserves high-risk facts and audits
   assert.match(rejected, /disclaimer|seller_name_noise|auction_date_noise|transport_or_location_noise|header_value_not_condition|condition_noise_line/i);
 });
 
+test("Phase 6 canonical CARFAX state keeps text-only Kia and Lexus mentions non-actionable", () => {
+  const kia = extract("openlane-vdp-kia-purchase-detail-cleanup-baseline.html", "https://app.openlane.ca/vdp/3KPFL4A72HE119966").openlaneCanonicalState as {
+    carfax?: { mentioned?: boolean; visible?: boolean; urlStatus?: string; urlResolved?: boolean; actionable?: boolean; url?: string };
+    mlFeatures?: Record<string, unknown>;
+  };
+  const lexus = extract("openlane-vdp-lexus-active-bid-conflict-baseline.html", "https://app.openlane.ca/vdp/JTJBARBZ7H2120574").openlaneCanonicalState as {
+    carfax?: { mentioned?: boolean; visible?: boolean; urlStatus?: string; urlResolved?: boolean; actionable?: boolean; url?: string };
+    mlFeatures?: Record<string, unknown>;
+  };
+
+  for (const canonical of [kia, lexus]) {
+    assert.equal(canonical.carfax?.mentioned, true);
+    assert.equal(canonical.carfax?.visible, true);
+    assert.equal(canonical.carfax?.urlStatus, "text_only");
+    assert.equal(canonical.carfax?.urlResolved, false);
+    assert.equal(canonical.carfax?.actionable, false);
+    assert.equal(canonical.carfax?.url || "", "");
+    assert.equal(canonical.mlFeatures?.hasCarfaxMention, true);
+    assert.equal(canonical.mlFeatures?.hasCarfaxResolvedUrl, false);
+    assert.equal(canonical.mlFeatures?.carfaxActionable, false);
+  }
+});
+
 function extract(name: string, href: string) {
   return extractor.extractOpenLaneFixture(fixture(name), href);
 }

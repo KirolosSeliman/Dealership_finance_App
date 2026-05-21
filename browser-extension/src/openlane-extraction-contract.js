@@ -264,6 +264,11 @@
     const diagnosticsSource = source.diagnostics || listing.diagnostics || {};
     const stableReadiness = listing.openlaneMetadata?.stableCaptureReadiness || {};
     const debug = listing.extractedFields?.debug || {};
+    const carfaxUrl = firstDefined(carfaxSource.url, listing.carfaxUrl);
+    const carfaxMentioned = Boolean(firstDefined(carfaxSource.mentioned, listing.carfaxMentioned, listing.carfaxAvailableLegacy, listing.carfaxAvailable, carfaxSource.available));
+    const carfaxVisible = Boolean(firstDefined(carfaxSource.visible, carfaxSource.mentioned, listing.carfaxMentioned, listing.carfaxAvailableLegacy, listing.carfaxAvailable, carfaxSource.available));
+    const carfaxStatus = normalizeCarfaxUrlStatus(firstDefined(carfaxSource.urlStatus, carfaxSource.status, listing.carfaxUrlStatus), carfaxUrl, carfaxMentioned || carfaxVisible);
+    const carfaxActionable = Boolean(carfaxUrl) && carfaxStatus === "resolved_url";
     const canonical = {
       schemaVersion: firstDefined(source.schemaVersion, listing.schemaVersion, "openlane-canonical-v2"),
       capturedAt: firstDefined(source.capturedAt, listing.capturedAt, new Date().toISOString()),
@@ -315,16 +320,20 @@
         rejectedCandidates: cappedArray(firstDefined(purchaseOutcomeSource.rejectedCandidates, debug.rejectedPurchaseOutcomeCandidates, debug.rejectedOutcomePriceCandidates)),
       }),
       carfax: compact({
-        status: firstDefined(carfaxSource.status, carfaxSource.urlStatus, listing.carfaxUrlStatus),
-        urlStatus: firstDefined(carfaxSource.urlStatus, listing.carfaxUrlStatus, listing.carfaxUrl ? "url_found" : listing.carfaxAvailable ? "text_only" : undefined),
-        url: firstDefined(carfaxSource.url, listing.carfaxUrl),
-        mentioned: Boolean(firstDefined(carfaxSource.mentioned, listing.carfaxMentioned, listing.carfaxAvailable, carfaxSource.available)),
-        visible: Boolean(firstDefined(carfaxSource.visible, carfaxSource.mentioned, listing.carfaxMentioned, listing.carfaxAvailable, carfaxSource.available)),
-        urlResolved: Boolean(firstDefined(carfaxSource.url, listing.carfaxUrl)),
-        actionable: Boolean(firstDefined(carfaxSource.url, listing.carfaxUrl)) && firstDefined(carfaxSource.urlStatus, listing.carfaxUrlStatus, listing.carfaxUrl ? "url_found" : undefined) === "url_found",
-        available: firstDefined(carfaxSource.available, carfaxSource.mentioned, listing.carfaxAvailable, listing.carfaxMentioned),
+        status: carfaxStatus,
+        urlStatus: carfaxStatus,
+        legacyUrlStatus: legacyCarfaxUrlStatus(carfaxStatus),
+        url: carfaxUrl,
+        mentioned: carfaxMentioned,
+        visible: carfaxVisible,
+        urlResolved: carfaxActionable,
+        actionable: carfaxActionable,
+        available: carfaxActionable,
+        availableLegacy: carfaxMentioned || carfaxVisible,
+        source: firstDefined(carfaxSource.source, sourceForCarfaxEvidence(carfaxSource.evidence || listing.openlaneMetadata?.carfaxEvidence || listing.extractedFields?.carfaxEvidence || [], carfaxStatus)),
         evidence: cappedArray(firstDefined(carfaxSource.evidence, listing.openlaneMetadata?.carfaxEvidence, listing.extractedFields?.carfaxEvidence)),
         candidateCounts: firstDefined(carfaxSource.candidateCounts, listing.openlaneMetadata?.carfaxDiagnostics),
+        rejectedCandidates: cappedArray(firstDefined(carfaxSource.rejectedCandidates, listing.openlaneMetadata?.carfaxDiagnostics?.rejectedCandidates)),
         rejectedReasons: cappedArray(firstDefined(carfaxSource.rejectedReasons, (debug.carfaxCandidates || []).map((candidate) => candidate?.rejectedReason || candidate?.rejectionReason).filter(Boolean))),
       }),
       condition: compact({
@@ -381,9 +390,10 @@
     const explicitMissingData = firstDefined(readinessSource.missingData, stableReadiness.missingData, listing.missingData);
     if (explicitMissingData !== undefined) canonical.readiness.missingData = cappedArray(explicitMissingData);
     if (!canonical.carfax.status && canonical.carfax.urlStatus) canonical.carfax.status = canonical.carfax.urlStatus;
-    if (canonical.carfax.urlStatus !== "url_found") {
+    if (canonical.carfax.urlStatus !== "resolved_url") {
       canonical.carfax.urlResolved = false;
       canonical.carfax.actionable = false;
+      canonical.carfax.available = false;
     }
     return sanitizeExtractionValue(canonical);
   }
@@ -420,6 +430,33 @@
       verifiedSoldPrice: purchaseOutcome.soldPriceCandidate,
       verifiedBuyPriceAuction: purchaseOutcome.buyPriceAuction,
     });
+  }
+
+  function normalizeCarfaxUrlStatus(status, url, mentioned) {
+    const text = String(status || "").trim();
+    if (url || /^(resolved_url|url_found)$/i.test(text)) return "resolved_url";
+    if (/^text_only$/i.test(text) || mentioned) return "text_only";
+    if (/^blocked$/i.test(text)) return "blocked";
+    if (/^(missing|not_found)$/i.test(text)) return "not_found";
+    return "unknown";
+  }
+
+  function legacyCarfaxUrlStatus(status) {
+    const normalized = normalizeCarfaxUrlStatus(status, undefined, false);
+    if (normalized === "resolved_url") return "url_found";
+    if (normalized === "not_found") return "missing";
+    return normalized;
+  }
+
+  function sourceForCarfaxEvidence(evidence = [], status = "") {
+    const items = cappedArray(evidence, 8);
+    const source = String(items.find((item) => item?.url)?.source || items[0]?.source || "");
+    if (/network/i.test(source)) return "network";
+    if (/link_href|href\b/i.test(source)) return "dom_link";
+    if (/data_href|data_url|data_report_url|safe_dom_attributes/i.test(source)) return "data_attribute";
+    if (/hydration_json|html_carfax_zone|html_node|html_attributes|router/i.test(source)) return "router_or_hydration";
+    if (status === "text_only") return "visible_text";
+    return "none";
   }
 
   function normalizeObd2Status(value) {
@@ -584,9 +621,12 @@
     setCanonical(next, "negotiatedAmount", purchaseOutcome.negotiatedAmount);
     setCanonical(next, "totalInvoiceAmount", purchaseOutcome.totalInvoiceAmount);
     setCanonical(next, "finalAcquisitionCost", purchaseOutcome.finalAcquisitionCost);
-    setCanonical(next, "carfaxUrlStatus", carfax.urlStatus || carfax.status);
+    setCanonical(next, "carfaxUrlStatus", legacyCarfaxUrlStatus(carfax.urlStatus || carfax.status));
     setCanonical(next, "carfaxUrl", carfax.url);
-    setCanonical(next, "carfaxAvailable", carfax.available);
+    setCanonical(next, "carfaxAvailable", Boolean(carfax.actionable));
+    setCanonical(next, "carfaxMentioned", Boolean(carfax.mentioned));
+    setCanonical(next, "carfaxActionable", Boolean(carfax.actionable));
+    setCanonical(next, "carfaxAvailableLegacy", Boolean(carfax.availableLegacy || carfax.mentioned || carfax.visible));
     setCanonical(next, "photos", media.photos);
     setCanonical(next, "videos", media.videos);
     setCanonical(next, "imageCount", media.photoCountVisible);

@@ -166,7 +166,10 @@
       carfaxMentioned: carfax.carfaxMentioned,
       carfaxUrl: carfax.carfaxUrl,
       carfaxAvailable: carfax.carfaxAvailable,
+      carfaxActionable: carfax.carfaxActionable,
+      carfaxAvailableLegacy: carfax.carfaxAvailableLegacy,
       carfaxUrlStatus: carfax.carfaxUrlStatus,
+      carfax: carfax.carfax,
       photos: media.photos,
       videos: media.videos,
       imageCount: Math.max(media.photos.length, mediaCounts.photoCount ?? 0),
@@ -323,9 +326,9 @@
       videos: media.videos,
       imageCount: Math.max(Number(listing.imageCount || 0), media.photos.length),
       videoCount: Math.max(Number(listing.videoCount || 0), media.videos.length),
-      carfaxUrl: listing.carfaxUrl || (html.match(/href=["']([^"']*carfax[^"']*)["']/i)?.[1] ? absoluteUrl(html.match(/href=["']([^"']*carfax[^"']*)["']/i)?.[1], href) : undefined),
-      carfaxAvailable: listing.carfaxAvailable || /carfax/i.test(html),
-      carfaxUrlStatus: listing.carfaxUrlStatus || (html.match(/href=["']([^"']*carfax[^"']*)["']/i) ? "url_found" : /carfax/i.test(html) ? "text_only" : "missing"),
+      carfaxUrl: listing.carfaxUrl,
+      carfaxAvailable: Boolean(listing.carfaxActionable || listing.carfaxUrl),
+      carfaxUrlStatus: listing.carfaxUrlStatus || (/carfax/i.test(html) ? "text_only" : "missing"),
     };
   }
 
@@ -1405,11 +1408,25 @@
     const withUrl = candidates.find((candidate) => candidate.url);
     const carfaxUrl = withUrl ? absoluteUrl(withUrl.url, href) : undefined;
     const carfaxMentioned = candidates.length > 0 || /carfax/i.test(text);
+    const carfaxActionable = Boolean(carfaxUrl);
+    const source = carfaxUrl ? carfaxCleanSource(withUrl?.source) : carfaxMentioned ? "visible_text" : "none";
     return {
       carfaxMentioned,
-      carfaxAvailable: Boolean(carfaxUrl || carfaxMentioned),
+      carfaxAvailable: carfaxActionable,
+      carfaxActionable,
+      carfaxAvailableLegacy: carfaxMentioned,
       carfaxUrl,
       carfaxUrlStatus: carfaxUrl ? "url_found" : carfaxMentioned ? "text_only" : "missing",
+      carfax: {
+        mentioned: carfaxMentioned,
+        visible: carfaxMentioned,
+        urlResolved: carfaxActionable,
+        actionable: carfaxActionable,
+        urlStatus: carfaxUrl ? "resolved_url" : carfaxMentioned ? "text_only" : "not_found",
+        url: carfaxUrl,
+        source,
+        confidenceScore: withUrl?.confidenceScore || (carfaxMentioned ? 50 : 0),
+      },
       carfaxEvidence: candidates.slice(0, 8),
       carfaxDiagnostics: buildCarfaxDiagnostics(candidates, carfaxUrl, carfaxMentioned),
     };
@@ -1430,12 +1447,24 @@
       carfaxSafeAttributeCandidateCount: count((item) => item.source === "safe_dom_attributes"),
       carfaxNetworkCandidateCount: 0,
       carfaxTextOnlyCandidateCount: urlFound ? 0 : (carfaxMentioned ? Math.max(1, count((item) => item.urlStatus === "text_only")) : 0),
+      rejectedCandidates: candidates
+        .filter((item) => item.rejectedReason)
+        .map((item) => ({
+          source: item.source,
+          sourceText: item.sourceText,
+          rejectedReason: item.rejectedReason,
+        }))
+        .slice(0, 12),
     };
   }
 
   function rejectedCarfaxReason(value) {
     const text = String(value || "");
+    if (/\b(?:javascript|data|vbscript):/i.test(text)) return "unsafe_carfax_url";
+    if (/\/vdp\/(?:null|undefined|#|$)/i.test(text)) return "placeholder_url_not_report";
     if (/\.(?:svg|png|jpe?g|webp|avif|css|js)(?:$|[?#\s])/i.test(text)) return "asset_url_not_report";
+    const urlLike = text.match(/https?:\/\/[^\s"'<>)]*(?:carfax|report|history)[^\s"'<>)]*/i)?.[0];
+    if (urlLike && !sanitizeCarfaxUrl(urlLike)) return "unsafe_carfax_url";
     return "carfax_text_without_safe_url";
   }
 
@@ -1461,6 +1490,7 @@
     try {
       const url = new URL(raw, "https://app.openlane.ca");
       if (!/^https?:$/i.test(url.protocol)) return undefined;
+      if (!isTrustedCarfaxUrl(url)) return undefined;
       for (const key of Array.from(url.searchParams.keys())) {
         const paramValue = url.searchParams.get(key) || "";
         if (isSensitiveText(`${key} ${paramValue}`) || /\[redacted/i.test(`${key} ${paramValue}`)) url.searchParams.delete(key);
@@ -1469,6 +1499,23 @@
     } catch {
       return undefined;
     }
+  }
+
+  function isTrustedCarfaxUrl(url) {
+    const hostname = String(url.hostname || "").toLowerCase();
+    const pathname = String(url.pathname || "");
+    if (/\/(?:null|undefined)(?:\/|$)/i.test(pathname)) return false;
+    if (/(^|\.)carfax\.(ca|com)$/.test(hostname)) return /\b(?:report|vehicle-history|history|vhr)\b/i.test(pathname);
+    if (/(^|\.)openlane\.(ca|com)$/.test(hostname)) return /\b(?:carfax|vehicle-history|reports?|history)\b/i.test(pathname);
+    return false;
+  }
+
+  function carfaxCleanSource(source) {
+    if (/link_href/i.test(String(source || ""))) return "dom_link";
+    if (/data_href|data_url|data_report_url|safe_dom_attributes/i.test(String(source || ""))) return "data_attribute";
+    if (/hydration_json|html_carfax_zone|html_node|html_attributes/i.test(String(source || ""))) return "router_or_hydration";
+    if (/network/i.test(String(source || ""))) return "network";
+    return "visible_text";
   }
 
   function sanitizeCarfaxEvidenceText(value) {

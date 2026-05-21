@@ -758,9 +758,9 @@
   function carfaxStatusLabel(listing) {
     const safeListing = canonicalListing(listing || {});
     if (!listing) return "-";
-    if (safeListing.carfaxUrlStatus === "url_found") return "url_found";
-    if (safeListing.carfaxUrlStatus === "text_only") return "text_only";
-    return safeListing.carfaxUrlStatus || "missing";
+    if (safeListing.carfaxActionable || safeListing.carfax?.actionable || safeListing.carfaxUrlStatus === "url_found") return "CARFAX URL captured";
+    if (safeListing.carfaxMentioned || safeListing.carfaxUrlStatus === "text_only") return "CARFAX visible, URL missing";
+    return "CARFAX not found";
   }
 
   function carfaxEvidenceLabel(listing) {
@@ -922,10 +922,9 @@
   function carfaxLabel(listing) {
     const safeListing = canonicalListing(listing || {});
     if (!listing) return "Missing";
-    if (safeListing.carfaxUrlStatus === "url_found") return "URL found";
-    if (safeListing.carfaxUrlStatus === "text_only") return "visible, URL missing";
-    if (safeListing.carfaxAvailable) return "Visible";
-    return "Missing";
+    if (safeListing.carfaxActionable || safeListing.carfax?.actionable || safeListing.carfaxUrlStatus === "url_found") return "CARFAX URL captured";
+    if (safeListing.carfaxMentioned || safeListing.carfaxUrlStatus === "text_only") return "CARFAX visible, URL missing";
+    return "CARFAX not found";
   }
 
   function canonicalListing(listing = {}) {

@@ -429,15 +429,64 @@ test("OpenLane CARFAX status is explicit for button text and missing pages", () 
   `, "https://app.openlane.ca/vdp/hyundai-tucson");
 
   assert.equal(textOnly.carfaxMentioned, true);
-  assert.equal(textOnly.carfaxAvailable, true);
+  assert.equal(textOnly.carfaxAvailable, false);
+  assert.equal((textOnly as { carfaxActionable?: boolean }).carfaxActionable, false);
+  assert.equal((textOnly as { carfax?: { urlStatus?: string; urlResolved?: boolean; actionable?: boolean; source?: string } }).carfax?.urlStatus, "text_only");
+  assert.equal((textOnly as { carfax?: { urlStatus?: string; urlResolved?: boolean; actionable?: boolean; source?: string } }).carfax?.urlResolved, false);
+  assert.equal((textOnly as { carfax?: { urlStatus?: string; urlResolved?: boolean; actionable?: boolean; source?: string } }).carfax?.actionable, false);
+  assert.equal((textOnly as { carfax?: { urlStatus?: string; urlResolved?: boolean; actionable?: boolean; source?: string } }).carfax?.source, "visible_text");
   assert.equal(textOnly.carfaxUrl, undefined);
   assert.equal(textOnly.carfaxUrlStatus, "text_only");
   assert.ok(((textOnly.openlaneMetadata as { carfaxDiagnostics?: { carfaxTextOnlyCandidateCount?: number } }).carfaxDiagnostics?.carfaxTextOnlyCandidateCount ?? 0) > 0);
   assert.equal(missing.carfaxMentioned, false);
   assert.equal(missing.carfaxAvailable, false);
+  assert.equal((missing as { carfax?: { urlStatus?: string; urlResolved?: boolean; actionable?: boolean; source?: string } }).carfax?.urlStatus, "not_found");
+  assert.equal((missing as { carfax?: { source?: string } }).carfax?.source, "none");
   assert.equal(missing.carfaxUrl, undefined);
   assert.equal(missing.carfaxUrlStatus, "missing");
   assert.equal((missing.openlaneMetadata as { carfaxDiagnostics?: { carfaxTextOnlyCandidateCount?: number } }).carfaxDiagnostics?.carfaxTextOnlyCandidateCount, 0);
+});
+
+test("OpenLane CARFAX safe URL semantics reject unsafe or fake report URLs", () => {
+  const unsafe = extractor.extractOpenLaneFixture(`
+    <main class="vdp-page">
+      <h1>2017 Hyundai Tucson AWD</h1>
+      <p>VIN KM8J3CA46HU123456</p>
+      <p>Odometer 111,486 KM</p>
+      <a href="javascript:alert(1)">View CARFAX Canada report</a>
+      <a href="data:text/html,<h1>CARFAX</h1>">CARFAX data report</a>
+      <a href="/vdp/null">CARFAX placeholder</a>
+      <a href="https://www.carfax.ca/assets/carfax-logo.svg">CARFAX logo</a>
+      <a href="https://example.com/fake-carfax-report">Fake CARFAX report</a>
+      <section class="bid-panel">Current Bid $4,600</section>
+    </main>
+  `, "https://app.openlane.ca/vdp/hyundai-tucson");
+  const safe = extractor.extractOpenLaneFixture(`
+    <main class="vdp-page">
+      <h1>2017 Hyundai Tucson AWD</h1>
+      <p>VIN KM8J3CA46HU123456</p>
+      <p>Odometer 111,486 KM</p>
+      <a href="https://www.carfax.ca/report/ABC123?token=secret&view=summary">View CARFAX Canada report</a>
+      <section class="bid-panel">Current Bid $4,600</section>
+    </main>
+  `, "https://app.openlane.ca/vdp/hyundai-tucson");
+  const unsafeRejected = (unsafe.openlaneMetadata as { carfaxDiagnostics?: { rejectedCandidates?: Array<{ rejectedReason?: string }> } }).carfaxDiagnostics?.rejectedCandidates || [];
+
+  assert.equal(unsafe.carfaxUrl, undefined);
+  assert.equal(unsafe.carfaxUrlStatus, "text_only");
+  assert.equal(unsafe.carfaxAvailable, false);
+  assert.equal((unsafe as { carfax?: { urlResolved?: boolean; actionable?: boolean } }).carfax?.urlResolved, false);
+  assert.equal((unsafe as { carfax?: { urlResolved?: boolean; actionable?: boolean } }).carfax?.actionable, false);
+  assert.match(JSON.stringify(unsafeRejected), /unsafe_carfax_url|asset_url_not_report|placeholder_url_not_report/i);
+
+  assert.equal(safe.carfaxUrl, "https://www.carfax.ca/report/ABC123?view=summary");
+  assert.equal(safe.carfaxUrlStatus, "url_found");
+  assert.equal(safe.carfaxAvailable, true);
+  assert.equal((safe as { carfax?: { urlStatus?: string; urlResolved?: boolean; actionable?: boolean; source?: string } }).carfax?.urlStatus, "resolved_url");
+  assert.equal((safe as { carfax?: { urlResolved?: boolean; actionable?: boolean } }).carfax?.urlResolved, true);
+  assert.equal((safe as { carfax?: { urlResolved?: boolean; actionable?: boolean } }).carfax?.actionable, true);
+  assert.equal((safe as { carfax?: { source?: string } }).carfax?.source, "dom_link");
+  assert.doesNotMatch(String(safe.carfaxUrl), /token=|secret/i);
 });
 
 test("OpenLane section map isolates noisy English VDP regions", () => {
@@ -876,7 +925,7 @@ test("OpenLane network CARFAX availability without URL remains truthful text_onl
   };
 
   assert.equal(merged.carfaxMentioned, true);
-  assert.equal(merged.carfaxAvailable, true);
+  assert.equal(merged.carfaxAvailable, false);
   assert.equal(merged.carfaxUrl, undefined);
   assert.equal(merged.carfaxUrlStatus, "text_only");
   assert.ok(merged.openlaneMetadata?.carfaxEvidence?.some((item) => item.urlStatus === "text_only"));
@@ -916,7 +965,8 @@ test("OpenLane extractor reads core auction fields from fixture HTML", () => {
   assert.ok(Array.isArray(media.photos));
   assert.ok(Array.isArray(media.evidence));
   assert.equal(carfax.available, listing.carfaxAvailable);
-  assert.equal(carfax.urlStatus, listing.carfaxUrlStatus);
+  assert.equal(carfax.urlStatus, "not_found");
+  assert.equal(listing.carfaxUrlStatus, "missing");
   assert.ok(Array.isArray(carfax.evidence));
   assert.ok(debug.sectionMapSummary);
   assert.ok(Array.isArray(debug.warnings));
@@ -944,7 +994,7 @@ test("OpenLane extractor captures Carfax, media, and normalized relative URLs", 
   assert.equal(carfax.carfaxUrl, "https://www.carfax.ca/report/ABC123");
   assert.equal(carfax.carfaxAvailable, true);
   assert.equal(carfaxContract.url, "https://www.carfax.ca/report/ABC123");
-  assert.equal(carfaxContract.urlStatus, "url_found");
+  assert.equal(carfaxContract.urlStatus, "resolved_url");
   assert.ok((carfaxContract.evidence || []).length > 0);
   assert.ok(photos.some((photo) => photo.url === "https://www.openlane.ca/photos/f150-front.jpg"));
   assert.ok(photos.some((photo) => photo.source === "picture"));
@@ -974,7 +1024,7 @@ test("OpenLane Carfax and media extraction stays truthful for text-only and junk
   assert.equal(textOnlyCarfax.url, undefined);
   assert.equal(textOnlyCarfax.urlStatus, "text_only");
   assert.equal(dataHrefCarfax.url, "https://www.carfax.ca/report/DATAHREF123");
-  assert.equal(dataHrefCarfax.urlStatus, "url_found");
+  assert.equal(dataHrefCarfax.urlStatus, "resolved_url");
   assert.equal(dataHref.imageCount, 13);
   assert.ok(photos.some((photo) => photo.url.includes("pub-us.kar-media.com")));
   assert.ok(photos.every((photo) => !/data:image|favicon|openlane-logo|\/vdp\/null|fonts\.gstatic\.com|translate/i.test(photo.url)));
@@ -1747,7 +1797,8 @@ test("OpenLane Phase 7 CARFAX fixtures keep text-only and router URL behavior tr
     "https://app.openlane.ca/vdp/KNAE55LC7J6040713",
   );
 
-  assert.equal(textOnly.carfaxAvailable, true);
+  assert.equal(textOnly.carfaxMentioned, true);
+  assert.equal(textOnly.carfaxAvailable, false);
   assert.equal(textOnly.carfaxUrl, undefined);
   assert.equal(textOnly.carfaxUrlStatus, "text_only");
   assert.equal(router.carfaxUrl, "https://app.openlane.ca/vehicle-history/carfax/STINGER123");
@@ -1884,7 +1935,8 @@ test("OpenLane active extractor reads Kia page with lazy media counts and visibl
   assert.equal(listing.videoCount, 0);
   assert.equal(metadata.disclosureCount, 22);
   assert.ok((listing.declarations as string[]).some((item) => /Accident repair/i.test(item)));
-  assert.equal(listing.carfaxAvailable, true);
+  assert.equal(listing.carfaxMentioned, true);
+  assert.equal(listing.carfaxAvailable, false);
   assert.equal(listing.carfaxUrl, undefined);
   assert.ok(photos.some((photo) => photo.url.includes("kia-forte-front")));
   assert.equal(metadata.mediaCountEvidence?.videoCount, 0);
@@ -1931,7 +1983,8 @@ test("OpenLane VDP purchase outcome ignores sidebar text and extracts hero vehic
   assert.equal(listing.totalInvoiceAmount, undefined);
   assert.equal(listing.finalAcquisitionCost, undefined);
   assert.ok(["candidate_wholesale_label", "verified_wholesale_label"].includes((listing.priceSemantics as Record<string, string>).buyPriceAuction));
-  assert.equal(listing.carfaxAvailable, true);
+  assert.equal(listing.carfaxMentioned, true);
+  assert.equal(listing.carfaxAvailable, false);
   assert.equal(listing.carfaxUrl, undefined);
   assert.equal(listing.carfaxUrlStatus, "text_only");
   assert.ok(photos.some((photo) => photo.url.includes("pub-us.kar-media.com")));

@@ -311,7 +311,9 @@
 
     if (carfaxUrlCandidate && !merged.carfaxUrl) merged.carfaxUrl = carfaxUrlCandidate.value;
     merged.carfaxMentioned = true;
-    merged.carfaxAvailable = true;
+    merged.carfaxAvailable = Boolean(merged.carfaxUrl);
+    merged.carfaxActionable = Boolean(merged.carfaxUrl);
+    merged.carfaxAvailableLegacy = true;
     merged.carfaxUrlStatus = merged.carfaxUrl ? "url_found" : "text_only";
     merged.openlaneMetadata = {
       ...(merged.openlaneMetadata || {}),
@@ -670,6 +672,7 @@
     try {
       const url = new URL(candidate, String(baseUrl || root.location?.href || "https://app.openlane.ca/"));
       if (!/^https?:$/i.test(url.protocol)) return "";
+      if (!isTrustedCarfaxUrl(url)) return "";
       for (const key of Array.from(url.searchParams.keys())) {
         const paramValue = url.searchParams.get(key) || "";
         if (SENSITIVE_KEY.test(`${key} ${paramValue}`) || /\[redacted/i.test(`${key} ${paramValue}`)) url.searchParams.delete(key);
@@ -678,6 +681,15 @@
     } catch {
       return "";
     }
+  }
+
+  function isTrustedCarfaxUrl(url) {
+    const hostname = String(url.hostname || "").toLowerCase();
+    const pathname = String(url.pathname || "");
+    if (/\/(?:null|undefined)(?:\/|$)/i.test(pathname)) return false;
+    if (/(^|\.)carfax\.(ca|com)$/.test(hostname)) return /\b(?:report|vehicle-history|history|vhr)\b/i.test(pathname);
+    if (/(^|\.)openlane\.(ca|com)$/.test(hostname)) return /\b(?:carfax|vehicle-history|reports?|history)\b/i.test(pathname);
+    return false;
   }
 
   function safeTextFieldValue(value) {
