@@ -102,6 +102,42 @@ test("Phase 1 baseline preserves raw pollution evidence for later canonical clea
   assert.match(combinedRawFixtureText, /Transport estimate CAD \$428 \/ 185km/i);
 });
 
+test("Phase 4 canonical state exposes clean ML features without raw OpenLane pollution", () => {
+  const listings = [
+    extract("openlane-vdp-kia-purchase-detail-cleanup-baseline.html", "https://app.openlane.ca/vdp/3KPFL4A72HE119966"),
+    extract("openlane-vdp-lexus-active-bid-conflict-baseline.html", "https://app.openlane.ca/vdp/JTJBARBZ7H2120574"),
+  ];
+  const pollution = /OPENLANE does not guarantee|condition, or safety of any vehicle|Privacy policy|Terms & conditions|\bHome\b|BUYING|SELLING|Transport estimate|Vehicle location|ZUMA MOTORS|Full bid history|Bidder|CARFAX report|\bme\b|\bg\b/i;
+
+  for (const listing of listings) {
+    const canonical = listing.openlaneCanonicalState as {
+      schemaVersion?: string;
+      source?: { name?: string; marketType?: string; urlPattern?: string };
+      mlFeatures?: Record<string, unknown>;
+      condition?: Record<string, unknown>;
+      carfax?: { mentioned?: boolean; urlResolved?: boolean; actionable?: boolean; urlStatus?: string };
+    };
+
+    assert.equal(canonical.schemaVersion, "openlane-canonical-v2");
+    assert.equal(canonical.source?.name, "OpenLane");
+    assert.equal(canonical.source?.marketType, "auction_market");
+    assert.ok(canonical.source?.urlPattern);
+    assert.ok(canonical.mlFeatures);
+    assert.doesNotMatch(JSON.stringify(canonical.mlFeatures), pollution);
+    assert.doesNotMatch(JSON.stringify(canonical.condition), pollution);
+    assert.equal(canonical.carfax?.mentioned, true);
+    assert.equal(canonical.carfax?.urlResolved, false);
+    assert.equal(canonical.carfax?.actionable, false);
+    assert.equal(canonical.carfax?.urlStatus, "text_only");
+  }
+
+  const kia = listings[0].openlaneCanonicalState as { mlFeatures?: Record<string, unknown> };
+  const lexus = listings[1].openlaneCanonicalState as { mlFeatures?: Record<string, unknown> };
+  assert.equal(kia.mlFeatures?.verifiedSoldPrice, 4_000);
+  assert.equal(kia.mlFeatures?.verifiedBuyPriceAuction, 4_000);
+  assert.equal(lexus.mlFeatures?.activeCurrentBid, 13_200);
+});
+
 function extract(name: string, href: string) {
   return extractor.extractOpenLaneFixture(fixture(name), href);
 }

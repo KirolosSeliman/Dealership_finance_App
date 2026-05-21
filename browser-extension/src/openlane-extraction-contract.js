@@ -265,6 +265,14 @@
     const stableReadiness = listing.openlaneMetadata?.stableCaptureReadiness || {};
     const debug = listing.extractedFields?.debug || {};
     const canonical = {
+      schemaVersion: firstDefined(source.schemaVersion, listing.schemaVersion, "openlane-canonical-v2"),
+      capturedAt: firstDefined(source.capturedAt, listing.capturedAt, new Date().toISOString()),
+      source: compact({
+        name: "OpenLane",
+        marketType: "auction_market",
+        listingUrl: firstDefined(source.source?.listingUrl, listing.listingUrl),
+        urlPattern: firstDefined(source.source?.urlPattern, pageContextSource.urlPattern, urlPattern(listing.listingUrl)),
+      }),
       identity: compact({
         vin: firstDefined(identitySource.vin, listing.vin),
         year: firstDefined(identitySource.year, listing.year),
@@ -310,6 +318,10 @@
         status: firstDefined(carfaxSource.status, carfaxSource.urlStatus, listing.carfaxUrlStatus),
         urlStatus: firstDefined(carfaxSource.urlStatus, listing.carfaxUrlStatus, listing.carfaxUrl ? "url_found" : listing.carfaxAvailable ? "text_only" : undefined),
         url: firstDefined(carfaxSource.url, listing.carfaxUrl),
+        mentioned: Boolean(firstDefined(carfaxSource.mentioned, listing.carfaxMentioned, listing.carfaxAvailable, carfaxSource.available)),
+        visible: Boolean(firstDefined(carfaxSource.visible, carfaxSource.mentioned, listing.carfaxMentioned, listing.carfaxAvailable, carfaxSource.available)),
+        urlResolved: Boolean(firstDefined(carfaxSource.url, listing.carfaxUrl)),
+        actionable: Boolean(firstDefined(carfaxSource.url, listing.carfaxUrl)) && firstDefined(carfaxSource.urlStatus, listing.carfaxUrlStatus, listing.carfaxUrl ? "url_found" : undefined) === "url_found",
         available: firstDefined(carfaxSource.available, carfaxSource.mentioned, listing.carfaxAvailable, listing.carfaxMentioned),
         evidence: cappedArray(firstDefined(carfaxSource.evidence, listing.openlaneMetadata?.carfaxEvidence, listing.extractedFields?.carfaxEvidence)),
         candidateCounts: firstDefined(carfaxSource.candidateCounts, listing.openlaneMetadata?.carfaxDiagnostics),
@@ -325,7 +337,6 @@
         notes: firstDefined(conditionSource.notes, conditionSource.dealerNotes, listing.openlaneMetadata?.dealerNotes),
         conditionReportText: firstDefined(listing.conditionReportText, conditionSource.conditionReportText),
         evidence: cappedArray(firstDefined(conditionSource.evidence, listing.condition?.evidence)),
-        rejectedLines: cappedArray(firstDefined(conditionSource.rejectedLines, debug.conditionDiagnostics?.rejectedConditionLines, listing.openlaneMetadata?.conditionDetails?.conditionDiagnostics?.rejectedConditionLines)),
       }),
       media: compact({
         photos: cappedArray(firstDefined(mediaSource.photos, listing.photos), 40),
@@ -350,9 +361,13 @@
         contradictions: cappedArray(firstDefined(diagnosticsSource.contradictions, listing.debug?.contradictions)),
         sourcePriorities: firstDefined(diagnosticsSource.sourcePriorities, listing.debug?.fieldEvidenceSummary),
         debugMessages: cappedArray(firstDefined(diagnosticsSource.debugMessages, listing.warnings)),
+        conditionRejectedLines: cappedArray(firstDefined(diagnosticsSource.conditionRejectedLines, conditionSource.rejectedLines, debug.conditionDiagnostics?.rejectedConditionLines, listing.openlaneMetadata?.conditionDetails?.conditionDiagnostics?.rejectedConditionLines)),
       }),
     };
 
+    canonical.condition = cleanCanonicalConditionState(canonical.condition || {});
+    canonical.rejectedEvidence = buildRejectedEvidence(canonical, debug);
+    canonical.mlFeatures = buildOpenLaneMlFeatures(canonical);
     if (canonical.readiness.ready === undefined && canonical.readiness.readyToCapture !== undefined) {
       canonical.readiness.ready = canonical.readiness.readyToCapture;
     }
@@ -362,7 +377,147 @@
     const explicitMissingData = firstDefined(readinessSource.missingData, stableReadiness.missingData, listing.missingData);
     if (explicitMissingData !== undefined) canonical.readiness.missingData = cappedArray(explicitMissingData);
     if (!canonical.carfax.status && canonical.carfax.urlStatus) canonical.carfax.status = canonical.carfax.urlStatus;
+    if (canonical.carfax.urlStatus !== "url_found") {
+      canonical.carfax.urlResolved = false;
+      canonical.carfax.actionable = false;
+    }
     return sanitizeExtractionValue(canonical);
+  }
+
+  function buildOpenLaneMlFeatures(canonical = {}) {
+    const identity = canonical.identity || {};
+    const activeAuction = canonical.activeAuction || {};
+    const purchaseOutcome = canonical.purchaseOutcome || {};
+    const condition = canonical.condition || {};
+    const carfax = canonical.carfax || {};
+    const media = canonical.media || {};
+    const conditionText = JSON.stringify(condition);
+    return compact({
+      year: identity.year,
+      make: identity.make,
+      model: identity.model,
+      trim: identity.trim,
+      mileageKm: identity.mileageKm,
+      photoCountVisible: media.photoCountVisible,
+      videoCountVisible: media.videoCountVisible,
+      hasCarfaxMention: Boolean(carfax.mentioned),
+      hasCarfaxResolvedUrl: Boolean(carfax.urlResolved),
+      carfaxActionable: Boolean(carfax.actionable),
+      hasAccidentHistory: /\b(accident|collision)\b/i.test(conditionText),
+      hasDamageOver3000: /\b(?:damage|dommage)[^\d]{0,20}(?:3000|3,000|3 000|\$3k)\b/i.test(conditionText),
+      hasRust: /\b(rust|corrosion|rouille)\b/i.test(conditionText),
+      hasMechanicalDisclosure: cappedArray(condition.mechanical).length > 0,
+      hasExteriorDisclosure: cappedArray(condition.exterior).length > 0,
+      hasInteriorDisclosure: cappedArray(condition.interior).length > 0,
+      hasTireWheelDisclosure: cappedArray(condition.tireWheel).length > 0,
+      obd2Scanned: condition.obd2 !== undefined && !/not_visible|not_scanned|unknown/i.test(String(condition.obd2)),
+      obd2Status: normalizeObd2Status(condition.obd2),
+      activeCurrentBid: activeAuction.currentBid,
+      verifiedSoldPrice: purchaseOutcome.soldPriceCandidate,
+      verifiedBuyPriceAuction: purchaseOutcome.buyPriceAuction,
+    });
+  }
+
+  function normalizeObd2Status(value) {
+    const text = String(value || "");
+    if (!text) return "unknown";
+    if (/not_visible|not available|not_scanned|nothing_reported/i.test(text)) return "not_scanned";
+    return "scanned";
+  }
+
+  function cleanCanonicalConditionState(condition = {}) {
+    const knownHistory = cleanCanonicalConditionItems(condition.knownHistory);
+    const mechanical = cleanCanonicalConditionItems(condition.mechanical);
+    const exterior = cleanCanonicalConditionItems(condition.exterior);
+    const interior = cleanCanonicalConditionItems(condition.interior);
+    const tireWheel = cleanCanonicalConditionItems(condition.tireWheel);
+    const notes = cleanCanonicalConditionItems(condition.notes);
+    const reportTextItems = cleanCanonicalConditionItems(splitConditionText(condition.conditionReportText));
+    const reportParts = [
+      knownHistory.length ? `Known history: ${knownHistory.join(" | ")}` : "",
+      mechanical.length ? `Mechanical: ${mechanical.join(" | ")}` : "",
+      exterior.length ? `Exterior: ${exterior.join(" | ")}` : "",
+      interior.length ? `Interior: ${interior.join(" | ")}` : "",
+      tireWheel.length ? `Tires and wheels: ${tireWheel.join(" | ")}` : "",
+      notes.length ? `Notes: ${notes.join(" | ")}` : "",
+      reportTextItems.length ? reportTextItems.join(" | ") : "",
+    ].filter(Boolean);
+    return compact({
+      knownHistory,
+      mechanical,
+      exterior,
+      interior,
+      tireWheel,
+      obd2: condition.obd2,
+      notes,
+      highRiskTerms: cleanCanonicalConditionItems(condition.highRiskTerms),
+      conditionReportText: reportParts.join(" | ") || undefined,
+      conditionExtractorMode: condition.conditionExtractorMode,
+      conditionDiagnostics: condition.conditionDiagnostics ? compact({
+        rejectedConditionLineCount: cappedArray(condition.conditionDiagnostics.rejectedConditionLines).length,
+        sectionBoundaryDecisionCount: cappedArray(condition.conditionDiagnostics.sectionBoundaryDecisions).length,
+        ignoredNoisyZoneCount: Number(condition.conditionDiagnostics.ignoredNoisyZoneCount || 0),
+      }) : undefined,
+      evidence: cappedArray(condition.evidence).map((item) => compact({
+        source: item?.source,
+        sourceType: item?.sourceType,
+        confidenceScore: item?.confidenceScore,
+      })),
+    });
+  }
+
+  function cleanCanonicalConditionItems(value) {
+    return Array.from(new Set(cappedArray(value, 40)
+      .map((item) => normalizeConditionFeatureText(item))
+      .filter((item) => item && !isCanonicalConditionNoise(item))))
+      .slice(0, 20);
+  }
+
+  function splitConditionText(value) {
+    return String(value || "")
+      .split(/\s+\|\s+|[\n\r•]+/g)
+      .map((item) => item.replace(/^(known history|mechanical|exterior|interior|tires? and wheels|notes|condition report)\s*:\s*/i, "").trim())
+      .filter(Boolean);
+  }
+
+  function normalizeConditionFeatureText(value) {
+    if (Array.isArray(value)) return value.map(normalizeConditionFeatureText).filter(Boolean).join(" ");
+    if (value && typeof value === "object") return normalizeConditionFeatureText(value.sourceText || value.text || value.value || "");
+    return String(value || "").replace(/\s+/g, " ").trim();
+  }
+
+  function isCanonicalConditionNoise(value) {
+    const text = String(value || "").trim();
+    if (!text || text.length < 3) return true;
+    if (/^[a-z]{1,2}$/i.test(text)) return true;
+    if (/\b(condition,\s*or\s*safety\s*of\s*any\s*vehicle|openlane\s+does\s+not\s+guarantee|privacy\s+policy|terms\s*&?\s*conditions?)\b/i.test(text)) return true;
+    if (/\b(home|buying|selling|purchase|browse|closing|on hold|vehicle media|copy vin|order-history|live-offer-row|bid-panel-current)\b/i.test(text)) return true;
+    if (/\b(carfax|transport estimate|vehicle location|current bid|full bid history|bids?|bidder|watchlist|outbid)\b/i.test(text)) return true;
+    if (/\b[A-HJ-NPR-Z0-9]{17}\b/i.test(text)) return true;
+    if (/^\d{1,3}(?:,\d{3})?\s*km$/i.test(text)) return true;
+    if (/\b\d{4}\s+[A-Za-z][A-Za-z-]+\s+[A-Za-z0-9-]+/i.test(text)) return true;
+    if (/\b[A-Z][A-Z0-9&.' -]+\s+(?:MOTORS|AUTO|AUTOS|DEALER|CARS|MOTORCARS)\b/.test(text)) return true;
+    if (/\b(thumbnail|gallery)\b/i.test(text)) return true;
+    return false;
+  }
+
+  function buildRejectedEvidence(canonical = {}, debug = {}) {
+    return [
+      ...(canonical.activeAuction?.rejectedCandidates || []),
+      ...(canonical.activeAuction?.staleCandidates || []),
+      ...(canonical.purchaseOutcome?.rejectedCandidates || []),
+      ...(canonical.diagnostics?.conditionRejectedLines || []),
+      ...((debug.titleCandidates || []).filter((candidate) => candidate?.rejectedReason)),
+      ...(debug.mediaRejected || []),
+    ].map((item) => redactEvidence({
+      field: item.field,
+      value: item.value,
+      sourceType: item.sourceType || item.sourceZone,
+      sourceName: item.sourceName || item.label,
+      sourceText: item.sourceText,
+      confidenceScore: item.confidenceScore,
+      rejectionReason: item.rejectedReason || item.rejectionReason,
+    })).slice(0, 80);
   }
 
   function canonicalToLegacyPayload(canonicalOrListing = {}, legacy = {}) {
