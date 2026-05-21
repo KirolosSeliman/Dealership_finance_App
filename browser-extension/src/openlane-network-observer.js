@@ -197,6 +197,9 @@
       endpointPattern: endpointPattern(url),
       contentType: String(contentType || "").slice(0, 80),
       sanitizedKeys: candidates.sanitizedKeys,
+      activationMode: observerStatus.activationMode,
+      consentMode: observerStatus.consentMode,
+      authoritative: observerStatus.activationMode === "explicit_consent_active" && observerStatus.consentMode === "active_backend_consent",
       candidates,
     };
     observations.unshift(observation);
@@ -256,7 +259,9 @@
   }
 
   function mergeNetworkEvidenceIntoListing(listing = {}, evidence = getOpenLaneNetworkEvidence()) {
-    const candidates = flattenNetworkCandidates(evidence);
+    const allCandidates = flattenNetworkCandidates(evidence);
+    const authoritativeEvidence = evidence.filter(isAuthoritativeNetworkEvidence);
+    const candidates = flattenNetworkCandidates(authoritativeEvidence);
     const merged = {
       ...listing,
       openlaneMetadata: {
@@ -265,6 +270,9 @@
           capturedAt: item.capturedAt,
           endpointPattern: item.endpointPattern,
           sanitizedKeys: item.sanitizedKeys,
+          consentMode: item.consentMode,
+          activationMode: item.activationMode,
+          authoritative: isAuthoritativeNetworkEvidence(item),
           candidateCounts: {
             vin: item.candidates?.vinCandidates?.length || 0,
             carfax: countCarfaxCandidates(item.candidates?.fieldCandidates || []),
@@ -277,7 +285,8 @@
         ...(listing.extractedFields || {}),
         debug: {
           ...(listing.extractedFields?.debug || {}),
-          networkCandidates: candidates,
+          networkCandidates: allCandidates,
+          authoritativeNetworkCandidates: candidates,
         },
       },
     };
@@ -541,6 +550,14 @@
       priceCandidates: acc.priceCandidates.concat(item.candidates?.priceCandidates || []),
       transportCandidates: acc.transportCandidates.concat(item.candidates?.transportCandidates || []),
     }), { fieldCandidates: [], vinCandidates: [], mediaCandidates: [], conditionCandidates: [], priceCandidates: [], transportCandidates: [] });
+  }
+
+  function isAuthoritativeNetworkEvidence(item = {}) {
+    if (!item) return false;
+    if (item.authoritative === false) return false;
+    if (item.consentMode && item.consentMode !== "active_backend_consent") return false;
+    if (item.activationMode && item.activationMode !== "explicit_consent_active") return false;
+    return true;
   }
 
   function isRelevantObservation(candidates) {

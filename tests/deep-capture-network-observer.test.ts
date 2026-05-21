@@ -107,6 +107,55 @@ test("OpenLane network observer status reports current evidence count", () => {
   networkObserver.stopOpenLaneNetworkObserver();
 });
 
+test("OpenLane network evidence stays diagnostic-only while consent is pending", () => {
+  networkObserver.stopOpenLaneNetworkObserver();
+  networkObserver.startOpenLaneNetworkObserver({
+    dealerFlowBaseUrl: "https://dealer-flow.example",
+    organizationId: "63c47786-fb41-40c1-a573-71346969b9e0",
+    observePageNetworkData: true,
+    deepCaptureEnabled: true,
+  }, { href: "https://app.openlane.ca/vdp/KM8J3CA46HU123456" });
+  const observed = networkObserver.rememberNetworkPayload(JSON.stringify({
+    vehicle: {
+      vin: "KM8J3CA46HU123456",
+      currentBid: 18500,
+    },
+  }), "https://app.openlane.ca/api/vdp/KM8J3CA46HU123456", "application/json", "pending-consent-evidence");
+  const merged = networkObserver.mergeNetworkEvidenceIntoListing({
+    sourceName: "OpenLane",
+    listingUrl: "https://app.openlane.ca/vdp/KM8J3CA46HU123456",
+    captureKind: "observation",
+    pageType: "active_listing",
+  }, [observed]) as {
+    vin?: string;
+    currentBid?: number;
+    openlaneMetadata?: { networkEvidence?: Array<{ authoritative?: boolean; consentMode?: string }> };
+    extractedFields?: { debug?: { networkCandidates?: { fieldCandidates?: unknown[] } } };
+  };
+
+  assert.ok(observed);
+  assert.equal(merged.vin, undefined);
+  assert.equal(merged.currentBid, undefined);
+  assert.equal(merged.openlaneMetadata?.networkEvidence?.[0]?.authoritative, false);
+  assert.equal(merged.openlaneMetadata?.networkEvidence?.[0]?.consentMode, "future_download_consent_pending");
+  assert.ok((merged.extractedFields?.debug?.networkCandidates?.fieldCandidates || []).length > 0);
+  networkObserver.stopOpenLaneNetworkObserver();
+});
+
+test("OpenLane network observer is inactive when backend consent is paused", () => {
+  const paused = networkObserver.startOpenLaneNetworkObserver({
+    dealerFlowBaseUrl: "https://dealer-flow.example",
+    organizationId: "63c47786-fb41-40c1-a573-71346969b9e0",
+    observePageNetworkData: true,
+    deepCaptureEnabled: true,
+    deepCaptureConsentStatus: "paused",
+  }, { href: "https://app.openlane.ca/vdp/123" });
+
+  assert.equal(paused.enabled, false);
+  assert.equal(paused.reason, "deep_capture_consent_paused");
+  assert.equal(paused.observationCount, 0);
+});
+
 test("OpenLane network observer distinguishes early content hook from proven page hook install", () => {
   const previousEarlyFlag = globalThis.__dealerFlowOpenLaneEarlyNetworkHook;
   globalThis.__dealerFlowOpenLaneEarlyNetworkHook = true;

@@ -19,6 +19,12 @@
     if (settings.deepCaptureConsentStatus === "withdrawn") {
       return state(false, MODE_DISABLED_BY_USER, "deep_capture_consent_withdrawn", openLaneHost, observePageNetworkData, settings);
     }
+    if (settings.deepCaptureConsentStatus === "paused") {
+      return state(false, MODE_DISABLED_BY_USER, "deep_capture_consent_paused", openLaneHost, observePageNetworkData, settings);
+    }
+    if (settings.deepCaptureConsentStatus === "requires_renewal") {
+      return state(false, MODE_DISABLED_BY_USER, "deep_capture_consent_requires_renewal", openLaneHost, observePageNetworkData, settings);
+    }
     if (!dealerFlowBaseUrl || !organizationId) {
       return state(false, MODE_DISABLED_MISSING_SETTINGS, !dealerFlowBaseUrl ? "missing_dealer_flow_url" : "missing_organization_id", openLaneHost, observePageNetworkData, settings);
     }

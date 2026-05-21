@@ -170,7 +170,7 @@ test("OpenLane stable capture keeps no-VIN listings preview-only even when ident
   assert.ok(result.readiness.missingData.includes("vin"));
 });
 
-test("OpenLane stable capture merges network VIN in default Deep Capture mode without formal consent id", async () => {
+test("OpenLane stable capture keeps pending-consent network evidence diagnostic-only", async () => {
   const networkObserver = require("../browser-extension/src/openlane-network-observer.js") as {
     startOpenLaneNetworkObserver: (settings: Record<string, unknown>, context?: Record<string, unknown>) => { enabled: boolean };
     stopOpenLaneNetworkObserver: () => void;
@@ -181,6 +181,40 @@ test("OpenLane stable capture merges network VIN in default Deep Capture mode wi
     organizationId: "63c47786-fb41-40c1-a573-71346969b9e0",
     deepCaptureEnabled: true,
     observePageNetworkData: true,
+  };
+  const href = "https://app.openlane.ca/vdp/no-vin-preview";
+  assert.equal(networkObserver.startOpenLaneNetworkObserver(settings, { href }).enabled, true);
+  networkObserver.rememberNetworkPayload(
+    JSON.stringify({ vehicle: { vin: "KM8J3CA46HU123456", carfaxUrl: "/vehicle-history/report/KM8J3CA46HU123456" } }),
+    "https://app.openlane.ca/api/vdp/KM8J3CA46HU123456",
+    "application/json",
+  );
+
+  const doc = fakeDocument("2017 Hyundai Tucson Odometer 111,486 KM Current Bid $4,600 23 total photos CARFAX Canada");
+  doc.images = Array.from({ length: 23 }, () => ({}));
+  const result = await stableCapture.extractStableOpenLaneListing(doc, href, settings, { delaysMs: [0], sleep: async () => undefined });
+
+  assert.equal(result.listing.vin, undefined);
+  assert.equal(result.readiness.readyToCapture, false);
+  assert.equal(result.readiness.vinStatus, "missing");
+  assert.equal(result.listing.carfaxUrlStatus, "text_only");
+  assert.equal(result.listing.openlaneMetadata?.networkEvidence?.[0]?.authoritative, false);
+  networkObserver.stopOpenLaneNetworkObserver();
+});
+
+test("OpenLane stable capture promotes network VIN with explicit active consent", async () => {
+  const networkObserver = require("../browser-extension/src/openlane-network-observer.js") as {
+    startOpenLaneNetworkObserver: (settings: Record<string, unknown>, context?: Record<string, unknown>) => { enabled: boolean };
+    stopOpenLaneNetworkObserver: () => void;
+    rememberNetworkPayload: (body: unknown, url?: string, contentType?: string) => unknown;
+  };
+  const settings = {
+    dealerFlowBaseUrl: "https://dealer-flow.example",
+    organizationId: "63c47786-fb41-40c1-a573-71346969b9e0",
+    deepCaptureEnabled: true,
+    observePageNetworkData: true,
+    deepCaptureConsentStatus: "active",
+    deepCaptureConsentId: "33333333-3333-4333-8333-333333333333",
   };
   const href = "https://app.openlane.ca/vdp/KM8J3CA46HU123456";
   assert.equal(networkObserver.startOpenLaneNetworkObserver(settings, { href }).enabled, true);
@@ -198,6 +232,7 @@ test("OpenLane stable capture merges network VIN in default Deep Capture mode wi
   assert.equal(result.readiness.readyToCapture, true);
   assert.equal(result.readiness.vinStatus, "found");
   assert.equal(result.listing.carfaxUrlStatus, "url_found");
+  assert.equal(result.listing.openlaneMetadata?.networkEvidence?.[0]?.authoritative, true);
   networkObserver.stopOpenLaneNetworkObserver();
 });
 
