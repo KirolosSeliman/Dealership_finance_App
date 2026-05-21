@@ -245,6 +245,7 @@
     const currentBidDebug = buildCurrentBidDebug(safeListing, priceDiagnostics);
     const contradictions = contradictionDiagnostics(listing || {}, priceDiagnostics, safeListing);
     const conditionDebug = conditionCleanupDebug(safeListing);
+    const carfaxSources = carfaxSourceStatus(safeListing);
     return [
       `<p>Page type: ${safeHtml(safeListing.pageType || "-")}</p>`,
       `<p>Capture kind: ${safeHtml(safeListing.captureKind || "-")}</p>`,
@@ -266,6 +267,8 @@
       `<p>Carfax evidence source: ${safeHtml(carfaxEvidenceLabel(safeListing))}</p>`,
       safeListing.carfaxUrlStatus === "text_only" ? `<p>Carfax warning: ${safeHtml("Visible text only; URL was not available in page evidence.")}</p>` : "",
       `<p>Carfax diagnostics: ${safeHtml(carfaxDiagnosticsLabel(safeListing))}</p>`,
+      `<p>Carfax text-only explanation: ${safeHtml(carfaxTextOnlyExplanation(safeListing) || "-")}</p>`,
+      `<p>Carfax source status: ${safeHtml(JSON.stringify(carfaxSources))}</p>`,
       `<p>Network observer: ${safeHtml(networkObserverLabel(deepCaptureRuntime))}</p>`,
       `<p>Network diagnostics: ${safeHtml(networkObserverDiagnosticsLabel(deepCaptureRuntime))}</p>`,
       `<p>Network evidence count: ${safeHtml(String(networkEvidenceCount(safeListing, deepCaptureRuntime)))}</p>`,
@@ -285,6 +288,7 @@
       `<p>Fresh bid panel candidates: ${safeHtml(String(currentBidDebug.freshBidPanelCandidates.length || 0))}</p>`,
       `<p>Bid monitor status: ${safeHtml(currentBidDebug.bidMonitorStatus ? JSON.stringify(currentBidDebug.bidMonitorStatus).slice(0, 180) : "-")}</p>`,
       `<p>Last bid updated at: ${safeHtml(currentBidDebug.lastBidUpdatedAt || "-")}</p>`,
+      `<p>Rejected current bid counts: ${safeHtml(JSON.stringify(currentBidDebug.rejectedCounts || {}))}</p>`,
       priceDiagnostics.rejectedPriceCandidates?.length ? `<p>Rejected price candidates: ${safeHtml(String(priceDiagnostics.rejectedPriceCandidates.length))}</p>` : "",
       priceDiagnostics.rejectedPriceCandidates?.length ? `<ul>${priceDiagnostics.rejectedPriceCandidates.slice(0, 5).map((item) => `<li>${safeHtml(rejectedPriceCandidateLabel(item))}</li>`).join("")}</ul>` : "",
       priceDiagnostics.rejectedOutcomePriceCandidates?.length ? `<p>Rejected outcome price candidates: ${safeHtml(String(priceDiagnostics.rejectedOutcomePriceCandidates.length))}</p>` : "",
@@ -300,8 +304,11 @@
       `<p>Final bid amount: ${safeHtml(moneyOrDash(safeListing.finalBidAmount))}</p>`,
       `<p>Purchase evidence source: ${safeHtml(purchaseEvidenceSource(safeListing))}</p>`,
       `<p>Sold price parser status: ${safeHtml(soldPriceParserStatus(safeListing, priceDiagnostics))}</p>`,
+      `<p>Missing purchase price reason: ${safeHtml(missingPurchasePriceReason(safeListing, priceDiagnostics) || "-")}</p>`,
       `<p>Purchase marker rejected reasons: ${safeHtml(purchaseMarkerRejectedReasons(safeListing).join(", ") || "-")}</p>`,
       `<p>Ignored noisy zones: ${safeHtml(ignoredNoisyZonesLabel(safeListing))}</p>`,
+      `<p>Condition extractor mode: ${safeHtml(conditionDebug.conditionExtractorMode || "-")}</p>`,
+      `<p>Ignored noisy zones count: ${safeHtml(String(conditionDebug.ignoredNoisyZoneCount || 0))}</p>`,
       `<p>Rejected condition lines: ${safeHtml(String(conditionDebug.rejectedConditionLines.length || 0))}</p>`,
       `<p>Section boundary decisions: ${safeHtml(String(conditionDebug.sectionBoundaryDecisions.length || 0))}</p>`,
       `<p>Safe expansion: ${safeHtml(safeExpansion ? `${safeExpansion.clicked?.length || 0} opened / ${safeExpansion.skipped?.length || 0} skipped` : "-")}</p>`,
@@ -486,6 +493,12 @@
       freshBidPanelCandidates,
       bidMonitorStatus: bidLiveMonitor,
       lastBidUpdatedAt: bidLiveMonitor?.updatedAt || bidStabilization.bidUpdatedAt || currentBidEvidence.capturedAt || "",
+      rejectedCounts: {
+        rejectedPriceCandidates: Number((priceDiagnostics.rejectedPriceCandidates || []).length),
+        rejectedOutcomePriceCandidates: Number((priceDiagnostics.rejectedOutcomePriceCandidates || []).length),
+        lowerBidCandidates: Number((priceDiagnostics.lowerBidCandidates || []).length),
+        staleCurrentBidCandidates: Number((priceDiagnostics.staleCurrentBidCandidates || []).length),
+      },
     };
   }
 
@@ -580,11 +593,25 @@
   function conditionCleanupDebug(listing = {}) {
     const debug = listing.extractedFields?.debug || {};
     const diagnostics = debug.conditionDiagnostics || listing.openlaneMetadata?.conditionDetails?.conditionDiagnostics || {};
+    const ignoredZones = ignoredNoisyZones(listing);
+    const rejectedConditionLines = (diagnostics.rejectedConditionLines || []).slice(0, 12);
+    const sectionBoundaryDecisions = (diagnostics.sectionBoundaryDecisions || []).slice(0, 8);
     return {
-      ignoredNoisyZones: ignoredNoisyZones(listing),
-      rejectedConditionLines: (diagnostics.rejectedConditionLines || []).slice(0, 12),
-      sectionBoundaryDecisions: (diagnostics.sectionBoundaryDecisions || []).slice(0, 8),
+      conditionExtractorMode: conditionExtractorMode(listing, diagnostics),
+      ignoredNoisyZones: ignoredZones,
+      ignoredNoisyZoneCount: ignoredZones.length,
+      rejectedConditionLines,
+      rejectedConditionLineCount: rejectedConditionLines.length,
+      sectionBoundaryDecisions,
+      sectionBoundaryDecisionCount: sectionBoundaryDecisions.length,
     };
+  }
+
+  function conditionExtractorMode(listing = {}, diagnostics = {}) {
+    if (diagnostics.conditionExtractorMode) return diagnostics.conditionExtractorMode;
+    if ((diagnostics.sectionBoundaryDecisions || []).length || (diagnostics.rejectedConditionLines || []).length) return "section_ast_with_boundary_cleanup";
+    if (listing.condition || listing.openlaneMetadata?.conditionDetails) return "condition_fields_only";
+    return "not_reported";
   }
 
   function rejectedOutcomePriceCandidates(listing = {}, rejectedPriceCandidates = []) {
@@ -637,6 +664,14 @@
     if (listing.soldPriceCandidate || listing.buyPriceAuction || listing.finalBidAmount) return "price_found";
     if ((priceDiagnostics.rejectedOutcomePriceCandidates || []).length) return "rejected_candidates_only";
     return "missing_sold_price";
+  }
+
+  function missingPurchasePriceReason(listing = {}, priceDiagnostics = buildPriceDiagnostics(listing)) {
+    if (!isPurchaseOutcomeContext(listing)) return "not_purchase_context";
+    if (listing.soldPriceCandidate || listing.buyPriceAuction || listing.finalBidAmount) return "";
+    if ((priceDiagnostics.rejectedOutcomePriceCandidates || []).length) return "only_rejected_purchase_price_candidates";
+    if (!purchaseEvidenceSource(listing)) return "no_purchase_price_evidence";
+    return "purchase_context_without_sold_or_acquisition_price";
   }
 
   function rejectedPriceCandidateLabel(candidate = {}) {
@@ -717,6 +752,25 @@
     const first = evidence?.[0];
     if (!first) return "-";
     return [first.source, first.endpointPattern, first.urlStatus].filter(Boolean).join(" / ") || first.text || first.sourceText || "-";
+  }
+
+  function carfaxSourceStatus(listing = {}) {
+    const safeListing = canonicalListing(listing || {});
+    const diagnostics = safeListing.openlaneMetadata?.carfaxDiagnostics || {};
+    const count = (key) => Number(diagnostics[key] || 0);
+    return {
+      domLink: count("carfaxLinkCandidateCount") > 0,
+      dataAttribute: count("carfaxDataHrefCandidateCount") + count("carfaxDataUrlCandidateCount") + count("carfaxDataReportUrlCandidateCount") > 0,
+      routerOrHydration: count("carfaxRouterLinkCandidateCount") + count("carfaxHydrationJsonCandidateCount") + count("carfaxHtmlZoneCandidateCount") + count("carfaxSafeAttributeCandidateCount") > 0,
+      network: count("carfaxNetworkCandidateCount") > 0,
+      textOnly: safeListing.carfaxUrlStatus === "text_only" || count("carfaxTextOnlyCandidateCount") > 0,
+    };
+  }
+
+  function carfaxTextOnlyExplanation(listing = {}) {
+    const safeListing = canonicalListing(listing || {});
+    if (safeListing.carfaxUrlStatus !== "text_only") return "";
+    return "Visible CARFAX text was found, but no safe URL was exposed in DOM, router metadata, hydration JSON, or allowed network evidence.";
   }
 
   function readinessSummary(listing = {}) {

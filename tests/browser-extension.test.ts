@@ -419,12 +419,31 @@ test("Market Snap copy payload builder returns sanitized readiness and debug evi
   assert.match(JSON.stringify((payload.currentBidDebug as { bidMonitorStatus?: unknown }).bidMonitorStatus), /bid_only_monitor/);
   assert.equal((payload.currentBidDebug as { lastBidUpdatedAt?: string }).lastBidUpdatedAt, "2026-05-20T12:00:01.000Z");
   assert.equal((payload.currentBidDebug as { bidStabilizationAttempts?: number }).bidStabilizationAttempts, 1);
+  assert.deepEqual((payload.currentBidDebug as { rejectedCounts?: unknown }).rejectedCounts, {
+    rejectedPriceCandidates: 2,
+    rejectedOutcomePriceCandidates: 3,
+    lowerBidCandidates: 1,
+    staleCurrentBidCandidates: 1,
+  });
   assert.equal((payload.purchaseOutcomeDebug as { soldPriceParserStatus?: string }).soldPriceParserStatus, "not_purchase_context");
+  assert.equal((payload.purchaseOutcomeDebug as { missingPurchasePriceReason?: string }).missingPurchasePriceReason, "not_purchase_context");
   assert.match(JSON.stringify((payload.purchaseOutcomeDebug as { purchaseMarkerRejectedReasons?: unknown[] }).purchaseMarkerRejectedReasons), /pickup_schedule_not_purchase_outcome/);
   assert.match(JSON.stringify((payload.purchaseOutcomeDebug as { purchaseMarkerSourceZones?: unknown[] }).purchaseMarkerSourceZones), /sellerNotes/);
+  assert.equal((payload.conditionCleanupDebug as { conditionExtractorMode?: string }).conditionExtractorMode, "section_ast_with_boundary_cleanup");
+  assert.equal((payload.conditionCleanupDebug as { rejectedConditionLineCount?: number }).rejectedConditionLineCount, 1);
+  assert.equal((payload.conditionCleanupDebug as { sectionBoundaryDecisionCount?: number }).sectionBoundaryDecisionCount, 1);
+  assert.equal((payload.conditionCleanupDebug as { ignoredNoisyZoneCount?: number }).ignoredNoisyZoneCount, 4);
   assert.match(JSON.stringify((payload.conditionCleanupDebug as { rejectedConditionLines?: unknown[] }).rejectedConditionLines), /bid_history_noise/);
   assert.match(JSON.stringify((payload.conditionCleanupDebug as { sectionBoundaryDecisions?: unknown[] }).sectionBoundaryDecisions), /Mechanical/);
   assert.match(JSON.stringify((payload.carfaxDebug as { carfaxCandidateCounts?: unknown }).carfaxCandidateCounts), /carfaxTextOnlyCandidateCount/);
+  assert.equal((payload.carfaxDebug as { textOnlyExplanation?: string }).textOnlyExplanation, "Visible CARFAX text was found, but no safe URL was exposed in DOM, router metadata, hydration JSON, or allowed network evidence.");
+  assert.deepEqual((payload.carfaxDebug as { sourceStatus?: unknown }).sourceStatus, {
+    domLink: false,
+    dataAttribute: false,
+    routerOrHydration: false,
+    network: false,
+    textOnly: true,
+  });
   assert.match(JSON.stringify((payload.carfaxDebug as { networkObserverMessage?: string }).networkObserverMessage), /safe vehicle JSON but no Carfax\/currentBid candidates/i);
   assert.match(JSON.stringify((payload.contradictionDiagnostics as { classificationContradictions?: unknown[] }).classificationContradictions), /pickup_schedule_not_purchase_outcome/);
   assert.match(JSON.stringify((payload.contradictionDiagnostics as { priceContradictions?: unknown[] }).priceContradictions), /stale_current_bid_candidate/);
@@ -574,9 +593,12 @@ test("Market Snap widget debug UX explains purchased, active, Carfax, network, a
     "networkObserverDiagnosticsLabel",
     "Legacy overrides:",
     "legacyValueOverridden",
+    "canonicalValue",
+    "legacyValue",
     "Q&A/sidebar/market-guide text ignored for canonical fields.",
     "Current bid source:",
     "Current bid source text:",
+    "Rejected current bid counts:",
     "Rejected price candidates:",
     "Rejected outcome price candidates:",
     "Lower bid candidates ignored:",
@@ -589,10 +611,15 @@ test("Market Snap widget debug UX explains purchased, active, Carfax, network, a
     "Network contradictions:",
     "Purchase marker rejected reasons:",
     "Sold price parser status:",
+    "Missing purchase price reason:",
     "Required fields for page type:",
     "Listed price requirement:",
+    "Condition extractor mode:",
     "Rejected condition lines:",
+    "Ignored noisy zones count:",
     "Section boundary decisions:",
+    "Carfax text-only explanation:",
+    "Carfax source status:",
     "Listed price semantics:",
     "Rejected bid count as price:",
     "contradictionDiagnostics",

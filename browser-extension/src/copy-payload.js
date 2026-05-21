@@ -291,6 +291,12 @@
       bidMonitorStatus: bidLiveMonitor,
       lastBidUpdatedAt: bidLiveMonitor?.updatedAt || bidStabilization.bidUpdatedAt || currentBidEvidence.capturedAt || "",
       bidStabilizationAttempts: Number(bidStabilization.bidStabilizationAttempts || 0),
+      rejectedCounts: {
+        rejectedPriceCandidates: Number((priceDiagnostics.rejectedPriceCandidates || []).length),
+        rejectedOutcomePriceCandidates: Number((priceDiagnostics.rejectedOutcomePriceCandidates || []).length),
+        lowerBidCandidates: Number((priceDiagnostics.lowerBidCandidates || []).length),
+        staleCurrentBidCandidates: Number((priceDiagnostics.staleCurrentBidCandidates || []).length),
+      },
       bidStabilization,
     });
   }
@@ -304,6 +310,7 @@
       finalBidAmount: safeListing.finalBidAmount ?? null,
       purchaseEvidenceSource: purchaseEvidenceSource(safeListing),
       soldPriceParserStatus: soldPriceParserStatus(safeListing, priceDiagnostics),
+      missingPurchasePriceReason: missingPurchasePriceReason(safeListing, priceDiagnostics),
       purchaseMarkerRejectedReasons: [...new Set(rejectedMarkers.map((item) => item.rejectedReason || item.rejectionReason).filter(Boolean))].slice(0, 8),
       purchaseMarkerSourceZones: [...new Set(rejectedMarkers.map((item) => item.zone || item.sourceZone || item.marker).filter(Boolean))].slice(0, 8),
       rejectedOutcomePriceCandidates: priceDiagnostics.rejectedOutcomePriceCandidates || [],
@@ -314,18 +321,25 @@
     const safeListing = canonicalListing(listing || {});
     const debug = safeListing.extractedFields?.debug || {};
     const diagnostics = debug.conditionDiagnostics || safeListing.openlaneMetadata?.conditionDetails?.conditionDiagnostics || {};
+    const rejectedConditionLines = (diagnostics.rejectedConditionLines || []).map((item) => ({
+      sourceZone: item.sourceZone || item.zone || "",
+      sourceText: sanitizeText(item.sourceText || item.text || ""),
+      rejectionReason: item.rejectionReason || item.reason || "condition_noise_line",
+    })).slice(0, 12);
+    const sectionBoundaryDecisions = (diagnostics.sectionBoundaryDecisions || []).map((item) => ({
+      sourceZone: item.sourceZone || item.zone || "",
+      startHeading: item.startHeading || item.heading || "",
+      stopHeading: item.stopHeading || item.nextHeading || "",
+    })).slice(0, 8);
+    const noisyZones = ignoredNoisyZones(safeListing);
     return sanitizeDebugValue({
-      ignoredNoisyZones: ignoredNoisyZones(safeListing),
-      rejectedConditionLines: (diagnostics.rejectedConditionLines || []).map((item) => ({
-        sourceZone: item.sourceZone || item.zone || "",
-        sourceText: sanitizeText(item.sourceText || item.text || ""),
-        rejectionReason: item.rejectionReason || item.reason || "condition_noise_line",
-      })).slice(0, 12),
-      sectionBoundaryDecisions: (diagnostics.sectionBoundaryDecisions || []).map((item) => ({
-        sourceZone: item.sourceZone || item.zone || "",
-        startHeading: item.startHeading || item.heading || "",
-        stopHeading: item.stopHeading || item.nextHeading || "",
-      })).slice(0, 8),
+      conditionExtractorMode: conditionExtractorMode(safeListing, diagnostics),
+      ignoredNoisyZones: noisyZones,
+      ignoredNoisyZoneCount: noisyZones.length,
+      rejectedConditionLines,
+      rejectedConditionLineCount: rejectedConditionLines.length,
+      sectionBoundaryDecisions,
+      sectionBoundaryDecisionCount: sectionBoundaryDecisions.length,
     });
   }
 
@@ -337,6 +351,8 @@
       carfaxUrlStatus: safeListing.carfaxUrlStatus || "missing",
       carfaxUrl: safeListing.carfaxUrl || "",
       carfaxCandidateCounts: safeListing.openlaneMetadata?.carfaxDiagnostics || {},
+      sourceStatus: carfaxSourceStatus(safeListing),
+      textOnlyExplanation: carfaxTextOnlyExplanation(safeListing),
       carfaxRejectedReasons: carfaxCandidates
         .map((candidate) => candidate.rejectedReason || candidate.rejectionReason)
         .filter(Boolean)
@@ -547,6 +563,14 @@
     return "missing_sold_price";
   }
 
+  function missingPurchasePriceReason(listing = {}, priceDiagnostics = buildPriceDiagnostics(listing)) {
+    if (!isPurchaseOutcomeContext(listing)) return "not_purchase_context";
+    if (listing.soldPriceCandidate || listing.buyPriceAuction || listing.finalBidAmount) return "";
+    if ((priceDiagnostics.rejectedOutcomePriceCandidates || []).length) return "only_rejected_purchase_price_candidates";
+    if (!purchaseEvidenceSource(listing)) return "no_purchase_price_evidence";
+    return "purchase_context_without_sold_or_acquisition_price";
+  }
+
   function purchaseEvidenceSource(listing = {}) {
     const explicit = listing.openlaneMetadata?.purchaseEconomics?.purchaseEvidenceSource
       || listing.extractedFields?.debug?.purchaseEvidenceSource;
@@ -569,6 +593,30 @@
       .map((item) => item.zone || String(item.marker || "").replace(/_text$/, ""))
       .filter(Boolean);
     return [...new Set([...fromSummary, ...fromEvidence])].slice(0, 8);
+  }
+
+  function conditionExtractorMode(listing = {}, diagnostics = {}) {
+    if (diagnostics.conditionExtractorMode) return diagnostics.conditionExtractorMode;
+    if ((diagnostics.sectionBoundaryDecisions || []).length || (diagnostics.rejectedConditionLines || []).length) return "section_ast_with_boundary_cleanup";
+    if (listing.condition || listing.openlaneMetadata?.conditionDetails) return "condition_fields_only";
+    return "not_reported";
+  }
+
+  function carfaxSourceStatus(listing = {}) {
+    const diagnostics = listing.openlaneMetadata?.carfaxDiagnostics || {};
+    const count = (key) => Number(diagnostics[key] || 0);
+    return {
+      domLink: count("carfaxLinkCandidateCount") > 0,
+      dataAttribute: count("carfaxDataHrefCandidateCount") + count("carfaxDataUrlCandidateCount") + count("carfaxDataReportUrlCandidateCount") > 0,
+      routerOrHydration: count("carfaxRouterLinkCandidateCount") + count("carfaxHydrationJsonCandidateCount") + count("carfaxHtmlZoneCandidateCount") + count("carfaxSafeAttributeCandidateCount") > 0,
+      network: count("carfaxNetworkCandidateCount") > 0,
+      textOnly: listing.carfaxUrlStatus === "text_only" || count("carfaxTextOnlyCandidateCount") > 0,
+    };
+  }
+
+  function carfaxTextOnlyExplanation(listing = {}) {
+    if (listing.carfaxUrlStatus !== "text_only") return "";
+    return "Visible CARFAX text was found, but no safe URL was exposed in DOM, router metadata, hydration JSON, or allowed network evidence.";
   }
 
   function rejectedFieldCandidateItems(listing = {}) {
