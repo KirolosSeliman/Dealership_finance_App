@@ -1,0 +1,46 @@
+{
+  "sourceName": "OpenLane",
+  "listingUrl": "https://app.openlane.ca/vdp/5YFB4RBE9LP030604",
+  "pageType": "active_listing",
+  "captureKind": "observation",
+  "vin": "5YFB4RBE9LP030604",
+  "year": 2020,
+  "make": "Toyota",
+  "model": "Corolla",
+  "trim": "LE",
+  "mileageKm": 87214,
+  "currentBid": 5600,
+  "carfaxUrlStatus": "text_only",
+  "carfaxMentioned": true,
+  "auctionObservation": {
+    "currentBid": 5600,
+    "evidence": [
+      {
+        "field": "currentBid",
+        "value": 5600,
+        "sourceType": "legacy_flat_field",
+        "sourceText": "currentBid: 5600"
+      }
+    ]
+  },
+  "purchaseOutcome": {
+    "evidence": [
+      {
+        "evidenceType": "visible_page_text",
+        "sourceText": "Known history Always view the CARFAX report Previous Accident History"
+      }
+    ]
+  },
+  "condition": {
+    "knownHistory": [
+      "Always view the CARFAX report",
+      "Expected May 28, 2026",
+      "Transport estimate CAD $428 / 185km",
+      "Vehicle location: Montreal, QC"
+    ],
+    "mechanical": [
+      "condition, or safety of any vehicle.",
+      "g"
+    ]
+  }
+}

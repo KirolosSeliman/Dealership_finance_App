@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <body>
+    <aside class="sidebar-navigation">
+      <nav>
+        <h2>Purchases</h2>
+        <a>On hold</a>
+        <a>Closing</a>
+        <a>Purchase history</a>
+      </nav>
+    </aside>
+
+    <main data-testid="vehicle-detail-page" class="vdp-page purchase-detail-page">
+      <section class="vehicle-hero" data-vin="3KPFL4A72HE119966">
+        <div class="gallery" aria-label="Vehicle media">
+          <span class="photo-badge">13 total</span>
+          <span class="video-badge">1 video</span>
+          <img src="https://pub-us.kar-media.com/vehicle/3KPFL4A72HE119966/front.jpg" alt="2017 Kia Forte front" />
+        </div>
+        <h1>2017 Kia Forte 4dr Sdn</h1>
+        <button type="button" aria-label="Copy VIN 3KPFL4A72HE119966">VIN 3KPFL4A72HE119966</button>
+        <dl>
+          <dt>Odometer</dt>
+          <dd>158,569 KM</dd>
+        </dl>
+      </section>
+
+      <section class="purchase-order-history" data-testid="order-history">
+        <h2>Order history</h2>
+        <dl>
+          <dt>Sold price</dt>
+          <dd>$4,000</dd>
+          <dt>Status</dt>
+          <dd>Mark as picked up</dd>
+        </dl>
+        <button type="button">Mark as picked up</button>
+      </section>
+
+      <section class="known-history" data-testid="known-history-panel">
+        <h2>Known history</h2>
+        <a class="carfax-link" href="/vehicle-history/carfax/3KPFL4A72HE119966" aria-label="Always view the CARFAX report">
+          Always view the CARFAX report
+        </a>
+        <p>Previous Accident History</p>
+      </section>
+
+      <section class="condition-report" data-testid="condition-report">
+        <h2>Condition report</h2>
+        <section data-condition-section="mechanical">
+          <h3>Mechanical</h3>
+          <p>condition, or safety of any vehicle.</p>
+          <p>me</p>
+        </section>
+        <section data-condition-section="interior">
+          <h3>Interior</h3>
+          <p>Roof (rust)</p>
+          <p>Rocker Panel (dent)</p>
+        </section>
+      </section>
+
+      <section class="bid-history">
+        <h2>Full bid history</h2>
+        <p>Current bid $31,500</p>
+        <p>15 Bids</p>
+      </section>
+
+      <section class="transport-estimate">
+        <h2>Transport estimate</h2>
+        <p>CAD $378 / 211km</p>
+      </section>
+    </main>
+  </body>
+</html>

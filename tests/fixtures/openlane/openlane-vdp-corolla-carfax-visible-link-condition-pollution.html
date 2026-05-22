@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <body>
+    <aside class="sidebar-navigation">
+      <nav>
+        <a>Home</a>
+        <a>Buying</a>
+        <a>Watchlist</a>
+        <a>Transport</a>
+      </nav>
+    </aside>
+
+    <main data-testid="vehicle-detail-page" class="vdp-page active-listing-page">
+      <section class="vehicle-hero" data-vin="5YFB4RBE9LP030604">
+        <div class="gallery" aria-label="Vehicle media">
+          <span class="photo-badge">24 photos</span>
+          <img src="https://pub-us.kar-media.com/vehicle/5YFB4RBE9LP030604/front.jpg" alt="2020 Toyota Corolla front" />
+        </div>
+        <h1>2020 Toyota Corolla LE</h1>
+        <button type="button" aria-label="Copy VIN 5YFB4RBE9LP030604">VIN 5YFB4RBE9LP030604</button>
+        <dl>
+          <dt>Odometer</dt>
+          <dd>87,214 KM</dd>
+          <dt>Location</dt>
+          <dd>Montreal, QC</dd>
+        </dl>
+      </section>
+
+      <section class="bid-panel" data-testid="bid-panel-current">
+        <h2>Current bid</h2>
+        <div data-testid="live-offer-row">
+          <span>Current bid</span>
+          <strong>$5,600</strong>
+          <span>Under 1 min</span>
+        </div>
+        <p>18 Bids</p>
+      </section>
+
+      <section class="known-history" data-testid="known-history-panel">
+        <h2>Known history</h2>
+        <a class="carfax-link" href="/vehicle-history/carfax/5YFB4RBE9LP030604" aria-label="Always view the CARFAX report">
+          Always view the CARFAX report
+        </a>
+        <p>Any Previous Damage Exceeding $3,000</p>
+        <p>Previous Accident History</p>
+        <p>Expected May 28, 2026</p>
+        <p>Transport estimate CAD $428 / 185km</p>
+        <p>Vehicle location: Montreal, QC</p>
+        <p>OPENLANE does not guarantee the condition, or safety of any vehicle.</p>
+      </section>
+
+      <section class="condition-report" data-testid="condition-report">
+        <h2>Condition report</h2>
+        <section data-condition-section="mechanical">
+          <h3>Mechanical</h3>
+          <p>condition, or safety of any vehicle.</p>
+          <p>g</p>
+          <p>Engine starts and runs</p>
+        </section>
+        <section data-condition-section="exterior">
+          <h3>Exterior</h3>
+          <p>Front bumper scuffed</p>
+          <p>Interior tab selected</p>
+        </section>
+        <section data-condition-section="interior">
+          <h3>Interior</h3>
+          <p>Exterior panel scratches</p>
+          <p>Seats show wear</p>
+        </section>
+        <section data-condition-section="obd2">
+          <h3>OBD2 scan</h3>
+          <p>This vehicle was not scanned</p>
+        </section>
+      </section>
+    </main>
+
+    <footer class="sticky-bid-footer" role="contentinfo">
+      <div class="active-bid-bar" data-testid="sticky-current-bid">
+        <span>Current bid</span>
+        <strong>$5,600</strong>
+      </div>
+    </footer>
+  </body>
+</html>
