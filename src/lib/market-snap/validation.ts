@@ -479,6 +479,14 @@ function enforceCaptureContract(value: Partial<z.infer<typeof marketListingPaylo
     });
   }
 
+  if (activeObservationPages.has(value.pageType ?? "") && hasMeaningfulPurchaseOutcomePayload(value)) {
+    context.addIssue({
+      code: "custom",
+      path: ["purchaseOutcome"],
+      message: "Active OpenLane listing pages cannot carry purchaseOutcome fields or evidence.",
+    });
+  }
+
   if (isOpenLanePricePayload(value) && hasOutcomePrice && value.pageType && !trustedOutcomePages.has(value.pageType)) {
     context.addIssue({
       code: "custom",
@@ -628,6 +636,29 @@ function enforceCaptureContract(value: Partial<z.infer<typeof marketListingPaylo
 
 function isOpenLanePricePayload(value: Partial<z.infer<typeof marketListingPayloadBaseSchema>>) {
   return String(value.sourceName ?? "").toLowerCase().includes("openlane") || Boolean(value.pageType);
+}
+
+function hasMeaningfulPurchaseOutcomePayload(value: Partial<z.infer<typeof marketListingPayloadBaseSchema>>): boolean {
+  const canonicalState = isPlainRecord(value.openlaneCanonicalState) ? value.openlaneCanonicalState : {};
+  const legacyCanonicalState = isPlainRecord(value.canonicalOpenLaneState) ? value.canonicalOpenLaneState : {};
+  return [
+    value.purchaseOutcome,
+    canonicalState.purchaseOutcome,
+    legacyCanonicalState.purchaseOutcome,
+  ].some((candidate) => isPlainRecord(candidate) && hasMeaningfulRecordValue(candidate));
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function hasMeaningfulRecordValue(record: Record<string, unknown>): boolean {
+  return Object.values(record).some((value) => {
+    if (value === undefined || value === null || value === "") return false;
+    if (Array.isArray(value)) return value.some((item) => item !== undefined && item !== null && item !== "");
+    if (isPlainRecord(value)) return hasMeaningfulRecordValue(value);
+    return true;
+  });
 }
 
 function priceEvidenceForField(

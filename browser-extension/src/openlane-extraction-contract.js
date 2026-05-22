@@ -64,6 +64,10 @@
     const debug = listing.extractedFields?.debug || {};
     const mediaFiltering = listing.openlaneMetadata?.mediaFiltering || {};
     const conditionDetails = listing.openlaneMetadata?.conditionDetails || {};
+    const outcomeContext = isOutcomeContext({
+      pageType: listing.pageType,
+      captureKind: listing.captureKind,
+    });
     return {
       pageContext: compact({
         pageType: listing.pageType,
@@ -99,7 +103,7 @@
         timeRemaining: listing.openlaneMetadata?.timeRemaining,
         evidence: observationEvidence(listing, debug),
       }),
-      purchaseOutcome: compact({
+      purchaseOutcome: outcomeContext ? compact({
         buyPriceAuction: listing.buyPriceAuction,
         soldPriceCandidate: listing.soldPriceCandidate,
         acceptedAmount: listing.acceptedAmount,
@@ -110,7 +114,7 @@
         totalInvoiceAmount: listing.totalInvoiceAmount,
         finalAcquisitionCost: listing.finalAcquisitionCost,
         evidence: listing.outcomeEvidence || [],
-      }),
+      }) : {},
       condition: compact({
         knownHistoryItems: conditionDetails.knownHistoryItems || listing.declarations,
         safetyDisclosures: conditionDetails.safetyDisclosures || listing.safetyDisclosures || listing.structuralAnnouncements,
@@ -270,6 +274,14 @@
     const carfaxVisible = Boolean(firstDefined(carfaxSource.visible, carfaxSource.mentioned, listing.carfaxMentioned, listing.carfaxAvailableLegacy, listing.carfaxAvailable, carfaxSource.available));
     const carfaxStatus = normalizeCarfaxUrlStatus(firstDefined(carfaxSource.urlStatus, carfaxSource.status, listing.carfaxUrlStatus), carfaxUrl, carfaxMentioned || carfaxVisible);
     const carfaxActionable = Boolean(carfaxUrl) && carfaxStatus === "resolved_url";
+    const pageContext = compact({
+      pageType: firstDefined(pageContextSource.pageType, listing.pageType),
+      captureKind: firstDefined(pageContextSource.captureKind, listing.captureKind),
+      outcomeConfidence: firstDefined(pageContextSource.outcomeConfidence, listing.outcomeConfidence),
+      evidence: cappedArray(firstDefined(pageContextSource.evidence, listing.openlaneMetadata?.classification?.evidence)),
+      ignoredEvidence: cappedArray(firstDefined(pageContextSource.ignoredEvidence, listing.openlaneMetadata?.classification?.ignoredEvidence, debug.ignoredEvidence)),
+    });
+    const outcomeContext = isOutcomeContext(pageContext);
     const canonical = {
       schemaVersion: firstDefined(source.schemaVersion, listing.schemaVersion, "openlane-canonical-v2"),
       capturedAt: firstDefined(source.capturedAt, listing.capturedAt, new Date().toISOString()),
@@ -293,13 +305,7 @@
           listing.extractedFields?.mileageEvidence,
         ].filter(Boolean))),
       }),
-      pageContext: compact({
-        pageType: firstDefined(pageContextSource.pageType, listing.pageType),
-        captureKind: firstDefined(pageContextSource.captureKind, listing.captureKind),
-        outcomeConfidence: firstDefined(pageContextSource.outcomeConfidence, listing.outcomeConfidence),
-        evidence: cappedArray(firstDefined(pageContextSource.evidence, listing.outcomeEvidence, listing.openlaneMetadata?.classification?.evidence)),
-        ignoredEvidence: cappedArray(firstDefined(pageContextSource.ignoredEvidence, listing.openlaneMetadata?.classification?.ignoredEvidence, debug.ignoredEvidence)),
-      }),
+      pageContext,
       activeAuction: compact({
         currentBid: firstDefined(activeAuctionSource.currentBid, listing.currentBid),
         currentOffer: firstDefined(activeAuctionSource.currentOffer, listing.currentOffer),
@@ -309,7 +315,7 @@
         rejectedCandidates: cappedArray(firstDefined(activeAuctionSource.rejectedCandidates, debug.priceCandidates?.filter((candidate) => candidate?.rejectedReason || candidate?.rejectionReason))),
         staleCandidates: cappedArray(firstDefined(activeAuctionSource.staleCandidates, debug.staleCurrentBidCandidates)),
       }),
-      purchaseOutcome: compact({
+      purchaseOutcome: outcomeContext ? compact({
         soldPriceCandidate: firstDefined(purchaseOutcomeSource.soldPriceCandidate, listing.soldPriceCandidate),
         buyPriceAuction: firstDefined(purchaseOutcomeSource.buyPriceAuction, listing.buyPriceAuction),
         finalBidAmount: firstDefined(purchaseOutcomeSource.finalBidAmount, listing.finalBidAmount),
@@ -319,7 +325,7 @@
         finalAcquisitionCost: firstDefined(purchaseOutcomeSource.finalAcquisitionCost, listing.finalAcquisitionCost),
         evidence: cappedArray(firstDefined(purchaseOutcomeSource.evidence, listing.outcomeEvidence, listing.fieldEvidence?.soldPriceCandidate)),
         rejectedCandidates: cappedArray(firstDefined(purchaseOutcomeSource.rejectedCandidates, debug.rejectedPurchaseOutcomeCandidates, debug.rejectedOutcomePriceCandidates)),
-      }),
+      }) : {},
       carfax: compact({
         status: carfaxStatus,
         urlStatus: carfaxStatus,
@@ -601,6 +607,7 @@
     const media = canonical.media || {};
     const network = canonical.network || {};
     const readiness = canonical.readiness || {};
+    const outcomeContext = isOutcomeContext(pageContext);
 
     setCanonical(next, "vin", identity.vin);
     setCanonical(next, "year", identity.year);
@@ -618,13 +625,17 @@
     setCanonical(next, "currentOffer", activeAuction.currentOffer);
     setCanonical(next, "bestOffer", activeAuction.bestOffer);
     setCanonical(next, "buyNowPrice", activeAuction.buyNowPrice);
-    setCanonical(next, "soldPriceCandidate", purchaseOutcome.soldPriceCandidate);
-    setCanonical(next, "buyPriceAuction", purchaseOutcome.buyPriceAuction);
-    setCanonical(next, "finalBidAmount", purchaseOutcome.finalBidAmount);
-    setCanonical(next, "acceptedAmount", purchaseOutcome.acceptedAmount);
-    setCanonical(next, "negotiatedAmount", purchaseOutcome.negotiatedAmount);
-    setCanonical(next, "totalInvoiceAmount", purchaseOutcome.totalInvoiceAmount);
-    setCanonical(next, "finalAcquisitionCost", purchaseOutcome.finalAcquisitionCost);
+    if (outcomeContext) {
+      setCanonical(next, "soldPriceCandidate", purchaseOutcome.soldPriceCandidate);
+      setCanonical(next, "buyPriceAuction", purchaseOutcome.buyPriceAuction);
+      setCanonical(next, "finalBidAmount", purchaseOutcome.finalBidAmount);
+      setCanonical(next, "acceptedAmount", purchaseOutcome.acceptedAmount);
+      setCanonical(next, "negotiatedAmount", purchaseOutcome.negotiatedAmount);
+      setCanonical(next, "totalInvoiceAmount", purchaseOutcome.totalInvoiceAmount);
+      setCanonical(next, "finalAcquisitionCost", purchaseOutcome.finalAcquisitionCost);
+    } else {
+      clearLegacyPurchaseOutcome(next);
+    }
     setCanonical(next, "carfaxUrlStatus", legacyCarfaxUrlStatus(carfax.urlStatus || carfax.status));
     setCanonical(next, "carfaxUrl", carfax.url);
     setCanonical(next, "carfaxAvailable", Boolean(carfax.actionable));
@@ -640,12 +651,12 @@
 
     const previousPriceSemantics = next.priceSemantics || {};
     next.priceSemantics = compact({
-      soldPriceCandidate: purchaseOutcome.soldPriceCandidate !== undefined ? "candidate_wholesale_label" : undefined,
-      finalBidAmount: purchaseOutcome.finalBidAmount !== undefined ? "wholesale_label" : undefined,
-      acceptedAmount: purchaseOutcome.acceptedAmount !== undefined ? "wholesale_label" : undefined,
-      buyPriceAuction: purchaseOutcome.buyPriceAuction !== undefined ? "acquisition_cost" : undefined,
-      totalInvoiceAmount: purchaseOutcome.totalInvoiceAmount !== undefined ? "acquisition_cost" : undefined,
-      finalAcquisitionCost: purchaseOutcome.finalAcquisitionCost !== undefined ? "acquisition_cost" : undefined,
+      soldPriceCandidate: outcomeContext && purchaseOutcome.soldPriceCandidate !== undefined ? "candidate_wholesale_label" : undefined,
+      finalBidAmount: outcomeContext && purchaseOutcome.finalBidAmount !== undefined ? "wholesale_label" : undefined,
+      acceptedAmount: outcomeContext && purchaseOutcome.acceptedAmount !== undefined ? "wholesale_label" : undefined,
+      buyPriceAuction: outcomeContext && purchaseOutcome.buyPriceAuction !== undefined ? "acquisition_cost" : undefined,
+      totalInvoiceAmount: outcomeContext && purchaseOutcome.totalInvoiceAmount !== undefined ? "acquisition_cost" : undefined,
+      finalAcquisitionCost: outcomeContext && purchaseOutcome.finalAcquisitionCost !== undefined ? "acquisition_cost" : undefined,
       ...previousPriceSemantics,
       listedPrice: isActiveObservationContext(pageContext) && activeAuction.currentBid !== undefined && activeAuction.buyNowPrice === undefined ? "observation_alias_current_bid" : previousPriceSemantics.listedPrice,
       currentBid: activeAuction.currentBid !== undefined ? "observation" : previousPriceSemantics.currentBid,
@@ -658,7 +669,7 @@
     next.identity = compact({ ...(next.identity || {}), ...identity });
     next.auctionObservation = compact({ ...(next.auctionObservation || {}), ...activeAuction });
     next.activeAuction = compact({ ...(next.activeAuction || {}), ...activeAuction });
-    next.purchaseOutcome = compact({ ...(next.purchaseOutcome || {}), ...purchaseOutcome });
+    next.purchaseOutcome = outcomeContext ? compact({ ...(next.purchaseOutcome || {}), ...purchaseOutcome }) : {};
     next.carfax = compact({ ...(next.carfax || {}), ...carfax });
     next.condition = compact({ ...(next.condition || {}), ...condition });
     next.media = compact({ ...(next.media || {}), ...media });
@@ -696,6 +707,31 @@
   function isActiveObservationContext(pageContext = {}) {
     return /active_listing|watchlist/i.test(String(pageContext.pageType || ""))
       || /observation/i.test(String(pageContext.captureKind || ""));
+  }
+
+  function isOutcomeContext(pageContext = {}) {
+    return /purchase_detail|purchase_list|post_sale|fee_details|purchase_info/i.test(String(pageContext.pageType || ""))
+      || /candidate_outcome|verified_outcome/i.test(String(pageContext.captureKind || ""));
+  }
+
+  function clearLegacyPurchaseOutcome(target) {
+    for (const field of [
+      "soldPriceCandidate",
+      "buyPriceAuction",
+      "finalBidAmount",
+      "acceptedAmount",
+      "negotiatedAmount",
+      "totalInvoiceAmount",
+      "finalAcquisitionCost",
+      "outcomeEvidence",
+    ]) {
+      delete target[field];
+    }
+    if (target.priceSemantics) {
+      for (const field of ["soldPriceCandidate", "finalBidAmount", "acceptedAmount", "buyPriceAuction", "totalInvoiceAmount", "finalAcquisitionCost"]) {
+        delete target.priceSemantics[field];
+      }
+    }
   }
 
   function firstDefined(...values) {

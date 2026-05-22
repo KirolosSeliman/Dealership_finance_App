@@ -1439,11 +1439,8 @@ test("OpenLane classifier ignores sidebar and footer purchase noise without a re
 });
 
 test("OpenLane classifier rejects weak pickup, paid-off, and Carfax notes on active VDP pages", () => {
-  const pickupInstructions = classifier.classifyOpenLanePageFromHtml(
-    fixture("openlane-vdp-active-pickup-instructions-not-purchase.html"),
-    "https://app.openlane.ca/vdp/JM3KFBDM1L0999999",
-  );
-  const paidOffCarfaxNote = classifier.classifyOpenLanePageFromHtml(`
+  const pickupHtml = fixture("openlane-vdp-active-pickup-instructions-not-purchase.html");
+  const paidOffHtml = `
     <main data-testid="vehicle-detail-page">
       <section class="vehicle-hero" data-vin="KNAE55LC7J6040713">
         <h1>2018 Kia Stinger GT</h1>
@@ -1456,7 +1453,11 @@ test("OpenLane classifier rejects weak pickup, paid-off, and Carfax notes on act
         <p>Paid Off. Please re-read the CARFAX report. Vehicle can be picked up Monday - Friday by appointment.</p>
       </section>
     </main>
-  `, "https://app.openlane.ca/vdp/KNAE55LC7J6040713");
+  `;
+  const pickupInstructions = classifier.classifyOpenLanePageFromHtml(pickupHtml, "https://app.openlane.ca/vdp/JM3KFBDM1L0999999");
+  const paidOffCarfaxNote = classifier.classifyOpenLanePageFromHtml(paidOffHtml, "https://app.openlane.ca/vdp/KNAE55LC7J6040713");
+  const mazdaActive = extractor.extractOpenLaneFixture(pickupHtml, "https://app.openlane.ca/vdp/JM3KFBDM1L0999999");
+  const stingerActive = extractor.extractOpenLaneFixture(paidOffHtml, "https://app.openlane.ca/vdp/KNAE55LC7J6040713");
 
   assert.equal(pickupInstructions.pageType, "active_listing");
   assert.equal(pickupInstructions.captureKind, "observation");
@@ -1464,6 +1465,10 @@ test("OpenLane classifier rejects weak pickup, paid-off, and Carfax notes on act
   assert.equal(paidOffCarfaxNote.pageType, "active_listing");
   assert.equal(paidOffCarfaxNote.captureKind, "observation");
   assert.ok(paidOffCarfaxNote.ignoredEvidence?.some((item) => item.rejectedReason === "weak_purchase_marker_in_non_purchase_context" || item.rejectedReason === "weak_purchase_marker_without_order_history_or_sold_price"));
+  assert.deepEqual((mazdaActive.openlaneCanonicalState as { purchaseOutcome?: Record<string, unknown> }).purchaseOutcome || {}, {});
+  assert.deepEqual((stingerActive.openlaneCanonicalState as { purchaseOutcome?: Record<string, unknown> }).purchaseOutcome || {}, {});
+  assert.equal(mazdaActive.soldPriceCandidate, undefined);
+  assert.equal(stingerActive.soldPriceCandidate, undefined);
 });
 
 test("OpenLane purchased VDP extracts sold price as outcome and ignores transport estimate as price", () => {

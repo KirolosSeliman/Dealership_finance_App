@@ -139,6 +139,29 @@ test("OpenLane canonical state derives active listing aliases and clean conditio
   assert.equal((legacy.openlaneCanonicalState as { mlFeatures?: { activeCurrentBid?: number } }).mlFeatures?.activeCurrentBid, 13_200);
 });
 
+test("OpenLane canonical state quarantines purchase outcome evidence on active listings", () => {
+  const canonical = contract.createCanonicalOpenLaneState({
+    pageContext: {
+      pageType: "active_listing",
+      captureKind: "observation",
+      evidence: [{ evidenceType: "classifier", sourceText: "Active listing VDP" }],
+    },
+    activeAuction: {
+      currentBid: 5600,
+      evidence: [{ field: "currentBid", sourceType: "bid_panel", sourceText: "Current bid $5,600" }],
+    },
+    purchaseOutcome: {
+      evidence: [{ evidenceType: "visible_page_text", sourceText: "Always view the CARFAX report" }],
+      soldPriceCandidate: 5600,
+    },
+  });
+
+  assert.equal((canonical as { purchaseOutcome?: { soldPriceCandidate?: number } }).purchaseOutcome?.soldPriceCandidate, undefined);
+  assert.deepEqual((canonical as { purchaseOutcome?: { evidence?: unknown[] } }).purchaseOutcome?.evidence ?? [], []);
+  assert.match(JSON.stringify((canonical as { pageContext?: { evidence?: unknown[] } }).pageContext?.evidence ?? []), /Active listing VDP/);
+  assert.match(JSON.stringify((canonical as { activeAuction?: { evidence?: unknown[] } }).activeAuction?.evidence ?? []), /Current bid \$5,600/);
+});
+
 test("OpenLane canonical state can be normalized from an existing extraction contract payload", () => {
   const listing = contract.applyOpenLaneExtractionContract({
     sourceName: "OpenLane",

@@ -1043,6 +1043,40 @@ test("Market Snap validation rejects outcome prices on unsupported OpenLane page
   assert.equal(result.success, false);
 });
 
+test("Market Snap validation rejects purchaseOutcome evidence on active OpenLane observations", () => {
+  const result = marketListingPayloadSchema.safeParse({
+    organizationId,
+    sourceName: "OpenLane",
+    sourceType: "auction",
+    pageType: "active_listing",
+    captureKind: "observation",
+    title: "2020 Toyota Corolla LE",
+    year: 2020,
+    make: "Toyota",
+    model: "Corolla",
+    vin: "5YFB4RBE9LP030604",
+    currentBid: 5600,
+    purchaseOutcome: {
+      evidence: [{
+        evidenceType: "visible_page_text",
+        sourceText: "Always view the CARFAX report",
+      }],
+    },
+    openlaneCanonicalState: {
+      pageContext: { pageType: "active_listing", captureKind: "observation" },
+      purchaseOutcome: {
+        evidence: [{ evidenceType: "visible_page_text", sourceText: "Pickup schedule" }],
+      },
+    },
+    priceSemantics: {
+      currentBid: "observation",
+    },
+  });
+
+  assert.equal(result.success, false);
+  assert.match(JSON.stringify(result.error?.issues), /purchaseOutcome/i);
+});
+
 test("Market Snap validation rejects current bid semantics marked as label", () => {
   const result = marketListingPayloadSchema.safeParse({
     organizationId,

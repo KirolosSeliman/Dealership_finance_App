@@ -23,14 +23,7 @@
       }
     ]
   },
-  "purchaseOutcome": {
-    "evidence": [
-      {
-        "evidenceType": "visible_page_text",
-        "sourceText": "Known history Always view the CARFAX report Previous Accident History"
-      }
-    ]
-  },
+  "purchaseOutcome": {},
   "condition": {
     "knownHistory": [
       "Always view the CARFAX report",

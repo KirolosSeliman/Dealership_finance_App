@@ -21,7 +21,7 @@ test("current live page fixtures preserve Toyota Corolla active listing evidence
   assert.equal(payload.captureKind, "observation");
   assert.equal(payload.vin, "5YFB4RBE9LP030604");
   assert.equal(payload.currentBid, 5_600);
-  assert.match(JSON.stringify(payload.purchaseOutcome), /visible_page_text|Always view the CARFAX report/);
+  assert.deepEqual(payload.purchaseOutcome, {});
   assert.match(JSON.stringify(payload.auctionObservation), /legacy_flat_field/);
 
   assert.match(bidHtml, /data-testid="bid-panel-current"/);
