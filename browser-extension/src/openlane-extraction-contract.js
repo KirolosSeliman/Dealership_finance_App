@@ -144,6 +144,7 @@
         available: listing.carfaxAvailable,
         url: listing.carfaxUrl,
         urlStatus: listing.carfaxUrlStatus || (listing.carfaxUrl ? "url_found" : listing.carfaxAvailable ? "text_only" : "missing"),
+        source: listing.carfax?.source,
         evidence: carfaxEvidence(listing),
       }),
       debug: compact({
@@ -452,9 +453,9 @@
     const items = cappedArray(evidence, 8);
     const source = String(items.find((item) => item?.url)?.source || items[0]?.source || "");
     if (/network/i.test(source)) return "network";
-    if (/link_href|href\b/i.test(source)) return "dom_link";
-    if (/data_href|data_url|data_report_url|safe_dom_attributes/i.test(source)) return "data_attribute";
-    if (/hydration_json|html_carfax_zone|html_node|html_attributes|router/i.test(source)) return "router_or_hydration";
+    if (/link_href|href\b/i.test(source)) return "dom_visible_anchor";
+    if (/data_href|data_url|data_report_url|safe_dom_attributes/i.test(source)) return "dom_data_href";
+    if (/hydration_json|html_carfax_zone|html_node|html_attributes|router/i.test(source)) return "router_metadata";
     if (status === "text_only") return "visible_text";
     return "none";
   }
@@ -793,7 +794,10 @@
       post_sale_page: 8,
       network_json: 8,
       explicit_dom_attribute: 7,
+      dom_visible_anchor: 7,
       header_chip: 6,
+      dom_data_href: 6,
+      router_metadata: 6,
       safe_dom_attribute: 5,
       dom_label: 4,
       safe_expansion: 3,
@@ -811,7 +815,11 @@
     if (field === "mileageKm" && listing.extractedFields?.mileageEvidence) return "dom_label";
     if (["buyPriceAuction", "totalInvoiceAmount", "finalAcquisitionCost"].includes(field) && listing.pageType === "fee_details") return "fee_page";
     if (["soldPriceCandidate", "acceptedAmount", "finalBidAmount"].includes(field) && listing.pageType === "post_sale") return "post_sale_page";
-    if (field === "carfaxUrl" || field === "carfaxUrlStatus") return listing.carfaxUrl ? "safe_dom_attribute" : "dom_label";
+    if (field === "carfaxUrl" || field === "carfaxUrlStatus") {
+      const carfaxSource = String(listing.carfax?.sourceType || listing.carfax?.source || "");
+      if (/dom_visible_anchor|dom_data_href|router_metadata|network/i.test(carfaxSource)) return carfaxSource;
+      return listing.carfaxUrl ? "safe_dom_attribute" : "dom_label";
+    }
     return "dom_label";
   }
 
@@ -819,7 +827,13 @@
     if (field === "vin") return listing.extractedFields?.vinEvidence?.sourceText || structured.identity?.evidence?.[0]?.sourceText;
     if (field === "mileageKm") return listing.extractedFields?.mileageEvidence?.sourceText || structured.identity?.evidence?.[1]?.sourceText;
     if (field === "conditionReportText") return structured.condition?.conditionReportText;
-    if (field === "carfaxUrl" || field === "carfaxUrlStatus") return listing.carfax?.evidence?.[0]?.sourceText || listing.carfaxUrl || listing.carfaxUrlStatus;
+    if (field === "carfaxUrl" || field === "carfaxUrlStatus") {
+      return listing.carfax?.evidence?.[0]?.sourceText
+        || structured.carfax?.evidence?.[0]?.sourceText
+        || listing.openlaneMetadata?.carfaxEvidence?.[0]?.sourceText
+        || listing.carfaxUrl
+        || listing.carfaxUrlStatus;
+    }
     return String(listing[field] ?? "");
   }
 

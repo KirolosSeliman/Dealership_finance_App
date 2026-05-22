@@ -409,6 +409,35 @@ test("OpenLane CARFAX resolver recovers router metadata and strips sensitive que
   assert.doesNotMatch(String(sensitiveQuery.carfaxUrl), /secret-token|token=/i);
 });
 
+test("OpenLane CARFAX resolver prioritizes visible Known history anchors from current live fixtures", () => {
+  const corolla = extractor.extractOpenLaneFixture(
+    fixture("openlane-vdp-corolla-carfax-visible-link-condition-pollution.html"),
+    "https://app.openlane.ca/vdp/5YFB4RBE9LP030604",
+  );
+  const kia = extractor.extractOpenLaneFixture(
+    fixture("openlane-vdp-kia-purchase-carfax-visible-link-sold-price.html"),
+    "https://app.openlane.ca/vdp/3KPFL4A72HE119966",
+  );
+  const corollaFieldEvidence = corolla.fieldEvidence as Record<string, Array<{ sourceType?: string; sourceText?: string }>>;
+  const kiaFieldEvidence = kia.fieldEvidence as Record<string, Array<{ sourceType?: string; sourceText?: string }>>;
+  const corollaCanonical = corolla.openlaneCanonicalState as { carfax?: { url?: string; source?: string; urlResolved?: boolean } };
+  const kiaCanonical = kia.openlaneCanonicalState as { carfax?: { url?: string; source?: string; urlResolved?: boolean } };
+
+  assert.equal(corolla.carfaxUrl, "https://app.openlane.ca/vehicle-history/carfax/5YFB4RBE9LP030604");
+  assert.equal(corolla.carfaxUrlStatus, "url_found");
+  assert.equal(kia.carfaxUrl, "https://app.openlane.ca/vehicle-history/carfax/3KPFL4A72HE119966");
+  assert.equal(kia.carfaxUrlStatus, "url_found");
+  assert.equal(corollaCanonical.carfax?.url, corolla.carfaxUrl);
+  assert.equal(kiaCanonical.carfax?.url, kia.carfaxUrl);
+  assert.equal(corollaCanonical.carfax?.urlResolved, true);
+  assert.equal(kiaCanonical.carfax?.urlResolved, true);
+  assert.equal(corollaCanonical.carfax?.source, "dom_visible_anchor");
+  assert.equal(kiaCanonical.carfax?.source, "dom_visible_anchor");
+  assert.equal(corollaFieldEvidence.carfaxUrl?.[0]?.sourceType, "dom_visible_anchor");
+  assert.equal(kiaFieldEvidence.carfaxUrl?.[0]?.sourceType, "dom_visible_anchor");
+  assert.match(String(corollaFieldEvidence.carfaxUrl?.[0]?.sourceText || ""), /Always view the CARFAX report/);
+});
+
 test("OpenLane CARFAX status is explicit for button text and missing pages", () => {
   const textOnly = extractor.extractOpenLaneFixture(`
     <main class="vdp-page">
@@ -485,7 +514,7 @@ test("OpenLane CARFAX safe URL semantics reject unsafe or fake report URLs", () 
   assert.equal((safe as { carfax?: { urlStatus?: string; urlResolved?: boolean; actionable?: boolean; source?: string } }).carfax?.urlStatus, "resolved_url");
   assert.equal((safe as { carfax?: { urlResolved?: boolean; actionable?: boolean } }).carfax?.urlResolved, true);
   assert.equal((safe as { carfax?: { urlResolved?: boolean; actionable?: boolean } }).carfax?.actionable, true);
-  assert.equal((safe as { carfax?: { source?: string } }).carfax?.source, "dom_link");
+  assert.equal((safe as { carfax?: { source?: string } }).carfax?.source, "dom_visible_anchor");
   assert.doesNotMatch(String(safe.carfaxUrl), /token=|secret/i);
 });
 

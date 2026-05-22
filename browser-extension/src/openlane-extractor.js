@@ -1405,7 +1405,8 @@
     for (const evidence of extractCarfaxEvidenceFromHtml(doc.__openlaneHtml || "")) add("html_node", evidence);
     add("html_attributes", extractAttributeText(doc.__openlaneHtml || ""));
     add("visible_text", text);
-    const withUrl = candidates.find((candidate) => candidate.url);
+    const withUrl = chooseBestCarfaxCandidate(candidates);
+    const orderedCandidates = orderCarfaxCandidates(candidates, withUrl);
     const carfaxUrl = withUrl ? absoluteUrl(withUrl.url, href) : undefined;
     const carfaxMentioned = candidates.length > 0 || /carfax/i.test(text);
     const carfaxActionable = Boolean(carfaxUrl);
@@ -1425,11 +1426,41 @@
         urlStatus: carfaxUrl ? "resolved_url" : carfaxMentioned ? "text_only" : "not_found",
         url: carfaxUrl,
         source,
+        sourceType: source,
         confidenceScore: withUrl?.confidenceScore || (carfaxMentioned ? 50 : 0),
       },
-      carfaxEvidence: candidates.slice(0, 8),
+      carfaxEvidence: orderedCandidates.slice(0, 8),
       carfaxDiagnostics: buildCarfaxDiagnostics(candidates, carfaxUrl, carfaxMentioned),
     };
+  }
+
+  function chooseBestCarfaxCandidate(candidates = []) {
+    return [...candidates]
+      .filter((candidate) => candidate?.url)
+      .sort((a, b) => carfaxSourcePriority(b.source) - carfaxSourcePriority(a.source) || (b.confidenceScore || 0) - (a.confidenceScore || 0))[0];
+  }
+
+  function orderCarfaxCandidates(candidates = [], selected) {
+    const ordered = [...candidates].sort((a, b) => {
+      const aSelected = selected && a === selected ? 1 : 0;
+      const bSelected = selected && b === selected ? 1 : 0;
+      return bSelected - aSelected || carfaxSourcePriority(b.source) - carfaxSourcePriority(a.source) || (b.confidenceScore || 0) - (a.confidenceScore || 0);
+    });
+    return ordered;
+  }
+
+  function carfaxSourcePriority(source) {
+    const text = String(source || "");
+    if (/link_href/i.test(text)) return 100;
+    if (/data_href/i.test(text)) return 96;
+    if (/data_url/i.test(text)) return 95;
+    if (/data_report_url/i.test(text)) return 94;
+    if (/hydration_json|html_carfax_zone|html_node|html_attributes/i.test(text)) return 82;
+    if (/safe_dom_attributes/i.test(text)) return 70;
+    if (/dom_attribute/i.test(text)) return 60;
+    if (/network/i.test(text)) return 50;
+    if (/visible_text/i.test(text)) return 10;
+    return 0;
   }
 
   function buildCarfaxDiagnostics(candidates = [], carfaxUrl, carfaxMentioned) {
@@ -1511,9 +1542,10 @@
   }
 
   function carfaxCleanSource(source) {
-    if (/link_href/i.test(String(source || ""))) return "dom_link";
-    if (/data_href|data_url|data_report_url|safe_dom_attributes/i.test(String(source || ""))) return "data_attribute";
-    if (/hydration_json|html_carfax_zone|html_node|html_attributes/i.test(String(source || ""))) return "router_or_hydration";
+    if (/link_href/i.test(String(source || ""))) return "dom_visible_anchor";
+    if (/data_href|data_url|data_report_url/i.test(String(source || ""))) return "dom_data_href";
+    if (/hydration_json|html_carfax_zone|html_node|html_attributes/i.test(String(source || ""))) return "router_metadata";
+    if (/safe_dom_attributes/i.test(String(source || ""))) return "dom_data_href";
     if (/network/i.test(String(source || ""))) return "network";
     return "visible_text";
   }
