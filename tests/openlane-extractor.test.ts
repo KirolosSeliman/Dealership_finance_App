@@ -1313,6 +1313,36 @@ test("OpenLane condition AST prevents broad fallback from reintroducing Q&A and 
   assert.doesNotMatch(String(condition.conditionReportText), /Q:|A:|Full bid history|Current bid|Bidder 1|\$5,100/i);
 });
 
+test("OpenLane current live condition fixtures quarantine noisy text from canonical condition fields", () => {
+  const corolla = extractor.extractOpenLaneFixture(
+    fixture("openlane-vdp-corolla-carfax-visible-link-condition-pollution.html"),
+    "https://app.openlane.ca/vdp/5YFB4RBE9LP030604",
+  );
+  const kia = extractor.extractOpenLaneFixture(
+    fixture("openlane-vdp-kia-purchase-carfax-visible-link-sold-price.html"),
+    "https://app.openlane.ca/vdp/3KPFL4A72HE119966",
+  );
+  const corollaCondition = (corolla.openlaneCanonicalState as { condition?: Record<string, unknown> }).condition || {};
+  const kiaCondition = (kia.openlaneCanonicalState as { condition?: Record<string, unknown> }).condition || {};
+  const corollaDetails = (corolla.openlaneMetadata as { conditionDetails?: { conditionDiagnostics?: { rejectedConditionLines?: unknown[] } } }).conditionDetails || {};
+  const serializedCorollaCondition = JSON.stringify(corollaCondition);
+  const serializedKiaCondition = JSON.stringify(kiaCondition);
+  const rejectedLines = JSON.stringify(corollaDetails.conditionDiagnostics?.rejectedConditionLines || []);
+
+  assert.match(serializedCorollaCondition, /Any Previous Damage Exceeding \$3,000/);
+  assert.match(serializedCorollaCondition, /Previous Accident History/);
+  assert.match(serializedCorollaCondition, /Front bumper scuffed/);
+  assert.match(serializedCorollaCondition, /Seats show wear/);
+  assert.match(serializedCorollaCondition, /Engine starts and runs|not_scanned/);
+  assert.doesNotMatch(serializedCorollaCondition, /Always view the CARFAX report|Transport estimate|Vehicle location|OPENLANE does not guarantee|condition, or safety|\"g\"|Interior tab selected|Exterior panel scratches|Expected May/i);
+  assert.doesNotMatch(serializedCorollaCondition, /Exterior:\s*Exceeding \$3,000|\"Exceeding \$3,000\"/);
+  assert.match(rejectedLines, /carfax|transport_or_location_noise|legal_or_footer_noise|condition_noise_line|header_value_not_condition/i);
+
+  assert.match(serializedKiaCondition, /Roof \(rust\)/);
+  assert.match(serializedKiaCondition, /Rocker Panel \(dent\)/);
+  assert.doesNotMatch(serializedKiaCondition, /Always view the CARFAX report|condition, or safety|\"me\"|Current bid \$31,500|15 Bids|CAD \$378|Mark as picked up/i);
+});
+
 test("OpenLane page classifier separates active observations from outcome pages", () => {
   const active = classifier.classifyOpenLanePageFromHtml(fixture("openlane-basic.html"), "https://www.openlane.ca/vehicle/123");
   const purchaseList = classifier.classifyOpenLanePageFromHtml(fixture("openlane-purchase-list.html"), "https://www.openlane.ca/purchases");

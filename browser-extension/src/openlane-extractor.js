@@ -47,7 +47,7 @@
     const mediaRejected = [...(media.rejected || []), ...(doc.__openlaneMediaRejected || [])];
     const mediaCounts = extractMediaCounts(mainVisibleText);
     const carfax = extractCarfaxInfo(doc, href, rawVisibleText);
-    const conditionDetails = extractConditionDetails(textRegions.sectionMap, mainVisibleText, scopedLabelValues.condition);
+    const conditionDetails = extractConditionDetails(textRegions.sectionMap, mainVisibleText, scopedLabelValues.condition, doc);
     const fallbackConditionReportText = hasCanonicalConditionSections(conditionDetails) ? "" : extractConditionText(mainVisibleText, scopedLabelValues.condition);
     const conditionReportText = [conditionDetails.conditionReportText, fallbackConditionReportText].filter(Boolean).join(" | ") || undefined;
     const purchaseEconomics = extractPurchaseEconomics(mainVisibleText, classification, textRegions.sectionMap, options.networkEvidence);
@@ -1634,15 +1634,16 @@
     return Array.from(new Set(evidence));
   }
 
-  function extractConditionDetails(sectionMap, text, labels) {
+  function extractConditionDetails(sectionMap, text, labels, doc) {
     const zones = sectionMap?.zones || {};
+    const domAstV2 = extractConditionDomAstV2(doc);
     const knownHistoryText = zones.knownHistory?.text || findSectionByHeadings(text, ["Known history", "Antécédents connus", "Antecedents connus"]);
     const disclosureText = zones.disclosuresCondition?.text || findSectionByHeadings(text, ["Disclosures and conditions", "Disclosures", "Divulgations et condition"]);
     const dealerNotesRaw = zones.dealerNotes?.text || findSectionByHeadings(text, ["Note from selling dealer", "Note du concessionnaire vendeur", "Dealer notes"]);
     const qaRaw = zones.qaSection?.text || findSectionByHeadings(text, ["Q and A", "Q&A", "Q et R"]);
     const conditionAst = buildConditionSectionAst(disclosureText);
-    const dealerNotes = cleanConditionSection(dealerNotesRaw);
-    const qaSummary = cleanConditionSection(qaRaw, { keepQuestions: true });
+    const dealerNotes = domAstV2.dealerNotes || cleanConditionSection(dealerNotesRaw);
+    const qaSummary = domAstV2.qaSummary || cleanConditionSection(qaRaw, { keepQuestions: true });
     const sellerBroadcasts = cleanConditionSection(findSectionByHeadings(text, ["Seller broadcasts", "Broadcasts", "Messages du vendeur"]));
     const astKnownHistoryItems = conditionSectionItems(conditionAst, ["knownHistory"], "", []);
     const knownHistoryItems = astKnownHistoryItems.length ? astKnownHistoryItems : conditionItems(knownHistoryText, ["Known history", "Antécédents connus", "Antecedents connus"]);
@@ -1654,14 +1655,24 @@
     const obd2Text = conditionSectionText(conditionAst, ["obd2"]) || subsectionText(disclosureText, ["OBD2 Reader", "OBD2 scan", "Lecteur OBD2"]);
     const obd2Status = obd2Text ? (/this vehicle was not scanned|not scanned|nothing reported|rien n.a été signalé|rien n.a ete signale/i.test(obd2Text) ? "not_scanned" : /non disponible|not available|not visible|unavailable/i.test(obd2Text) ? "not_visible" : "visible_text") : undefined;
     const fallbackDeclarations = conditionItems(labels.get("declarations"));
+    const canonicalKnownHistoryItems = domAstV2.hasKnownHistoryPanel ? (domAstV2.knownHistoryItems || []) : knownHistoryItems;
+    const canonicalSafetyDisclosures = domAstV2.hasConditionSections ? (domAstV2.safetyDisclosures || []) : safetyDisclosures;
+    const canonicalMechanicalDisclosures = domAstV2.hasConditionSections ? (domAstV2.mechanicalDisclosures || []) : mechanicalDisclosures;
+    const canonicalExteriorDisclosures = domAstV2.hasConditionSections ? (domAstV2.exteriorDisclosures || []) : exteriorDisclosures;
+    const canonicalInteriorDisclosures = domAstV2.hasConditionSections ? (domAstV2.interiorDisclosures || []) : interiorDisclosures;
+    const canonicalTireWheelDisclosures = domAstV2.hasConditionSections ? (domAstV2.tireWheelDisclosures || []) : tireWheelDisclosures;
+    const canonicalObd2Text = domAstV2.obd2Text || obd2Text;
+    const canonicalObd2Status = canonicalObd2Text
+      ? (/this vehicle was not scanned|not scanned|nothing reported|rien n.a Ã©tÃ© signalÃ©|rien n.a ete signale/i.test(canonicalObd2Text) ? "not_scanned" : /non disponible|not available|not visible|unavailable/i.test(canonicalObd2Text) ? "not_visible" : "visible_text")
+      : obd2Status;
     const allConditionText = [
-      knownHistoryItems.length ? `Known history: ${knownHistoryItems.join(" | ")}` : "",
-      safetyDisclosures.length ? `Safety: ${safetyDisclosures.join(" | ")}` : "",
-      mechanicalDisclosures.length ? `Mechanical: ${mechanicalDisclosures.join(" | ")}` : "",
-      exteriorDisclosures.length ? `Exterior: ${exteriorDisclosures.join(" | ")}` : "",
-      interiorDisclosures.length ? `Interior: ${interiorDisclosures.join(" | ")}` : "",
-      tireWheelDisclosures.length ? `Tires and wheels: ${tireWheelDisclosures.join(" | ")}` : "",
-      obd2Text ? `OBD2 Reader: ${cleanConditionSection(obd2Text)}` : "",
+      canonicalKnownHistoryItems.length ? `Known history: ${canonicalKnownHistoryItems.join(" | ")}` : "",
+      canonicalSafetyDisclosures.length ? `Safety: ${canonicalSafetyDisclosures.join(" | ")}` : "",
+      canonicalMechanicalDisclosures.length ? `Mechanical: ${canonicalMechanicalDisclosures.join(" | ")}` : "",
+      canonicalExteriorDisclosures.length ? `Exterior: ${canonicalExteriorDisclosures.join(" | ")}` : "",
+      canonicalInteriorDisclosures.length ? `Interior: ${canonicalInteriorDisclosures.join(" | ")}` : "",
+      canonicalTireWheelDisclosures.length ? `Tires and wheels: ${canonicalTireWheelDisclosures.join(" | ")}` : "",
+      canonicalObd2Text ? `OBD2 Reader: ${cleanConditionSection(canonicalObd2Text)}` : "",
       dealerNotes ? `Dealer notes: ${dealerNotes}` : "",
       fallbackDeclarations.length ? `Declarations: ${fallbackDeclarations.join(" | ")}` : "",
     ].filter(Boolean).join(" | ").slice(0, 4000);
@@ -1671,7 +1682,7 @@
       disclosuresCondition: disclosureText,
       dealerNotes: dealerNotesRaw,
       qaSection: qaRaw,
-    }, conditionAst);
+    }, domAstV2.conditionAst || conditionAst, domAstV2);
     const evidence = [
       knownHistoryText ? { source: "known_history_zone", sourceText: cleanConditionSection(knownHistoryText).slice(0, 500) } : undefined,
       disclosureText ? { source: "disclosures_condition_zone", sourceText: cleanConditionSection(disclosureText).slice(0, 800) } : undefined,
@@ -1680,13 +1691,13 @@
     ].filter(Boolean);
 
     return compact({
-      knownHistoryItems: knownHistoryItems.length ? knownHistoryItems : fallbackDeclarations.length ? fallbackDeclarations : undefined,
-      safetyDisclosures,
-      mechanicalDisclosures,
-      exteriorDisclosures,
-      interiorDisclosures,
-      tireWheelDisclosures,
-      obd2Status,
+      knownHistoryItems: canonicalKnownHistoryItems.length ? canonicalKnownHistoryItems : fallbackDeclarations.length ? fallbackDeclarations : undefined,
+      safetyDisclosures: canonicalSafetyDisclosures,
+      mechanicalDisclosures: canonicalMechanicalDisclosures,
+      exteriorDisclosures: canonicalExteriorDisclosures,
+      interiorDisclosures: canonicalInteriorDisclosures,
+      tireWheelDisclosures: canonicalTireWheelDisclosures,
+      obd2Status: canonicalObd2Status,
       dealerNotes,
       sellerBroadcasts,
       qaSummary,
@@ -1696,6 +1707,132 @@
       conditionExtractorMode: conditionDiagnostics.conditionExtractorMode,
       conditionDiagnostics,
     });
+  }
+
+  function extractConditionDomAstV2(doc) {
+    const html = String(doc?.__openlaneHtml || "");
+    if (!html) return {};
+    const rejectedConditionLines = [];
+    const conditionSections = new Map();
+    const sectionTree = [];
+    const addRejected = (sourceZone, sourceText, rejectionReason) => {
+      if (!sourceText || rejectedConditionLines.length >= 40) return;
+      rejectedConditionLines.push({ sourceZone, sourceText: sourceText.slice(0, 240), rejectionReason });
+    };
+    const cleanItemsForSection = (lines, sourceZone, sectionKey) => {
+      const accepted = [];
+      for (const rawLine of lines) {
+        const line = cleanConditionLine(rawLine);
+        if (!line) continue;
+        const reason = conditionDomAstRejectionReason(line, sectionKey);
+        if (reason) {
+          addRejected(sourceZone, line, reason);
+          continue;
+        }
+        accepted.push(line);
+      }
+      return Array.from(new Set(accepted)).slice(0, 20);
+    };
+
+    for (const match of html.matchAll(/<section\b([^>]*)\bdata-condition-section=["']([^"']+)["'][^>]*>([\s\S]*?)<\/section>/gi)) {
+      const sectionKey = canonicalConditionSectionKey(match[2]) || canonicalConditionSectionKey(stripTags(match[3]).split(/\n/)[0] || "");
+      if (!sectionKey) continue;
+      const sourceZone = `condition_${sectionKey}`;
+      const lines = htmlConditionLines(match[3]);
+      const items = cleanItemsForSection(lines, sourceZone, sectionKey);
+      conditionSections.set(sectionKey, [...(conditionSections.get(sectionKey) || []), ...items]);
+      sectionTree.push({ heading: match[2], canonicalKey: sectionKey, lineCount: items.length });
+    }
+
+    let fallbackConditionAst;
+    if (!conditionSections.size) {
+      const conditionBlocks = extractHtmlBlocksByClassPattern(html, /\b(condition-report|disclosures-condition|disclosures?[-_\s]?condition)\b/i);
+      const blockConditionText = conditionBlocks.map((block) => htmlConditionLines(block).join("\n")).join("\n");
+      const conditionText = /\b(mechanical|exterior|interior|tires?|wheels?|obd2)\b/i.test(blockConditionText)
+        && !/\b(interior|exterior|obd2)\b/i.test(htmlConditionLines(html).join("\n"))
+        ? blockConditionText
+        : htmlConditionLines(html).join("\n");
+      fallbackConditionAst = buildConditionSectionAst(conditionText);
+      for (const section of fallbackConditionAst.sections || []) {
+        const items = cleanItemsForSection(section.lines, `condition_${section.canonicalKey}`, section.canonicalKey);
+        conditionSections.set(section.canonicalKey, [...(conditionSections.get(section.canonicalKey) || []), ...items]);
+        sectionTree.push({ heading: section.heading, canonicalKey: section.canonicalKey, lineCount: items.length });
+      }
+    }
+
+    const knownHistoryBlocks = extractHtmlBlocksByClassPattern(html, /\bknown-history\b/i);
+    const knownHistoryItems = knownHistoryBlocks
+      .flatMap((block) => cleanItemsForSection(htmlConditionLines(block), "knownHistory", "knownHistory"))
+      .filter((item) => /accident|damage|dommage|history|historique|previous|declaration|structural|salvage|rebuilt|registration|out of province|rien n.a|nothing reported/i.test(item));
+    const qaSummary = extractHtmlBlocksByClassPattern(html, /\b(q-and-a|qa-section|qanda|q-a)\b/i)
+      .map((block) => cleanConditionSection(htmlConditionLines(block).join("\n"), { keepQuestions: true }))
+      .filter(Boolean)
+      .join(" | ");
+    const dealerNotes = extractHtmlBlocksByClassPattern(html, /\b(dealer-notes?|seller-notes?|selling-dealer-note)\b/i)
+      .map((block) => cleanConditionSection(htmlConditionLines(block).join("\n")))
+      .filter(Boolean)
+      .join(" | ");
+    const obd2Items = conditionSections.get("obd2") || [];
+    const conditionAst = fallbackConditionAst || {
+      sections: sectionTree.map((section) => ({ heading: section.heading, canonicalKey: section.canonicalKey, lines: conditionSections.get(section.canonicalKey) || [] })),
+      boundaries: sectionTree.map((section, index) => ({
+        sourceZone: "disclosuresCondition",
+        startHeading: section.heading,
+        stopHeading: sectionTree[index + 1]?.heading || "section_end",
+      })),
+    };
+
+    return compact({
+      knownHistoryItems: knownHistoryItems.length ? Array.from(new Set(knownHistoryItems)).slice(0, 20) : undefined,
+      safetyDisclosures: conditionSections.get("safetyRelated"),
+      mechanicalDisclosures: conditionSections.get("mechanical"),
+      exteriorDisclosures: conditionSections.get("exterior"),
+      interiorDisclosures: conditionSections.get("interior"),
+      tireWheelDisclosures: conditionSections.get("tiresAndWheels"),
+      obd2Text: obd2Items.length ? obd2Items.join(" | ") : undefined,
+      dealerNotes,
+      qaSummary,
+      conditionAst,
+      rejectedConditionLines,
+      conditionAstVersion: "v2",
+      hasConditionSections: conditionSections.size > 0,
+      hasKnownHistoryPanel: knownHistoryBlocks.length > 0,
+    });
+  }
+
+  function extractHtmlBlocksByClassPattern(html, pattern) {
+    const blocks = [];
+    for (const match of String(html || "").matchAll(/<(section|div|article)\b([^>]*)>([\s\S]*?)<\/\1>/gi)) {
+      const attrs = match[2] || "";
+      const heading = stripTags(match[3]).split(/\n/).map(cleanConditionLine).find(Boolean) || "";
+      if (pattern.test(attrs) || pattern.test(heading)) blocks.push(match[3]);
+      if (blocks.length >= 12) break;
+    }
+    return blocks;
+  }
+
+  function htmlConditionLines(html) {
+    return stripTags(String(html || "")
+      .replace(/<\/(?:h[1-6]|p|li|dt|dd|div|section)>/gi, "\n")
+      .replace(/<(?:h[1-6]|p|li|dt|dd|div|section)\b[^>]*>/gi, "\n"))
+      .split(/\n|\s+\|\s+/)
+      .map(cleanConditionLine)
+      .filter(Boolean);
+  }
+
+  function conditionDomAstRejectionReason(line, sectionKey = "") {
+    if (isConditionNoiseLine(line, { keepQuestions: sectionKey === "qaSummary" })) return conditionNoiseReason(line);
+    const text = normalizeSpace(line);
+    if (text.length < 3 || /^[a-z]{1,2}$/i.test(text)) return "condition_noise_line";
+    if (/\bcarfax\b/i.test(text)) return "carfax_control_not_condition";
+    if (/^Expected\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|\d)/i.test(text)) return "timing_not_condition";
+    if (/\bopenlane\s+does\s+not\s+guarantee|condition,\s*or\s*safety\s*of\s*any\s*vehicle/i.test(text)) return "legal_or_footer_noise";
+    if (/\btab selected\b/i.test(text)) return "header_value_not_condition";
+    if (/^(Sold price|Status|Mark as picked up|Order history)$/i.test(text)) return "purchase_panel_not_condition";
+    if (/\bknown-history-panel|condition-report|bid-panel-current|live-offer-row|vehicle-detail-page\b/i.test(text)) return "attribute_noise";
+    if (sectionKey === "interior" && /^exterior\b/i.test(text)) return "section_bleed_not_condition";
+    if (sectionKey === "mechanical" && /^(exterior|interior|tires?|wheels?)$/i.test(text)) return "header_value_not_condition";
+    return "";
   }
 
   function hasCanonicalConditionSections(conditionDetails = {}) {
@@ -1711,8 +1848,8 @@
     return "";
   }
 
-  function buildConditionDiagnostics(sectionTexts = {}, conditionAst = { sections: [], boundaries: [] }) {
-    const rejectedConditionLines = [];
+  function buildConditionDiagnostics(sectionTexts = {}, conditionAst = { sections: [], boundaries: [] }, domAstV2 = {}) {
+    const rejectedConditionLines = [...(domAstV2.rejectedConditionLines || [])];
     for (const [sourceZone, value] of Object.entries(sectionTexts)) {
       for (const rawLine of conditionBoundaryText(value).split(/\n|\s+\|\s+/)) {
         const sourceText = cleanConditionLine(rawLine);
@@ -1730,6 +1867,7 @@
     }
     return compact({
       conditionExtractorMode: "dom_ast",
+      conditionAstVersion: domAstV2.conditionAstVersion,
       conditionSectionTree: (conditionAst.sections || []).map((section) => ({
         heading: section.heading,
         canonicalKey: section.canonicalKey,
