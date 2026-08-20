@@ -540,7 +540,7 @@ test("vehicle VIN validation normalizes quality input and rejects unsafe identif
 
 test("validation migration backs active VIN uniqueness without unsafe duplicate cleanup", () => {
   const sql = readFileSync(join(process.cwd(), "supabase/migrations/20260519_validation_domain_integrity.sql"), "utf8");
-  const route = readFileSync(join(process.cwd(), "src/app/api/mutations/route.ts"), "utf8");
+  const handler = readFileSync(join(process.cwd(), "src/lib/server/domain-mutation-handlers.ts"), "utf8");
   const repository = readFileSync(join(process.cwd(), "src/lib/supabase/repository.ts"), "utf8");
 
   assert.match(sql, /create or replace function normalize_vehicle_vin/i);
@@ -548,8 +548,8 @@ test("validation migration backs active VIN uniqueness without unsafe duplicate 
   assert.match(sql, /contacts_type_valid/i);
   assert.match(sql, /Duplicate active VINs exist/i);
   assert.match(sql, /vehicles_org_active_vin_unique_idx/i);
-  assert.match(route, /assertUniqueActiveVin/i);
-  assert.match(route, /Another active vehicle already uses this VIN/i);
+  assert.match(handler, /assertUniqueActiveVin/i);
+  assert.match(handler, /Another active vehicle already uses this VIN/i);
   assert.match(repository, /normalizeVin\(formData\.get\("vin"\)\)/i);
 });
 test("duplicate organization rows resolve to the highest role", () => {
@@ -1174,6 +1174,19 @@ test("high-risk mutation domains have dedicated route entrypoints", () => {
   assert.match(mutations, /function mutationEndpoint/i);
   assert.match(mutations, /\/api\/vehicles\/\$\{vehicleId\}\/archive/i);
   assert.match(mutations, /\/api\/cash\/\$\{account\}\/\$\{transactionId\}\/reverse/i);
+});
+
+test("migrated high-risk mutations leave the legacy switch and use shared domain handlers", () => {
+  const legacyRoute = readFileSync(join(process.cwd(), "src/app/api/mutations/route.ts"), "utf8");
+  const bridge = readFileSync(join(process.cwd(), "src/lib/server/mutation-route-bridge.ts"), "utf8");
+  const handler = readFileSync(join(process.cwd(), "src/lib/server/domain-mutation-handlers.ts"), "utf8");
+
+  assert.match(legacyRoute, /handleDomainMutation/i);
+  assert.doesNotMatch(legacyRoute, /case "(?:createVehicle|updateVehicle|deleteVehicle|createExpense|updateExpense|deleteExpense|recordSale|voidSale|correctSale|createCashTransaction|updateCashTransaction|deleteCashTransaction)"/i);
+  assert.match(bridge, /handleDomainMutation/i);
+  assert.doesNotMatch(bridge, /legacyMutationPost/i);
+  assert.match(handler, /DOMAIN_MUTATION_OPERATIONS/i);
+  assert.match(handler, /createVehicle|createExpense|recordSale|createCashTransaction/i);
 });
 
 test("DealerFlowApp shell delegates app plumbing to feature modules", () => {

@@ -1,58 +1,33 @@
 import { NextResponse } from "next/server";
-import { calculateCompanyCashBalance, calculateExternalCashBalance, isActiveSale } from "@/lib/domain/calculations";
 import { assertSameOrigin, checkRateLimit } from "@/lib/server/security";
+import { handleDomainMutation, isDomainMutationOperation } from "@/lib/server/domain-mutation-handlers";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import {
-  archiveVehicle,
   createAttachment,
-  createCashTransaction,
   createContact,
-  createExpense,
   createOrganization,
   createRecurringExpenseTemplate,
-  createVehicle,
-  correctVehicleSale,
-  deleteCashTransaction,
-  deleteExpense,
   deleteRecurringExpenseTemplate,
   joinOrganization,
-  loadAppData,
-  recordVehicleSale,
   applyRecurringExpenseTemplate,
-  updateCashTransaction,
-  updateExpense,
   updateRecurringExpenseTemplate,
-  updateVehicle,
   updateVehicleMainPhoto,
-  voidVehicleSale,
 } from "@/lib/supabase/repository";
 import { mapAttachment, mapVehicle } from "@/lib/supabase/mappers";
-import { isValidVehicleDeleteConfirmation } from "@/lib/vehicle-delete";
 import {
   attachmentSchema,
   activityLogSchema,
   applyRecurringExpenseTemplateSchema,
-  cashTransactionSchema,
-  cashUpdateSchema,
   contactSchema,
-  expenseSchema,
   formatValidationError,
   formDataToObject,
-  normalizeVin,
   invitationCodeSchema,
   organizationSchema,
   regenerateInvitationSchema,
   recurringExpenseTemplateSchema,
   roleUpdateSchema,
-  saleCorrectionSchema,
-  saleSchema,
-  saleVoidSchema,
-  deleteVehicleSchema,
-  vehicleAnyUpdateSchema,
-  vehicleSchema,
 } from "@/lib/validation";
 import type { Role } from "@/types/domain";
-import type { CompanyCashTransactionType, ExternalCashTransactionType } from "@/types/domain";
 
 const LEGACY_MUTATION_HEADERS = { "x-dealer-flow-deprecated-route": "/api/mutations" };
 
@@ -112,6 +87,17 @@ export async function POST(request: Request) {
   const operation = String(formData.get("operation") || "") as Operation;
   const organizationId = String(formData.get("organizationId") || "");
 
+  if (isDomainMutationOperation(operation)) {
+    return handleDomainMutation({
+      client: supabase,
+      user: userData.user,
+      operation,
+      organizationId,
+      formData,
+      legacy: true,
+    });
+  }
+
   try {
     switch (operation) {
       case "createOrganization": {
@@ -123,91 +109,6 @@ export async function POST(request: Request) {
         invitationCodeSchema.parse(formDataToObject(formData));
         await joinOrganization(supabase, String(formData.get("inviteCode") || ""));
         return ok();
-      }
-      case "createVehicle": {
-        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin", "member"]);
-        const parsed = vehicleSchema.parse(formDataToObject(formData));
-        formData.set("vin", parsed.vin);
-        await assertUniqueActiveVin(supabase, organizationId, parsed.vin);
-        const id = await createVehicle(supabase, organizationId, formData);
-        return ok({ id });
-      }
-      case "updateVehicle": {
-        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin", "member"]);
-        const parsed = vehicleAnyUpdateSchema.parse(formDataToObject(formData));
-        const vehicle = await getVehicle(supabase, organizationId, String(formData.get("vehicleId") || ""));
-        if ("vin" in parsed) {
-          formData.set("vin", parsed.vin);
-          await assertUniqueActiveVin(supabase, organizationId, parsed.vin, vehicle.id);
-        }
-        await updateVehicle(supabase, vehicle, formData);
-        return ok();
-      }
-      case "deleteVehicle": {
-        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin"]);
-        deleteVehicleSchema.parse(formDataToObject(formData));
-        const vehicleId = String(formData.get("vehicleId") || "");
-        const confirmationText = String(formData.get("confirmationText") || "").trim();
-        const archiveReason = String(formData.get("archiveReason") || "").trim();
-        const vehicle = await getVehicleOptional(supabase, organizationId, vehicleId);
-        if (!vehicle) throw new ApiError(404, "Vehicle was not found.");
-        if (vehicle.archivedAt) throw new ApiError(400, "Vehicle is already archived.");
-        assertVehicleDeleteConfirmation(vehicle, confirmationText);
-        await archiveVehicle(supabase, organizationId, vehicle.id, archiveReason);
-        return ok({ archived: true });
-      }
-      case "createExpense": {
-        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin", "member"]);
-        expenseSchema.parse(formDataToObject(formData));
-        const vehicle = await getVehicle(supabase, organizationId, String(formData.get("vehicleId") || ""));
-        const id = await createExpense(supabase, vehicle, formData);
-        return ok({ id });
-      }
-      case "updateExpense": {
-        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin", "member"]);
-        expenseSchema.parse(formDataToObject(formData));
-        const vehicle = await getVehicle(supabase, organizationId, String(formData.get("vehicleId") || ""));
-        await updateExpense(supabase, vehicle, String(formData.get("expenseId") || ""), formData);
-        return ok();
-      }
-      case "deleteExpense": {
-        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin", "member"]);
-        const vehicle = await getVehicle(supabase, organizationId, String(formData.get("vehicleId") || ""));
-        await deleteExpense(supabase, vehicle, String(formData.get("expenseId") || ""));
-        return ok();
-      }
-      case "recordSale": {
-        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin", "member"]);
-        saleSchema.parse(formDataToObject(formData));
-        const vehicle = await getVehicle(supabase, organizationId, String(formData.get("vehicleId") || ""));
-        const appData = await loadAppData(supabase, userData.user, organizationId);
-        if (appData.sales.some((sale) => sale.vehicleId === vehicle.id && isActiveSale(sale))) {
-          throw new ApiError(400, "This vehicle already has a sale record.");
-        }
-        await recordVehicleSale(supabase, appData, vehicle, formData);
-        return ok();
-      }
-      case "voidSale": {
-        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin", "member"]);
-        saleVoidSchema.parse(formDataToObject(formData));
-        await voidVehicleSale(
-          supabase,
-          organizationId,
-          String(formData.get("saleId") || ""),
-          String(formData.get("reason") || ""),
-        );
-        return ok();
-      }
-      case "correctSale": {
-        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin", "member"]);
-        saleCorrectionSchema.parse(formDataToObject(formData));
-        const id = await correctVehicleSale(
-          supabase,
-          organizationId,
-          String(formData.get("saleId") || ""),
-          formData,
-        );
-        return ok({ id });
       }
       case "createRecurringExpenseTemplate": {
         await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin"]);
@@ -232,61 +133,6 @@ export async function POST(request: Request) {
         const vehicle = await getVehicle(supabase, organizationId, String(formData.get("vehicleId") || ""));
         const id = await applyRecurringExpenseTemplate(supabase, vehicle, String(formData.get("templateId") || ""));
         return ok({ id });
-      }
-      case "createCashTransaction": {
-        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin"]);
-        cashTransactionSchema.parse(formDataToObject(formData));
-        const appData = await loadAppData(supabase, userData.user, organizationId);
-        const type = String(formData.get("type")) as CompanyCashTransactionType | ExternalCashTransactionType;
-        const amount = Number(formData.get("amount"));
-        if (type === "company_cash_withdrawn" && amount > calculateCompanyCashBalance(appData.companyCashTransactions)) {
-          throw new ApiError(400, "Company cash withdrawal exceeds available balance.");
-        }
-        if (
-          (type === "external_cash_transferred_to_company" || type === "external_cash_personally_removed") &&
-          amount > calculateExternalCashBalance(appData.externalCashTransactions)
-        ) {
-          throw new ApiError(400, "External cash action exceeds available balance.");
-        }
-        await createCashTransaction(
-          supabase,
-          organizationId,
-          type,
-          amount,
-          String(formData.get("note") || ""),
-          String(formData.get("date") || ""),
-        );
-        return ok();
-      }
-      case "updateCashTransaction": {
-        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin"]);
-        cashUpdateSchema.parse(formDataToObject(formData));
-        const appData = await loadAppData(supabase, userData.user, organizationId);
-        assertCashUpdateKeepsBalance(
-          appData,
-          String(formData.get("account") || "") as "company" | "external",
-          String(formData.get("transactionId") || ""),
-          Number(formData.get("amount")),
-        );
-        await updateCashTransaction(
-          supabase,
-          organizationId,
-          String(formData.get("account") || "") as "company" | "external",
-          String(formData.get("transactionId") || ""),
-          formData,
-        );
-        return ok();
-      }
-      case "deleteCashTransaction": {
-        await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin"]);
-        await deleteCashTransaction(
-          supabase,
-          organizationId,
-          String(formData.get("account") || "") as "company" | "external",
-          String(formData.get("transactionId") || ""),
-          String(formData.get("reason") || ""),
-        );
-        return ok();
       }
       case "createContact": {
         await requireRole(supabase, userData.user.id, organizationId, ["owner", "admin", "member"]);
@@ -424,43 +270,6 @@ async function getVehicle(client: Awaited<ReturnType<typeof createSupabaseServer
   return mapVehicle(data as Record<string, unknown>);
 }
 
-async function getVehicleOptional(client: Awaited<ReturnType<typeof createSupabaseServerClient>>, organizationId: string, vehicleId: string) {
-  if (!client || !vehicleId) throw new ApiError(400, "Vehicle is required.");
-  const { data, error } = await client
-    .from("vehicles")
-    .select("*")
-    .eq("id", vehicleId)
-    .eq("organization_id", organizationId)
-    .maybeSingle();
-  if (error) throw error;
-  if (!data) return undefined;
-  return mapVehicle(data as Record<string, unknown>);
-}
-
-async function assertUniqueActiveVin(
-  client: Awaited<ReturnType<typeof createSupabaseServerClient>>,
-  organizationId: string,
-  vin: string,
-  exceptVehicleId?: string,
-) {
-  if (!client) throw new Error("Supabase is not configured.");
-  const normalizedVin = normalizeVin(vin);
-  if (!normalizedVin) return;
-  const { data, error } = await client
-    .from("vehicles")
-    .select("id, vin")
-    .eq("organization_id", organizationId)
-    .is("archived_at", null);
-  if (error) throw error;
-
-  const duplicate = (data ?? []).find((row) => {
-    const id = String((row as Record<string, unknown>).id ?? "");
-    if (exceptVehicleId && id === exceptVehicleId) return false;
-    return normalizeVin((row as Record<string, unknown>).vin) === normalizedVin;
-  });
-  if (duplicate) throw new ApiError(400, "Another active vehicle already uses this VIN.");
-}
-
 async function getAttachment(client: Awaited<ReturnType<typeof createSupabaseServerClient>>, organizationId: string, attachmentId: string) {
   if (!client || !attachmentId) throw new Error("Attachment is required.");
   const { data, error } = await client
@@ -478,11 +287,6 @@ function optionalId(value: FormDataEntryValue | null) {
   return text || undefined;
 }
 
-function assertVehicleDeleteConfirmation(vehicle: { vin?: string; id: string }, confirmationText: string) {
-  if (isValidVehicleDeleteConfirmation(confirmationText, vehicle.vin)) return;
-  throw new ApiError(400, "Type DELETE or the vehicle VIN to confirm deletion.");
-}
-
 function toClientErrorMessage(error: unknown, operation: Operation) {
   if (error instanceof ApiError) return error.message;
   const message = formatValidationError(error);
@@ -494,94 +298,7 @@ function toClientErrorMessage(error: unknown, operation: Operation) {
     if (normalized.includes("cash does not have enough")) return message;
     return "Template could not be applied. Please try again.";
   }
-  if (operation === "deleteVehicle") {
-    const normalized = message.toLowerCase();
-    if (normalized.includes("not allowed")) return "You are not allowed to archive this vehicle.";
-    if (normalized.includes("vehicle not found")) return "Vehicle not found.";
-    if (normalized.includes("already archived")) return "Vehicle is already archived.";
-    if (
-      normalized.includes("archive_vehicle") ||
-      normalized.includes("could not find the function") ||
-      normalized.includes("does not exist")
-    ) {
-      console.error("[deleteVehicle] missing database RPC. Apply the latest vehicle archive migration in Supabase.");
-      return "Vehicle archive database migration is missing. Run the latest vehicle archive migration in Supabase, then try again.";
-    }
-    if (normalized === "invalid input." || normalized.includes("invalid input syntax")) {
-      return "Type DELETE or the vehicle VIN to confirm archive.";
-    }
-    return "Vehicle could not be archived. Please try again.";
-  }
-  if (operation === "deleteCashTransaction") {
-    const normalized = message.toLowerCase();
-    if (
-      normalized.includes("reverse_company_cash_transaction") ||
-      normalized.includes("reverse_external_cash_transaction") ||
-      normalized.includes("could not find the function") ||
-      normalized.includes("does not exist")
-    ) {
-      console.error("[deleteCashTransaction] missing database RPC. Apply the latest cash reversal migration in Supabase.");
-      return "Cash reversal database migration is missing. Run the latest cash reversal migration in Supabase, then try again.";
-    }
-    if (normalized.includes("system-generated cash transactions")) {
-      return "This linked cash transaction must be corrected through the vehicle or sale workflow.";
-    }
-    return message;
-  }
-  if (operation === "updateVehicle") {
-    const normalized = message.toLowerCase();
-    if (
-      normalized.includes("correct_vehicle_purchase") ||
-      normalized.includes("transition_vehicle_status") ||
-      normalized.includes("could not find the function") ||
-      normalized.includes("does not exist")
-    ) {
-      console.error("[updateVehicle] missing database RPC. Apply the latest vehicle correction migration in Supabase.");
-      return "Vehicle correction database migration is missing. Run the latest vehicle correction migration in Supabase, then try again.";
-    }
-    return message;
-  }
-  if (operation === "voidSale" || operation === "correctSale") {
-    const normalized = message.toLowerCase();
-    if (
-      normalized.includes("void_vehicle_sale_atomic") ||
-      normalized.includes("correct_vehicle_sale_atomic") ||
-      normalized.includes("could not find the function") ||
-      normalized.includes("does not exist")
-    ) {
-      console.error("[saleCorrection] missing database RPC. Apply the latest sale correction migration in Supabase.");
-      return "Sale correction database migration is missing. Run the latest sale correction migration in Supabase, then try again.";
-    }
-    return message;
-  }
   return message;
-}
-
-function assertCashUpdateKeepsBalance(appData: Awaited<ReturnType<typeof loadAppData>>, account: "company" | "external", transactionId: string, amount: number) {
-  if (!transactionId) throw new ApiError(400, "Transaction is required.");
-  if (account === "company") {
-    const current = appData.companyCashTransactions.find((transaction) => transaction.id === transactionId && !transaction.deletedAt);
-    if (!current) throw new ApiError(404, "Company cash transaction was not found.");
-    const nextTransactions = appData.companyCashTransactions.map((transaction) =>
-      transaction.id === transactionId ? { ...transaction, amount } : transaction,
-    );
-    if (calculateCompanyCashBalance(nextTransactions) < 0) {
-      throw new ApiError(400, "This edit would make company cash negative.");
-    }
-    return;
-  }
-  if (account === "external") {
-    const current = appData.externalCashTransactions.find((transaction) => transaction.id === transactionId && !transaction.deletedAt);
-    if (!current) throw new ApiError(404, "External cash transaction was not found.");
-    const nextTransactions = appData.externalCashTransactions.map((transaction) =>
-      transaction.id === transactionId ? { ...transaction, amount } : transaction,
-    );
-    if (calculateExternalCashBalance(nextTransactions) < 0) {
-      throw new ApiError(400, "This edit would make external cash negative.");
-    }
-    return;
-  }
-  throw new ApiError(400, "Cash account is invalid.");
 }
 
 async function updateMemberRole(
