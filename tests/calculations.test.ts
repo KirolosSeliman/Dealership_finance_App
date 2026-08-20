@@ -1201,6 +1201,28 @@ test("DealerFlowApp shell delegates app plumbing to feature modules", () => {
   assert.equal(existsSync(join(process.cwd(), "src/features/app/mutations.ts")), true);
 });
 
+test("DealerFlowApp keeps explicit feature boundaries and a bounded shell", () => {
+  const app = readFileSync(join(process.cwd(), "src/components/dealer-flow-app.tsx"), "utf8");
+  const featureModules = [
+    "src/features/dashboard/dashboard-view.tsx",
+    "src/features/vehicles/vehicles-view.tsx",
+    "src/features/cash/cash-view.tsx",
+    "src/features/contacts/contacts-view.tsx",
+    "src/features/taxes/taxes-view.tsx",
+    "src/features/backups/backups-view.tsx",
+    "src/features/settings/settings-view.tsx",
+    "src/features/market-snap/market-snap-view.tsx",
+  ];
+  assert.ok(app.split("\n").length < 1500, "DealerFlowApp should remain a shell, not a feature implementation");
+  for (const modulePath of featureModules) {
+    assert.equal(existsSync(join(process.cwd(), modulePath)), true, `${modulePath} should define a feature boundary`);
+  }
+  assert.match(app, /@\/features\/dashboard\/dashboard-view/i);
+  assert.match(app, /@\/features\/vehicles\/vehicles-view/i);
+  assert.match(app, /@\/features\/cash\/cash-view/i);
+  assert.match(app, /@\/features\/market-snap\/market-snap-view/i);
+});
+
 test("backup and tax export request schemas reject invalid payloads", () => {
   assert.equal(backupRequestSchema.safeParse({ organizationId: "not-a-uuid" }).success, false);
   assert.equal(taxExportSchema.safeParse({
