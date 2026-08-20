@@ -28,6 +28,8 @@ import {
 import type {
   AppData,
   Attachment,
+  CompanyCashTransaction,
+  ExternalCashTransaction,
   Language,
   Vehicle,
   VehicleStatus,
