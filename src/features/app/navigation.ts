@@ -18,6 +18,9 @@ export function getRouteState(pathname: string, searchParams: string) {
     }
     return { view: "vehicles" as View, mode: "list" as VehicleMode };
   }
+  if (parts[0] === "market-snap" || parts[0] === "deal-radar" || parts[0] === "market-data") {
+    return { view: "dashboard" as View, mode: "list" as VehicleMode };
+  }
   const routeMap: Record<string, View> = {
     dashboard: "dashboard",
     cash: "cash",
@@ -25,9 +28,6 @@ export function getRouteState(pathname: string, searchParams: string) {
     taxes: "taxes",
     backups: "backups",
     settings: "settings",
-    "market-snap": "marketSnap",
-    "deal-radar": "dealRadar",
-    "market-data": "marketData",
   };
   if (root && routeMap[root]) {
     return { view: routeMap[root], mode: "list" as VehicleMode };

@@ -1,5 +1,5 @@
-import { DealerFlowApp } from "@/components/dealer-flow-app";
+import { redirect } from "next/navigation";
 
 export default function MarketDataPage() {
-  return <DealerFlowApp />;
+  redirect("/dashboard");
 }

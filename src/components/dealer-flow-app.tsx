@@ -93,13 +93,11 @@ type CashTransaction = CompanyCashTransaction | ExternalCashTransaction;
 type VehiclePrefill = Partial<Pick<Vehicle, "year" | "make" | "model" | "trim" | "mileage" | "purchasePrice" | "purchaseSource" | "notes">>;
 
 const languageKey = "dealer-flow-language";
+const LEGACY_MARKET_UI_VISIBLE = false;
 
 const mainNav: Array<[View, React.ReactNode]> = [
   ["dashboard", <BarChart3 key="dashboard" size={18} />],
   ["vehicles", <Car key="vehicles" size={18} />],
-  ["marketSnap", <Activity key="marketSnap" size={18} />],
-  ["dealRadar", <Search key="dealRadar" size={18} />],
-  ["marketData", <FolderLock key="marketData" size={18} />],
   ["cash", <LineChart key="cash" size={18} />],
   ["contacts", <Contact key="contacts" size={18} />],
   ["taxes", <Archive key="taxes" size={18} />],
@@ -2584,18 +2582,22 @@ function SettingsPage({
           onDelete={onDeleteRecurringExpenseTemplate}
         />
       </Panel>
-      <Panel title={t.marketSnap.dataAiSettings}>
-        <div className="space-y-3 text-sm text-slate-400">
-          <p>{t.marketSnap.dataAiPurpose}</p>
-          <InfoGrid rows={[
-            [t.marketSnap.modelImprovement, t.marketSnap.enabledByTerms],
-            [t.marketSnap.dataUsed, t.marketSnap.anonymizedDataUsed],
-            [t.marketSnap.dataExcluded, t.marketSnap.personalDataExcluded],
-            [t.marketSnap.retention, t.marketSnap.retentionSummary],
-          ]} />
-        </div>
-      </Panel>
-      <DeepCaptureSettingsPanel organizationId={activeOrganization.id} permissions={permissions} />
+      {LEGACY_MARKET_UI_VISIBLE && (
+        <>
+          <Panel title={t.marketSnap.dataAiSettings}>
+            <div className="space-y-3 text-sm text-slate-400">
+              <p>{t.marketSnap.dataAiPurpose}</p>
+              <InfoGrid rows={[
+                [t.marketSnap.modelImprovement, t.marketSnap.enabledByTerms],
+                [t.marketSnap.dataUsed, t.marketSnap.anonymizedDataUsed],
+                [t.marketSnap.dataExcluded, t.marketSnap.personalDataExcluded],
+                [t.marketSnap.retention, t.marketSnap.retentionSummary],
+              ]} />
+            </div>
+          </Panel>
+          <DeepCaptureSettingsPanel organizationId={activeOrganization.id} permissions={permissions} />
+        </>
+      )}
       <Panel title={t.sections.privateStorage}><p className="flex items-center gap-2 text-slate-300"><Lock size={18} />{activeOrganization.name}</p><p className="mt-3 text-sm text-slate-500">{t.backup.r2Inactive}</p></Panel>
     </div>
   );
