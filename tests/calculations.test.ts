@@ -403,12 +403,13 @@ test("vehicle total cost and cash balances are calculated", () => {
     { id: "2", organizationId: "org-1", type: "company_cash_withdrawn", amount: 500, date: "2026-01-02", createdAt: "2026-01-02", createdBy: "user-1" },
   ];
   const external: ExternalCashTransaction[] = [
+    { id: "0", organizationId: "org-1", type: "external_cash_added", amount: 1000, date: "2026-01-01", createdAt: "2026-01-01", createdBy: "user-1" },
     { id: "1", organizationId: "org-1", type: "external_commission_earned", amount: 700, date: "2026-01-01", createdAt: "2026-01-01", createdBy: "user-1" },
     { id: "2", organizationId: "org-1", type: "external_cash_transferred_to_company", amount: 200, date: "2026-01-02", createdAt: "2026-01-02", createdBy: "user-1" },
     { id: "3", organizationId: "org-1", type: "external_vehicle_expense_paid", amount: 50, date: "2026-01-03", createdAt: "2026-01-03", createdBy: "user-1" },
   ];
   assert.equal(calculateCompanyCashBalance(company), 4500);
-  assert.equal(calculateExternalCashBalance(external), 450);
+  assert.equal(calculateExternalCashBalance(external), 1450);
 });
 
 test("expense validation and mapping support funding source defaults", () => {

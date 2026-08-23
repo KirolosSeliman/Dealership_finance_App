@@ -664,6 +664,7 @@ async function selectOrgRows(client: Client, table: string, organizationId: stri
 function actionForCashType(type: string) {
   if (type === "company_cash_added") return "cash_added";
   if (type === "company_cash_withdrawn") return "cash_withdrawn";
+  if (type === "external_cash_added") return "external_cash_added";
   if (type === "external_cash_transferred_to_company") return "external_cash_transferred";
   if (type === "external_cash_personally_removed") return "external_cash_personally_spent";
   return "cash_transaction_created";

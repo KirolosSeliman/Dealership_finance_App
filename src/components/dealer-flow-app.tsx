@@ -2138,7 +2138,8 @@ function CashManagement({
         <div className="metric-card min-h-36">
           <p className="text-xs font-medium uppercase tracking-[0.12em] text-slate-500">{t.metrics.externalCash}</p>
           <p className="mt-3 text-3xl font-semibold text-white">{money(metrics.externalCash)}</p>
-          {permissions.manageCash ? <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          {permissions.manageCash ? <div className="mt-4 grid gap-3 xl:grid-cols-3">
+            <CashActionForm t={t} label={t.actions.addExternalCash} type="external_cash_added" onSubmit={onQuickTransaction} />
             <CashActionForm t={t} label={t.actions.transferExternalCash} type="external_cash_transferred_to_company" onSubmit={onQuickTransaction} />
             <CashActionForm t={t} label={t.actions.removeExternalCash} type="external_cash_personally_removed" onSubmit={onQuickTransaction} />
           </div> : <p className="mt-4 text-sm text-slate-500">Read-only external cash access.</p>}
@@ -2149,7 +2150,7 @@ function CashManagement({
           <CashLedger account="company" transactions={activeCompanyTransactions} onEdit={onEditTransaction} onDelete={onDeleteTransaction} canManage={permissions.manageCash} emptyCopy={permissions.manageCash ? "Add company cash or record a business withdrawal to start the ledger." : "No company cash transactions have been recorded."} />
         </Panel>
         <Panel title={t.sections.externalLedger}>
-          <CashLedger account="external" transactions={activeExternalTransactions} onEdit={onEditTransaction} onDelete={onDeleteTransaction} canManage={permissions.manageCash} emptyCopy={permissions.manageCash ? "External commission cash from sales will appear here, and can be transferred or removed." : "No external cash transactions have been recorded."} />
+          <CashLedger account="external" transactions={activeExternalTransactions} onEdit={onEditTransaction} onDelete={onDeleteTransaction} canManage={permissions.manageCash} emptyCopy={permissions.manageCash ? "External cash added manually or earned from sales will appear here, and can be transferred or removed." : "No external cash transactions have been recorded."} />
         </Panel>
       </div>
       {deletedTransactions.length > 0 && (

@@ -29,6 +29,7 @@
     "joinOrganization": "Joindre organisation",
     "addCompanyCash": "Ajouter caisse entreprise",
     "withdrawCompanyCash": "Retirer caisse entreprise",
+    "addExternalCash": "Ajouter caisse externe",
     "transferExternalCash": "Transférer caisse externe",
     "removeExternalCash": "Marquer comme retiré personnellement",
     "toggleLanguage": "EN",

@@ -53,6 +53,7 @@ export const COMPANY_CASH_TRANSACTION_TYPES: CompanyCashTransactionType[] = [
   "external_transfer_received",
 ];
 export const EXTERNAL_CASH_TRANSACTION_TYPES: ExternalCashTransactionType[] = [
+  "external_cash_added",
   "external_commission_earned",
   "external_cash_transferred_to_company",
   "external_cash_personally_removed",

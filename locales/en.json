@@ -29,6 +29,7 @@
     "joinOrganization": "Join organization",
     "addCompanyCash": "Add company cash",
     "withdrawCompanyCash": "Withdraw company cash",
+    "addExternalCash": "Add external cash",
     "transferExternalCash": "Transfer external cash",
     "removeExternalCash": "Mark personally removed",
     "saveSettings": "Save settings",
