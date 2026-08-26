@@ -2223,7 +2223,7 @@ function CashLedger({
               <p className="text-sm text-amber-100">This will keep the original entry and add an equal opposite reversal entry.</p>
               <input className="control w-full" name="reason" placeholder="Reason for reversal" />
               <div className="flex flex-wrap gap-2">
-                <button className="secondary-button" type="submit">Reverse transaction</button>
+                <button className="secondary-button" type="submit">{transaction.transferPairId ? "Reverse transfer" : "Reverse transaction"}</button>
                 <button className="secondary-button" type="button" onClick={() => setDeletingId(null)}>Cancel</button>
               </div>
             </form>
@@ -2235,10 +2235,23 @@ function CashLedger({
                 ["Amount", money(transaction.amount)],
                 ["Notes", transaction.note ?? ""],
               ]} />
-              {canManage && <div className="flex flex-wrap gap-2">
+              {canManage && !transaction.transferPairId && <div className="flex flex-wrap gap-2">
                 <button className="secondary-button" type="button" onClick={() => setEditingId(transaction.id)}>Edit</button>
                 <button className="secondary-button" type="button" onClick={() => setDeletingId(transaction.id)}>Reverse</button>
               </div>}
+              {canManage
+                && transaction.transferPairId
+                && !transaction.correctionOfTransactionId
+                && !transaction.reversedTransactionId
+                && !transaction.voidedAt
+                && <button className="secondary-button" type="button" onClick={() => setDeletingId(transaction.id)}>Reverse transfer</button>}
+              {transaction.transferPairId && transaction.correctionOfTransactionId && (
+                <span className="text-sm text-slate-500">Transfer reversal</span>
+              )}
+              {transaction.transferPairId
+                && !transaction.correctionOfTransactionId
+                && (transaction.reversedTransactionId || transaction.voidedAt)
+                && <span className="text-sm text-slate-500">Reversed</span>}
             </div>
           )}
         </div>

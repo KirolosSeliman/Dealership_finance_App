@@ -562,6 +562,9 @@ function assertCashUpdateKeepsBalance(appData: Awaited<ReturnType<typeof loadApp
   if (account === "company") {
     const current = appData.companyCashTransactions.find((transaction) => transaction.id === transactionId && !transaction.deletedAt);
     if (!current) throw new ApiError(404, "Company cash transaction was not found.");
+    if (current.transferPairId) {
+      throw new ApiError(400, "Paired external transfers cannot be edited directly. Reverse the transfer and create a new one.");
+    }
     const nextTransactions = appData.companyCashTransactions.map((transaction) =>
       transaction.id === transactionId ? { ...transaction, amount } : transaction,
     );
@@ -573,6 +576,9 @@ function assertCashUpdateKeepsBalance(appData: Awaited<ReturnType<typeof loadApp
   if (account === "external") {
     const current = appData.externalCashTransactions.find((transaction) => transaction.id === transactionId && !transaction.deletedAt);
     if (!current) throw new ApiError(404, "External cash transaction was not found.");
+    if (current.transferPairId) {
+      throw new ApiError(400, "Paired external transfers cannot be edited directly. Reverse the transfer and create a new one.");
+    }
     const nextTransactions = appData.externalCashTransactions.map((transaction) =>
       transaction.id === transactionId ? { ...transaction, amount } : transaction,
     );

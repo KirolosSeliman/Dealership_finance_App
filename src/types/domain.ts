@@ -42,6 +42,7 @@ export type CompanyCashTransactionType =
   | "company_cash_added"
   | "company_cash_withdrawn"
   | "vehicle_cost_paid"
+  | "vehicle_cost_refunded"
   | "paper_sale_received"
   | "external_transfer_received";
 
@@ -49,8 +50,10 @@ export type ExternalCashTransactionType =
   | "external_cash_added"
   | "external_commission_earned"
   | "external_cash_transferred_to_company"
+  | "external_transfer_returned"
   | "external_cash_personally_removed"
-  | "external_vehicle_expense_paid";
+  | "external_vehicle_expense_paid"
+  | "external_vehicle_expense_refunded";
 
 export interface Organization {
   id: string;
@@ -209,6 +212,7 @@ export interface CompanyCashTransaction {
   sourceSaleId?: string;
   createdAt: string;
   createdBy: string;
+  transferPairId?: string;
   updatedAt?: string;
   deletedAt?: string;
   deletedBy?: string;
@@ -232,6 +236,7 @@ export interface ExternalCashTransaction {
   sourceSaleId?: string;
   createdAt: string;
   createdBy: string;
+  transferPairId?: string;
   updatedAt?: string;
   deletedAt?: string;
   deletedBy?: string;

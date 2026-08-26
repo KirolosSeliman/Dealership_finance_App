@@ -412,6 +412,30 @@ test("vehicle total cost and cash balances are calculated", () => {
   assert.equal(calculateExternalCashBalance(external), 1450);
 });
 
+test("external-to-company transfer changes only the two account balances", () => {
+  const companyBefore: CompanyCashTransaction[] = [
+    { id: "company-start", organizationId: "org-1", type: "company_cash_added", amount: 8000, date: "2026-08-23", createdAt: "2026-08-23", createdBy: "user-1" },
+  ];
+  const externalBefore: ExternalCashTransaction[] = [
+    { id: "external-start", organizationId: "org-1", type: "external_cash_added", amount: 5000, date: "2026-08-23", createdAt: "2026-08-23", createdBy: "user-1" },
+  ];
+  const companyAfter = [
+    ...companyBefore,
+    { id: "company-transfer", organizationId: "org-1", type: "external_transfer_received" as const, amount: 1500, date: "2026-08-23", createdAt: "2026-08-23", createdBy: "user-1", transferPairId: "pair-1" },
+  ];
+  const externalAfter = [
+    ...externalBefore,
+    { id: "external-transfer", organizationId: "org-1", type: "external_cash_transferred_to_company" as const, amount: 1500, date: "2026-08-23", createdAt: "2026-08-23", createdBy: "user-1", transferPairId: "pair-1" },
+  ];
+
+  assert.equal(calculateExternalCashBalance(externalAfter), 3500);
+  assert.equal(calculateCompanyCashBalance(companyAfter), 9500);
+  assert.equal(
+    calculateExternalCashBalance(externalBefore) + calculateCompanyCashBalance(companyBefore),
+    calculateExternalCashBalance(externalAfter) + calculateCompanyCashBalance(companyAfter),
+  );
+});
+
 test("expense validation and mapping support funding source defaults", () => {
   assert.equal(expenseSchema.safeParse({
     category: "repair",

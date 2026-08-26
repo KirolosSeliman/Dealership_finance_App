@@ -89,6 +89,9 @@ export function calculateSaleBreakdown(input: {
 export function calculateCompanyCashBalance(transactions: CompanyCashTransaction[]) {
   return roundMoney(
     transactions.filter((transaction) => !transaction.deletedAt).reduce((sum, transaction) => {
+      if (transaction.type === "vehicle_cost_refunded") {
+        return sum + transaction.amount;
+      }
       if (
         transaction.type === "company_cash_withdrawn" ||
         transaction.type === "vehicle_cost_paid"
@@ -103,6 +106,9 @@ export function calculateCompanyCashBalance(transactions: CompanyCashTransaction
 export function calculateExternalCashBalance(transactions: ExternalCashTransaction[]) {
   return roundMoney(
     transactions.filter((transaction) => !transaction.deletedAt).reduce((sum, transaction) => {
+      if (transaction.type === "external_vehicle_expense_refunded") {
+        return sum + transaction.amount;
+      }
       if (
         transaction.type === "external_cash_transferred_to_company" ||
         transaction.type === "external_cash_personally_removed" ||

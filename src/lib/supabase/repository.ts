@@ -488,6 +488,21 @@ export async function createCashTransaction(
   note: string,
   date = today(),
 ) {
+  if (type === "external_transfer_received" || type === "external_transfer_returned") {
+    throw new Error("This cash transaction type is system-generated.");
+  }
+
+  if (type === "external_cash_transferred_to_company") {
+    const { error } = await client.rpc("transfer_external_cash_to_company", {
+      p_organization_id: organizationId,
+      p_amount: amount,
+      p_date: date || today(),
+      p_note: note || null,
+    });
+    if (error) throw error;
+    return;
+  }
+
   const user = await requireUser(client);
   const table = type.startsWith("external_") ? "external_cash_transactions" : "company_cash_transactions";
   const { error } = await client.from(table).insert({
@@ -510,6 +525,18 @@ export async function updateCashTransaction(
   formData: FormData,
 ) {
   const table = account === "company" ? "company_cash_transactions" : "external_cash_transactions";
+  const { data: current, error: readError } = await client
+    .from(table)
+    .select("transfer_pair_id")
+    .eq("id", transactionId)
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+  if (readError) throw readError;
+  if (!current) throw new Error("Cash transaction not found.");
+  if (String(current.transfer_pair_id ?? "").trim()) {
+    throw new Error("Paired external transfers cannot be edited directly. Reverse the transfer and create a new one.");
+  }
+
   const amount = numberValue(formData.get("amount"));
   const date = stringValue(formData.get("date")) || today();
   const note = optionalString(formData.get("note"));
@@ -530,6 +557,39 @@ export async function deleteCashTransaction(
   transactionId: string,
   reason: string,
 ) {
+  const table = account === "company" ? "company_cash_transactions" : "external_cash_transactions";
+  const { data: transaction, error: readError } = await client
+    .from(table)
+    .select("id,type,transfer_pair_id,correction_of_transaction_id,reversed_transaction_id,voided_at")
+    .eq("id", transactionId)
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+  if (readError) throw readError;
+  if (!transaction) throw new Error("Cash transaction not found.");
+
+  const transferPairId = String(transaction.transfer_pair_id ?? "").trim();
+  const correctionOfTransactionId = String(transaction.correction_of_transaction_id ?? "").trim();
+  if (transferPairId && correctionOfTransactionId) {
+    throw new Error("Transfer reversal entries cannot be reversed directly.");
+  }
+
+  if (transferPairId && (
+    (account === "external" && transaction.type === "external_cash_transferred_to_company") ||
+    (account === "company" && transaction.type === "external_transfer_received")
+  )) {
+    const { error } = await client.rpc("reverse_external_cash_transfer_pair", {
+      p_organization_id: organizationId,
+      p_transfer_pair_id: transferPairId,
+      p_reason: reason || "Reversed from cash management",
+    });
+    if (error) throw error;
+    return;
+  }
+
+  if (transferPairId) {
+    throw new Error("Paired cash transfers must be reversed as a complete transfer.");
+  }
+
   const rpcName = account === "company"
     ? "reverse_company_cash_transaction"
     : "reverse_external_cash_transaction";

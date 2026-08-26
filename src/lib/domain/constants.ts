@@ -49,6 +49,7 @@ export const COMPANY_CASH_TRANSACTION_TYPES: CompanyCashTransactionType[] = [
   "company_cash_added",
   "company_cash_withdrawn",
   "vehicle_cost_paid",
+  "vehicle_cost_refunded",
   "paper_sale_received",
   "external_transfer_received",
 ];
@@ -56,8 +57,10 @@ export const EXTERNAL_CASH_TRANSACTION_TYPES: ExternalCashTransactionType[] = [
   "external_cash_added",
   "external_commission_earned",
   "external_cash_transferred_to_company",
+  "external_transfer_returned",
   "external_cash_personally_removed",
   "external_vehicle_expense_paid",
+  "external_vehicle_expense_refunded",
 ];
 
 export const TAXABLE_PROFIT_TAX_RATE = 0.22;
