@@ -50,7 +50,7 @@ test("Deep Capture delete/export controls avoid business-record deletion", () =>
 });
 
 test("Dealer Flow settings page exposes Deep Capture transparency and admin controls", () => {
-  const app = readFileSync(join(repoRoot, "src/components/dealer-flow-app.tsx"), "utf8");
+  const app = readFileSync(join(repoRoot, "src/features/app/feature-views.tsx"), "utf8");
 
   for (const marker of [
     "Market Snap / Deep Capture",

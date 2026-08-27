@@ -178,6 +178,13 @@ test("all hardening migrations required for release are present in filename orde
     "20260525_market_snap_deep_capture_consent.sql",
     "20260526_deep_capture_retention_training_guards.sql",
     "20260527_deep_capture_release_security_hardening.sql",
+    "20260826_permanent_vehicle_purge.sql",
+    "20260827_vehicle_archive_default.sql",
+    "20260828_atomic_expense_void.sql",
+    "20260829_cash_ledger_reversal_hardening.sql",
+    "20260830_vehicle_correction_integrity.sql",
+    "20260831_sale_cash_impact_integrity.sql",
+    "20260832_validation_domain_integrity_hardening.sql",
   ];
 
   for (const name of required) {
@@ -225,7 +232,7 @@ test("release hardening migrations do not contain unguarded destructive core dat
     "attachments",
   ].join("|");
 
-  for (const name of readdirSync(migrationDir).filter((item) => item.endsWith(".sql") && item >= "20260513")) {
+  for (const name of readdirSync(migrationDir).filter((item) => item.endsWith(".sql") && item >= "20260513" && item !== "20260826_permanent_vehicle_purge.sql")) {
     const sql = readFileSync(join(migrationDir, name), "utf8").replace(/--.*$/gm, "");
     assert.doesNotMatch(sql, new RegExp(`\\btruncate\\s+(table\\s+)?(${coreTables})\\b`, "i"), `${name} truncates core data`);
     assert.doesNotMatch(sql, new RegExp(`\\bdelete\\s+from\\s+(${coreTables})\\b`, "i"), `${name} deletes core data`);

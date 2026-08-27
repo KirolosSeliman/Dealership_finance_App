@@ -1,5 +1,6 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { calculateExpenseTax } from "@/lib/domain/calculations";
+import { MANUAL_CASH_TRANSACTION_TYPES } from "@/lib/domain/constants";
 import { assertAllowedUpload, sanitizeStorageFileName } from "@/lib/security";
 import { dedupeOrganizationsByHighestRole, emptyAppData, mapActivityLog, mapAttachment, mapCompanyCashTransaction, mapContact, mapExpense, mapExternalCashTransaction, mapMembership, mapOrganization, mapRecurringExpenseTemplate, mapSale, mapVehicle } from "@/lib/supabase/mappers";
 import { normalizeVin } from "@/lib/validation";
@@ -253,14 +254,18 @@ export async function updateVehicleMainPhoto(client: Client, vehicle: Vehicle, a
   await logActivity(client, vehicle.organizationId, "vehicle_main_photo_updated", "vehicle", vehicle.id, attachment.title);
 }
 
-export async function archiveVehicle(client: Client, organizationId: string, vehicleId: string, reason?: string) {
+export async function archiveVehicle(
+  client: Client,
+  organizationId: string,
+  vehicleId: string,
+  reason?: string,
+) {
   const { error } = await client.rpc("archive_vehicle", {
     p_organization_id: organizationId,
     p_vehicle_id: vehicleId,
-    p_reason: reason || "Archived from vehicle detail screen.",
+    p_reason: reason?.trim() || null,
   });
   if (error) throw error;
-  return { archived: true };
 }
 
 export async function createExpense(client: Client, vehicle: Vehicle, formData: FormData) {
@@ -413,26 +418,13 @@ export async function applyRecurringExpenseTemplate(client: Client, vehicle: Veh
   return String(expenseId);
 }
 
-export async function deleteExpense(client: Client, vehicle: Vehicle, expenseId: string) {
-  const user = await requireUser(client);
-  const deletedAt = new Date().toISOString();
-  const [companyResult, externalResult] = await Promise.all([
-    client.from("company_cash_transactions").update({
-      deleted_at: deletedAt,
-      deleted_by: user.id,
-      deletion_note: "Linked vehicle expense was deleted.",
-      updated_at: deletedAt,
-    }).eq("organization_id", vehicle.organizationId).eq("source_expense_id", expenseId).is("deleted_at", null),
-    client.from("external_cash_transactions").update({
-      deleted_at: deletedAt,
-      deleted_by: user.id,
-      deletion_note: "Linked vehicle expense was deleted.",
-      updated_at: deletedAt,
-    }).eq("organization_id", vehicle.organizationId).eq("source_expense_id", expenseId).is("deleted_at", null),
-  ]);
-  if (companyResult.error) throw companyResult.error;
-  if (externalResult.error) throw externalResult.error;
-  const { error } = await client.rpc("delete_vehicle_expense", { expense_id: expenseId });
+export async function voidVehicleExpense(client: Client, vehicle: Vehicle, expenseId: string, reason: string) {
+  const { error } = await client.rpc("void_vehicle_expense_with_cash_reversal", {
+    p_organization_id: vehicle.organizationId,
+    p_vehicle_id: vehicle.id,
+    p_expense_id: expenseId,
+    p_reason: reason,
+  });
   if (error) throw error;
 }
 
@@ -503,6 +495,10 @@ export async function createCashTransaction(
     return;
   }
 
+  if (!MANUAL_CASH_TRANSACTION_TYPES.includes(type as typeof MANUAL_CASH_TRANSACTION_TYPES[number])) {
+    throw new Error("This cash transaction type is system-generated and cannot be entered manually.");
+  }
+
   const user = await requireUser(client);
   const table = type.startsWith("external_") ? "external_cash_transactions" : "company_cash_transactions";
   const { error } = await client.from(table).insert({
@@ -524,30 +520,40 @@ export async function updateCashTransaction(
   transactionId: string,
   formData: FormData,
 ) {
+  if (account !== "company" && account !== "external") throw new Error("Cash account is invalid.");
   const table = account === "company" ? "company_cash_transactions" : "external_cash_transactions";
   const { data: current, error: readError } = await client
     .from(table)
-    .select("transfer_pair_id")
+    .select("transfer_pair_id,source_vehicle_id,source_expense_id,source_sale_id,correction_of_transaction_id,reversed_transaction_id,voided_at,deleted_at")
     .eq("id", transactionId)
     .eq("organization_id", organizationId)
     .maybeSingle();
   if (readError) throw readError;
-  if (!current) throw new Error("Cash transaction not found.");
+  if (!current || current.deleted_at) throw new Error("Cash transaction not found.");
   if (String(current.transfer_pair_id ?? "").trim()) {
     throw new Error("Paired external transfers cannot be edited directly. Reverse the transfer and create a new one.");
+  }
+  if (current.source_vehicle_id || current.source_expense_id || current.source_sale_id) {
+    throw new Error("System-generated cash transactions cannot be edited.");
+  }
+  if (current.correction_of_transaction_id || current.reversed_transaction_id || current.voided_at) {
+    throw new Error("Reversal entries cannot be edited.");
   }
 
   const amount = numberValue(formData.get("amount"));
   const date = stringValue(formData.get("date")) || today();
   const note = optionalString(formData.get("note"));
-  const { error } = await client.from(table).update({
-    amount,
-    date,
-    note,
-    updated_at: new Date().toISOString(),
-  }).eq("id", transactionId).eq("organization_id", organizationId).is("deleted_at", null);
+  const rpcName = account === "company"
+    ? "update_manual_company_cash_transaction"
+    : "update_manual_external_cash_transaction";
+  const { error } = await client.rpc(rpcName, {
+    p_organization_id: organizationId,
+    p_transaction_id: transactionId,
+    p_amount: amount,
+    p_date: date,
+    p_note: note,
+  });
   if (error) throw error;
-  await logActivity(client, organizationId, "cash_transaction_updated", "cash_transaction", transactionId, note ?? "Cash transaction updated");
 }
 
 export async function deleteCashTransaction(
@@ -557,15 +563,20 @@ export async function deleteCashTransaction(
   transactionId: string,
   reason: string,
 ) {
+  if (account !== "company" && account !== "external") throw new Error("Cash account is invalid.");
   const table = account === "company" ? "company_cash_transactions" : "external_cash_transactions";
   const { data: transaction, error: readError } = await client
     .from(table)
-    .select("id,type,transfer_pair_id,correction_of_transaction_id,reversed_transaction_id,voided_at")
+    .select("id,type,transfer_pair_id,source_vehicle_id,source_expense_id,source_sale_id,correction_of_transaction_id,reversed_transaction_id,voided_at,deleted_at")
     .eq("id", transactionId)
     .eq("organization_id", organizationId)
     .maybeSingle();
   if (readError) throw readError;
-  if (!transaction) throw new Error("Cash transaction not found.");
+  if (!transaction || transaction.deleted_at) throw new Error("Cash transaction not found.");
+
+  if (transaction.source_vehicle_id || transaction.source_expense_id || transaction.source_sale_id) {
+    throw new Error("System-generated cash transactions must be corrected through the vehicle or sale workflow.");
+  }
 
   const transferPairId = String(transaction.transfer_pair_id ?? "").trim();
   const correctionOfTransactionId = String(transaction.correction_of_transaction_id ?? "").trim();

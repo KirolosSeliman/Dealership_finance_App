@@ -62,16 +62,25 @@ function checkLocalRateLimit(bucket: string, identity: string, limit: number, wi
 }
 
 async function checkPersistentRateLimit(bucket: string, identity: string, limit: number, windowMs: number) {
-  const client = getRateLimitClient();
-  const { data, error } = await client.rpc("check_rate_limit", {
-    p_bucket: bucket,
-    p_identifier_hash: hashRateLimitIdentity(identity),
-    p_limit: limit,
-    p_window_seconds: Math.max(1, Math.ceil(windowMs / 1000)),
-  });
-  if (error) throw error;
-  const allowed = typeof data === "object" && data !== null && "allowed" in data ? Boolean((data as { allowed?: unknown }).allowed) : false;
-  if (!allowed) throw new RouteSecurityError(429, "Too many requests. Please try again shortly.");
+  try {
+    const client = getRateLimitClient();
+    const { data, error } = await client.rpc("check_rate_limit", {
+      p_bucket: bucket,
+      p_identifier_hash: hashRateLimitIdentity(identity),
+      p_limit: limit,
+      p_window_seconds: Math.max(1, Math.ceil(windowMs / 1000)),
+    });
+    if (error) {
+      console.error("[rate-limit] persistent backend unavailable", error.message);
+      throw new RouteSecurityError(503, "Persistent rate limiting is unavailable. Apply the rate-limit database migration, then try again.");
+    }
+    const allowed = typeof data === "object" && data !== null && "allowed" in data ? Boolean((data as { allowed?: unknown }).allowed) : false;
+    if (!allowed) throw new RouteSecurityError(429, "Too many requests. Please try again shortly.");
+  } catch (error) {
+    if (error instanceof RouteSecurityError) throw error;
+    console.error("[rate-limit] persistent backend request failed", error);
+    throw new RouteSecurityError(503, "Persistent rate limiting is unavailable. Try again shortly.");
+  }
 }
 
 function getRateLimitClient() {
@@ -86,8 +95,11 @@ function getRateLimitClient() {
 }
 
 function shouldUsePersistentRateLimit() {
-  if (process.env.RATE_LIMIT_BACKEND === "memory") return false;
-  return process.env.RATE_LIMIT_BACKEND === "supabase" || process.env.NODE_ENV === "production";
+  const backend = process.env.RATE_LIMIT_BACKEND?.trim().toLowerCase();
+  if (process.env.NODE_ENV === "production") return true;
+  if (backend === "supabase") return true;
+  if (backend === "memory" || !backend) return false;
+  throw new RouteSecurityError(503, "RATE_LIMIT_BACKEND must be either 'supabase' or 'memory'.");
 }
 
 function hashRateLimitIdentity(identity: string) {

@@ -6,7 +6,7 @@ import { getRouteState } from "../src/features/app/navigation";
 import { PURCHASE_SOURCES } from "../src/lib/domain/constants";
 
 const repoRoot = process.cwd();
-const dealerFlowApp = readFileSync(join(repoRoot, "src/components/dealer-flow-app.tsx"), "utf8");
+const dealerFlowApp = readFileSync(join(repoRoot, "src/features/app/feature-views.tsx"), "utf8");
 
 test("legacy Market routes fall back to the dashboard list", () => {
   for (const pathname of ["/market-snap", "/deal-radar", "/market-data"]) {

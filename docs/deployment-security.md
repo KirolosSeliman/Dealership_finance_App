@@ -10,7 +10,7 @@ Client-safe:
 
 Rate limiting:
 
-- `RATE_LIMIT_BACKEND=supabase` in production. Use `memory` only for local development or deterministic tests.
+- `RATE_LIMIT_BACKEND=supabase` in production. Use `memory` only for local development or deterministic tests; production ignores a memory override and returns a configuration error if Supabase-backed limiting is unavailable.
 
 Server-only:
 
@@ -42,7 +42,9 @@ Required migrations:
 - `20260510_delete_vehicle_cascade.sql`
 - `20260510_delete_vehicle_cascade_hardening.sql`
 
-Vehicle deletion requires the `delete_vehicle_and_related_data(uuid, uuid)` RPC from the 20260510 migrations. If production shows a missing vehicle deletion migration error, run both 20260510 files in Supabase SQL editor, then retry the delete.
+Normal vehicle removal requires the `archive_vehicle(uuid, uuid, text)` RPC from `20260825_archive_vehicle_cash_refund.sql`. Expense creation, correction, and voiding require the atomic RPCs from `20260828_atomic_expense_void.sql`. Cash manual edits require the atomic RPCs from `20260829_cash_ledger_reversal_hardening.sql`; system-generated cash rows must be corrected through vehicle or sale workflows, and cash reversal keeps the original row for auditability. Purchase corrections use the forward integrity replacement in `20260830_vehicle_correction_integrity.sql`, which excludes voided/reversed payments, rejects duplicate active impacts, and recreates a missing linked cash row atomically. Sale void/correction uses the forward integrity replacement in `20260831_sale_cash_impact_integrity.sql`, which fails closed when sale cash impacts are missing or ambiguous and preserves the existing buyer link when no replacement buyer is entered. Validation hardening from `20260832_validation_domain_integrity_hardening.sql` canonicalizes VINs, blocks concurrent duplicate active VIN writes while preserving legacy duplicates for review, and removes direct user insert access to system-generated cash types. If production reports a missing RPC, apply the migrations in filename order through the corresponding migration in the Supabase SQL editor, then retry the action. Do not use the legacy `delete_vehicle_and_related_data(uuid, uuid)` or `delete_vehicle_expense(uuid)` RPCs for application actions.
+
+High-risk browser mutations use domain-specific routes (`/api/vehicles`, `/api/vehicles/:id/*`, `/api/sales/:id/*`, and `/api/cash/:account/*`) backed by `src/lib/server/domain-mutation-handlers.ts`. These routes authenticate the user, enforce organization roles, validate the domain payload, and use separate rate-limit buckets. `/api/mutations` remains only as a deprecated compatibility path for unmigrated operations and delegates migrated high-risk operations to the same handler; do not add new financial cases to that switch.
 
 ## Vercel Setup
 
@@ -80,7 +82,8 @@ Before using real business data, manually verify:
 4. Upload a valid backup ZIP in Backups / Exports and confirm restore preparation reports counts without writing business records.
 5. Upload an invalid ZIP and confirm restore preparation returns a clear error.
 6. Try editing a cash transaction so the resulting company/external balance would become negative and confirm the server rejects it.
-7. Confirm Cloudflare R2 objects are private and the uploaded backup appears under `dealer-flow-backups/{organization_id}/{year}/{month}/`.
+7. Try editing or reversing a sale-, vehicle-, or expense-linked cash row and confirm the server requires the corresponding correction workflow.
+8. Confirm Cloudflare R2 objects are private and the uploaded backup appears under `dealer-flow-backups/{organization_id}/{year}/{month}/`.
 
 ## Manual P2 Verification
 

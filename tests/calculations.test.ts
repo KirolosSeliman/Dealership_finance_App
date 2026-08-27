@@ -565,7 +565,7 @@ test("vehicle VIN validation normalizes quality input and rejects unsafe identif
 
 test("validation migration backs active VIN uniqueness without unsafe duplicate cleanup", () => {
   const sql = readFileSync(join(process.cwd(), "supabase/migrations/20260519_validation_domain_integrity.sql"), "utf8");
-  const route = readFileSync(join(process.cwd(), "src/app/api/mutations/route.ts"), "utf8");
+  const handler = readFileSync(join(process.cwd(), "src/lib/server/domain-mutation-handlers.ts"), "utf8");
   const repository = readFileSync(join(process.cwd(), "src/lib/supabase/repository.ts"), "utf8");
 
   assert.match(sql, /create or replace function normalize_vehicle_vin/i);
@@ -573,8 +573,8 @@ test("validation migration backs active VIN uniqueness without unsafe duplicate 
   assert.match(sql, /contacts_type_valid/i);
   assert.match(sql, /Duplicate active VINs exist/i);
   assert.match(sql, /vehicles_org_active_vin_unique_idx/i);
-  assert.match(route, /assertUniqueActiveVin/i);
-  assert.match(route, /Another active vehicle already uses this VIN/i);
+  assert.match(handler, /assertUniqueActiveVin/i);
+  assert.match(handler, /Another active vehicle already uses this VIN/i);
   assert.match(repository, /normalizeVin\(formData\.get\("vin"\)\)/i);
 });
 test("duplicate organization rows resolve to the highest role", () => {
@@ -1194,18 +1194,57 @@ test("high-risk mutation domains have dedicated route entrypoints", () => {
   }
   const bridge = readFileSync(join(process.cwd(), "src/lib/server/mutation-route-bridge.ts"), "utf8");
   const mutations = readFileSync(join(process.cwd(), "src/features/app/mutations.ts"), "utf8");
+  const cashCreateRoute = readFileSync(join(process.cwd(), "src/app/api/cash/[account]/route.ts"), "utf8");
+  const handler = readFileSync(join(process.cwd(), "src/lib/server/domain-mutation-handlers.ts"), "utf8");
   assert.match(bridge, /forwardDomainMutation/i);
   assert.match(bridge, /checkRateLimit/i);
   assert.match(mutations, /function mutationEndpoint/i);
   assert.match(mutations, /\/api\/vehicles\/\$\{vehicleId\}\/archive/i);
   assert.match(mutations, /\/api\/cash\/\$\{account\}\/\$\{transactionId\}\/reverse/i);
+  assert.match(cashCreateRoute, /fields: \{ account \}/i);
+  assert.match(handler, /Cash account does not match the transaction type/i);
+});
+
+test("migrated high-risk mutations use shared domain handlers instead of the legacy switch", () => {
+  const legacyRoute = readFileSync(join(process.cwd(), "src/app/api/mutations/route.ts"), "utf8");
+  const bridge = readFileSync(join(process.cwd(), "src/lib/server/mutation-route-bridge.ts"), "utf8");
+  const handler = readFileSync(join(process.cwd(), "src/lib/server/domain-mutation-handlers.ts"), "utf8");
+
+  assert.match(legacyRoute, /handleDomainMutation/i);
+  assert.doesNotMatch(legacyRoute, /case "(?:createVehicle|updateVehicle|deleteVehicle|createExpense|updateExpense|voidExpense|recordSale|voidSale|correctSale|createCashTransaction|updateCashTransaction|deleteCashTransaction)"/i);
+  assert.match(bridge, /handleDomainMutation/i);
+  assert.doesNotMatch(bridge, /legacyMutationPost/i);
+  assert.match(handler, /DOMAIN_MUTATION_OPERATIONS/i);
+  assert.match(handler, /createVehicle|createExpense|recordSale|createCashTransaction/i);
 });
 
 test("DealerFlowApp shell delegates app plumbing to feature modules", () => {
   const app = readFileSync(join(process.cwd(), "src/components/dealer-flow-app.tsx"), "utf8");
+  const featureViews = readFileSync(join(process.cwd(), "src/features/app/feature-views.tsx"), "utf8");
   assert.match(app, /@\/features\/app\/navigation/i);
   assert.match(app, /@\/features\/app\/permissions/i);
   assert.match(app, /@\/features\/app\/mutations/i);
+  assert.ok(app.length < 60_000, "the app shell should not contain the feature renderers");
+  assert.match(featureViews, /export function Dashboard/i);
+  assert.match(featureViews, /export function VehiclesSection/i);
+  assert.match(featureViews, /export function CashManagement/i);
+  assert.match(featureViews, /export function MarketSnapDashboard/i);
+  for (const featureRoute of [
+    "src/features/dashboard/dashboard-view.tsx",
+    "src/features/vehicles/vehicles-view.tsx",
+    "src/features/cash/cash-view.tsx",
+    "src/features/contacts/contacts-view.tsx",
+    "src/features/taxes/taxes-view.tsx",
+    "src/features/backups/backups-view.tsx",
+    "src/features/settings/settings-view.tsx",
+    "src/features/market-snap/market-snap-view.tsx",
+  ]) {
+    assert.equal(existsSync(join(process.cwd(), featureRoute)), true, `${featureRoute} should exist`);
+  }
+  assert.match(app, /@\/features\/dashboard\/dashboard-view/i);
+  assert.match(app, /@\/features\/vehicles\/vehicles-view/i);
+  assert.match(app, /@\/features\/cash\/cash-view/i);
+  assert.doesNotMatch(app, /function (Dashboard|VehiclesSection|CashManagement|MarketSnapDashboard)\(/i);
   assert.equal(app.includes("function getRouteState"), false);
   assert.equal(app.includes("function mutationEndpoint"), false);
   assert.equal(existsSync(join(process.cwd(), "src/features/app/navigation.ts")), true);
@@ -1347,12 +1386,13 @@ test("invitation regeneration schema requires an organization id", () => {
   assert.equal(regenerateInvitationSchema.safeParse({ organizationId: "bad" }).success, false);
 });
 
-test("vehicle delete confirmation accepts DELETE or VIN case-insensitively", () => {
-  assert.equal(isValidVehicleDeleteConfirmation("DELETE", "KM8JUCAC7AU031562"), true);
-  assert.equal(isValidVehicleDeleteConfirmation(" delete ", "KM8JUCAC7AU031562"), true);
-  assert.equal(isValidVehicleDeleteConfirmation("KM8JUCAC7AU031562", "KM8JUCAC7AU031562"), true);
-  assert.equal(isValidVehicleDeleteConfirmation(" km8jucac7au031562 ", "KM8JUCAC7AU031562"), true);
-  assert.equal(isValidVehicleDeleteConfirmation("wrong", "KM8JUCAC7AU031562"), false);
+test("vehicle delete confirmation requires DELETE plus the actual vehicle identifier", () => {
+  const vehicle = { id: "9a2f9c7f-6d2d-4af4-bf6c-54f0c0a3f8b2", vin: "KM8JUCAC7AU031562" };
+  assert.equal(isValidVehicleDeleteConfirmation("DELETE", vehicle), false);
+  assert.equal(isValidVehicleDeleteConfirmation("KM8JUCAC7AU031562", vehicle), false);
+  assert.equal(isValidVehicleDeleteConfirmation(" delete km8jucac7au031562 ", vehicle), true);
+  assert.equal(isValidVehicleDeleteConfirmation("DELETE wrong", vehicle), false);
+  assert.equal(isValidVehicleDeleteConfirmation("DELETE 9a2f9c7f-6d2d-4af4-bf6c-54f0c0a3f8b2", { ...vehicle, vin: "" }), true);
 });
 
 test("vehicle archive helpers hide archived inventory without removing audit data", () => {

@@ -46,7 +46,7 @@ create table organization_invitations (
 create table vehicles (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references organizations(id) on delete cascade,
-  vin text,
+  vin text not null default '' check (vin = '' or vin ~ '^[A-HJ-NPR-Z0-9]{17}$'),
   year integer,
   make text,
   model text,
@@ -81,6 +81,9 @@ create table vehicle_expenses (
   funding_source text not null default 'company_cash' check (funding_source in ('company_cash', 'external_cash')),
   date date not null default current_date,
   note text,
+  voided_at timestamptz,
+  voided_by uuid references profiles(id),
+  void_reason text,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   created_by uuid references profiles(id)
@@ -149,6 +152,12 @@ create table sales (
   real_client_payment numeric(12,2) not null,
   external_commission numeric(12,2) not null,
   notes text,
+  status text not null default 'active' check (status in ('active', 'voided', 'corrected')),
+  voided_at timestamptz,
+  voided_by uuid references profiles(id),
+  void_reason text,
+  corrected_by_sale_id uuid references sales(id),
+  correction_of_sale_id uuid references sales(id),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   created_by uuid references profiles(id)
@@ -163,11 +172,18 @@ create table company_cash_transactions (
   note text,
   source_vehicle_id uuid references vehicles(id),
   source_expense_id uuid references vehicle_expenses(id) on delete set null,
+  source_sale_id uuid references sales(id),
+  transfer_pair_id uuid,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   deleted_at timestamptz,
   deleted_by uuid references profiles(id),
   deletion_note text,
+  reversed_transaction_id uuid references company_cash_transactions(id),
+  correction_of_transaction_id uuid references company_cash_transactions(id),
+  voided_at timestamptz,
+  voided_by uuid references profiles(id),
+  void_reason text,
   created_by uuid references profiles(id)
 );
 
@@ -180,11 +196,18 @@ create table external_cash_transactions (
   note text,
   source_vehicle_id uuid references vehicles(id),
   source_expense_id uuid references vehicle_expenses(id) on delete set null,
+  source_sale_id uuid references sales(id),
+  transfer_pair_id uuid,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   deleted_at timestamptz,
   deleted_by uuid references profiles(id),
   deletion_note text,
+  reversed_transaction_id uuid references external_cash_transactions(id),
+  correction_of_transaction_id uuid references external_cash_transactions(id),
+  voided_at timestamptz,
+  voided_by uuid references profiles(id),
+  void_reason text,
   created_by uuid references profiles(id)
 );
 
@@ -391,33 +414,8 @@ language plpgsql
 security definer
 set search_path = public
 as $$
-declare
-  expense_record record;
 begin
-  select * into expense_record
-  from vehicle_expenses
-  where id = expense_id;
-
-  if expense_record.id is null then
-    raise exception 'expense not found';
-  end if;
-
-  if not has_org_role(expense_record.organization_id, array['owner','admin','member']::app_role[]) then
-    raise exception 'not allowed';
-  end if;
-
-  delete from vehicle_expenses
-  where id = expense_id;
-
-  insert into activity_logs (organization_id, action, entity_type, entity_id, message, created_by)
-  values (
-    expense_record.organization_id,
-    'expense_deleted',
-    'vehicle',
-    expense_record.vehicle_id,
-    'Expense deleted',
-    auth.uid()
-  );
+  raise exception 'delete_vehicle_expense is deprecated. Use void_vehicle_expense_with_cash_reversal.';
 end;
 $$;
 
@@ -690,7 +688,6 @@ create policy "update expenses" on vehicle_expenses for update using (has_org_ro
 create policy "read recurring vehicle expense templates" on recurring_vehicle_expense_templates for select using (is_org_member(organization_id));
 create policy "insert recurring vehicle expense templates" on recurring_vehicle_expense_templates for insert with check (has_org_role(organization_id, array['owner','admin']::app_role[]));
 create policy "update recurring vehicle expense templates" on recurring_vehicle_expense_templates for update using (has_org_role(organization_id, array['owner','admin']::app_role[])) with check (has_org_role(organization_id, array['owner','admin']::app_role[]));
-create policy "delete expenses" on vehicle_expenses for delete using (has_org_role(organization_id, array['owner','admin','member']::app_role[]));
 
 create policy "read contacts" on contacts for select using (is_org_member(organization_id));
 create policy "write contacts" on contacts for insert with check (has_org_role(organization_id, array['owner','admin','member']::app_role[]));
@@ -700,15 +697,29 @@ create policy "read sales" on sales for select using (is_org_member(organization
 create policy "write sales" on sales for insert with check (has_org_role(organization_id, array['owner','admin','member']::app_role[]));
 
 create policy "read company cash" on company_cash_transactions for select using (is_org_member(organization_id));
-create policy "write company cash" on company_cash_transactions for insert with check (has_org_role(organization_id, array['owner','admin']::app_role[]));
-create policy "insert company expense cash impact" on company_cash_transactions for insert with check (type = 'vehicle_cost_paid' and source_expense_id is not null and source_vehicle_id is not null and has_org_role(organization_id, array['owner','admin','member']::app_role[]));
-create policy "update company cash" on company_cash_transactions for update using (has_org_role(organization_id, array['owner','admin']::app_role[]));
-create policy "update company expense cash impact" on company_cash_transactions for update using (type = 'vehicle_cost_paid' and source_expense_id is not null and source_vehicle_id is not null and has_org_role(organization_id, array['owner','admin','member']::app_role[])) with check (type = 'vehicle_cost_paid' and source_expense_id is not null and source_vehicle_id is not null and has_org_role(organization_id, array['owner','admin','member']::app_role[]));
+create policy "insert manual company cash" on company_cash_transactions for insert with check (
+  type in ('company_cash_added', 'company_cash_withdrawn')
+  and source_vehicle_id is null
+  and source_expense_id is null
+  and source_sale_id is null
+  and transfer_pair_id is null
+  and correction_of_transaction_id is null
+  and reversed_transaction_id is null
+  and voided_at is null
+  and has_org_role(organization_id, array['owner','admin']::app_role[])
+);
 create policy "read external cash" on external_cash_transactions for select using (is_org_member(organization_id));
-create policy "write external cash" on external_cash_transactions for insert with check (has_org_role(organization_id, array['owner','admin']::app_role[]));
-create policy "insert external expense cash impact" on external_cash_transactions for insert with check (type = 'external_vehicle_expense_paid' and source_expense_id is not null and source_vehicle_id is not null and has_org_role(organization_id, array['owner','admin','member']::app_role[]));
-create policy "update external cash" on external_cash_transactions for update using (has_org_role(organization_id, array['owner','admin']::app_role[]));
-create policy "update external expense cash impact" on external_cash_transactions for update using (type = 'external_vehicle_expense_paid' and source_expense_id is not null and source_vehicle_id is not null and has_org_role(organization_id, array['owner','admin','member']::app_role[])) with check (type = 'external_vehicle_expense_paid' and source_expense_id is not null and source_vehicle_id is not null and has_org_role(organization_id, array['owner','admin','member']::app_role[]));
+create policy "insert manual external cash" on external_cash_transactions for insert with check (
+  type in ('external_cash_added', 'external_cash_personally_removed')
+  and source_vehicle_id is null
+  and source_expense_id is null
+  and source_sale_id is null
+  and transfer_pair_id is null
+  and correction_of_transaction_id is null
+  and reversed_transaction_id is null
+  and voided_at is null
+  and has_org_role(organization_id, array['owner','admin']::app_role[])
+);
 
 create policy "read attachments" on attachments for select using (is_org_member(organization_id));
 create policy "write attachments" on attachments for insert with check (has_org_role(organization_id, array['owner','admin','member']::app_role[]));
@@ -726,6 +737,9 @@ create policy "own preferences" on user_preferences for all using (user_id = aut
 
 create index vehicles_org_status_idx on vehicles (organization_id, status);
 create index vehicles_org_active_status_idx on vehicles (organization_id, status) where archived_at is null;
+create unique index vehicles_org_active_vin_unique_idx
+  on vehicles (organization_id, upper(regexp_replace(vin, '\s+', '', 'g')))
+  where archived_at is null and upper(regexp_replace(vin, '\s+', '', 'g')) <> '';
 create index expenses_org_vehicle_idx on vehicle_expenses (organization_id, vehicle_id);
 create index recurring_vehicle_expense_templates_org_idx on recurring_vehicle_expense_templates (organization_id, is_active, deleted_at);
 create index vehicle_expenses_template_idx on vehicle_expenses (recurring_template_id);

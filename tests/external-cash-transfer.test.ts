@@ -249,8 +249,8 @@ test("repository refuses to edit paired transactions", async () => {
 });
 
 test("API and ledger UI include defense-in-depth pair protection", () => {
-  const route = readFileSync(join(process.cwd(), "src/app/api/mutations/route.ts"), "utf8");
-  const component = readFileSync(join(process.cwd(), "src/components/dealer-flow-app.tsx"), "utf8");
+  const route = readFileSync(join(process.cwd(), "src/lib/server/domain-mutation-handlers.ts"), "utf8");
+  const component = readFileSync(join(process.cwd(), "src/features/app/feature-views.tsx"), "utf8");
   const ledger = component.slice(component.indexOf("function CashLedger"), component.indexOf("function CashActionForm"));
   assert.match(route, /transferPairId/);
   assert.match(route, /Paired external transfers cannot be edited directly/i);

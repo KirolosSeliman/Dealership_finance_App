@@ -111,6 +111,9 @@ export interface VehicleExpense {
   note?: string;
   createdAt: string;
   createdBy: string;
+  voidedAt?: string;
+  voidedBy?: string;
+  voidReason?: string;
 }
 
 export interface RecurringVehicleExpenseTemplate {

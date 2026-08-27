@@ -18,7 +18,7 @@ export function mutationEndpoint(operation: string, formData: FormData): { url: 
   if (operation === "deleteVehicle" && vehicleId) return { url: `/api/vehicles/${vehicleId}/archive`, method: "POST" };
   if (operation === "createExpense" && vehicleId) return { url: `/api/vehicles/${vehicleId}/expenses`, method: "POST" };
   if (operation === "updateExpense" && vehicleId && expenseId) return { url: `/api/vehicles/${vehicleId}/expenses/${expenseId}`, method: "PATCH" };
-  if (operation === "deleteExpense" && vehicleId && expenseId) return { url: `/api/vehicles/${vehicleId}/expenses/${expenseId}`, method: "DELETE" };
+  if (operation === "voidExpense" && vehicleId && expenseId) return { url: `/api/vehicles/${vehicleId}/expenses/${expenseId}`, method: "DELETE" };
   if (operation === "recordSale" && vehicleId) return { url: `/api/vehicles/${vehicleId}/sale`, method: "POST" };
   if (operation === "voidSale" && saleId) return { url: `/api/sales/${saleId}/void`, method: "POST" };
   if (operation === "correctSale" && saleId) return { url: `/api/sales/${saleId}/correct`, method: "POST" };

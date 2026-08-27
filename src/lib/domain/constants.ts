@@ -62,6 +62,13 @@ export const EXTERNAL_CASH_TRANSACTION_TYPES: ExternalCashTransactionType[] = [
   "external_vehicle_expense_paid",
   "external_vehicle_expense_refunded",
 ];
+export const MANUAL_CASH_TRANSACTION_TYPES = [
+  "company_cash_added",
+  "company_cash_withdrawn",
+  "external_cash_added",
+  "external_cash_transferred_to_company",
+  "external_cash_personally_removed",
+] as const;
 
 export const TAXABLE_PROFIT_TAX_RATE = 0.22;
 export const OPENLANE_PURCHASE_TAX_RATE = 0.05;

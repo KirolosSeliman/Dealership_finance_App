@@ -5,6 +5,7 @@ export function POST(request: Request, context: { params: Promise<{ account: str
     forwardDomainMutation(request, "createCashTransaction", {
       bucket: `cash-${account}-create`,
       limit: 30,
+      fields: { account },
     }),
   );
 }

@@ -816,6 +816,19 @@ export async function dataQuality(request: Request) {
   }
 }
 
+export async function calibrationReport(request: Request) {
+  return withMarketSnapAuth(request, "market-snap-calibration-report", async ({ client, userId }) => {
+    const organizationId = new URL(request.url).searchParams.get("organizationId") ?? "";
+    const payload = dealRadarQuerySchema.pick({ organizationId: true }).parse({ organizationId });
+    await requireOrganizationRole(client, userId, payload.organizationId, ["owner", "admin"]);
+    const { data, error } = await client.rpc("market_snap_calibration_report", {
+      p_organization_id: payload.organizationId,
+    });
+    if (error) throw error;
+    return NextResponse.json({ ok: true, report: data ?? emptyCalibrationReport() });
+  });
+}
+
 const OPENLANE_VIN_PATTERN = /^[A-HJ-NPR-Z0-9]{17}$/i;
 
 function isOpenLaneQualityRow(row: Record<string, unknown>) {
@@ -877,6 +890,18 @@ function stringMetric(value: unknown) {
 function objectMetric(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return value as Record<string, unknown>;
+}
+
+function emptyCalibrationReport() {
+  return {
+    outcomeCount: 0,
+    averageError: 0,
+    medianError: 0,
+    averagePercentageError: 0,
+    errorByMakeModel: [],
+    errorBySource: [],
+    confidenceVsError: [],
+  };
 }
 
 export async function importListings(request: Request, importType: "csv" | "json") {

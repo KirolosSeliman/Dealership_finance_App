@@ -60,7 +60,7 @@ export function calculateExpenseTax(input: {
 }
 
 export function calculateVehicleTotalCost(vehicle: Vehicle, expenses: VehicleExpense[]) {
-  const vehicleExpenses = expenses.filter((expense) => expense.vehicleId === vehicle.id);
+  const vehicleExpenses = expenses.filter((expense) => expense.vehicleId === vehicle.id && !expense.voidedAt);
   const expenseTotal = vehicleExpenses.reduce((sum, expense) => {
     if (expense.category === "vehicle_purchase_price" && vehicle.purchasePrice > 0) {
       return sum + expense.taxAmount;
@@ -140,7 +140,9 @@ export function calculateDashboardMetrics(input: {
   );
   const totalExpenses =
     input.vehicles.reduce((sum, vehicle) => sum + vehicle.purchasePrice, 0) +
-    input.expenses.reduce((sum, expense) => sum + normalizedExpenseAmount(expense, vehiclesById.get(expense.vehicleId)), 0);
+    input.expenses
+      .filter((expense) => !expense.voidedAt)
+      .reduce((sum, expense) => sum + normalizedExpenseAmount(expense, vehiclesById.get(expense.vehicleId)), 0);
   const totalTaxableProfit = activeSales.reduce(
     (sum, sale) => sum + sale.taxableProfitAmount,
     0,
@@ -177,7 +179,7 @@ export function generateTaxReport(input: {
   endDate?: string;
 }) {
   const sales = filterByDate(input.sales.filter(isActiveSale), "saleDate", input.startDate, input.endDate);
-  const expenses = filterByDate(input.expenses, "date", input.startDate, input.endDate);
+  const expenses = filterByDate(input.expenses.filter((expense) => !expense.voidedAt), "date", input.startDate, input.endDate);
   const companyCash = filterByDate(
     input.companyCashTransactions.filter((transaction) => !transaction.deletedAt),
     "date",
@@ -254,7 +256,7 @@ export function calculatePeriodExpenses(
 ) {
   const vehiclesById = indexVehiclesById(vehicles);
   return roundMoney(
-    filterByDate(expenses, "date", startDate, endDate)
+    filterByDate(expenses.filter((expense) => !expense.voidedAt), "date", startDate, endDate)
       .reduce((sum, expense) => sum + normalizedExpenseAmount(expense, vehiclesById.get(expense.vehicleId)), 0),
   );
 }

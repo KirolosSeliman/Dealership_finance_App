@@ -31,7 +31,7 @@ test("Deal Radar convert-to-inventory prefills only confidently extracted vehicl
 });
 
 test("Deal Radar UI surfaces saved OpenLane Carfax and media metadata", () => {
-  const app = readFileSync(join(process.cwd(), "src/components/dealer-flow-app.tsx"), "utf8");
+  const app = readFileSync(join(process.cwd(), "src/features/app/feature-views.tsx"), "utf8");
 
   assert.match(app, /carfax_url/);
   assert.match(app, /photos_json/);

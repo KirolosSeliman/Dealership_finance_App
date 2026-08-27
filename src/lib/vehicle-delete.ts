@@ -8,12 +8,14 @@ export function normalizeVehicleVin(vin?: string) {
   return String(vin ?? "").trim().toUpperCase();
 }
 
-export function isValidVehicleDeleteConfirmation(input: string, vin?: string) {
+export function expectedVehicleDeleteConfirmation(vehicle: Pick<Vehicle, "id" | "vin">) {
+  const identifier = normalizeVehicleVin(vehicle.vin) || vehicle.id.trim().toUpperCase();
+  return `DELETE ${identifier}`;
+}
+
+export function isValidVehicleDeleteConfirmation(input: string, vehicle: Pick<Vehicle, "id" | "vin">) {
   const normalizedInput = normalizeDeleteConfirmation(input);
-  if (!normalizedInput) return false;
-  if (normalizedInput === "DELETE") return true;
-  const normalizedVin = normalizeVehicleVin(vin);
-  return Boolean(normalizedVin) && normalizedInput === normalizedVin;
+  return normalizedInput === expectedVehicleDeleteConfirmation(vehicle);
 }
 
 export function isArchivedVehicle(vehicle: Pick<Vehicle, "archivedAt">) {

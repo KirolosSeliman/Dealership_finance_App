@@ -28,13 +28,14 @@ If a local generated `.next/dev/types/routes.d.ts` syntax error appears, delete 
 
 - Tax calculations: purchase tax by source, expense tax, sale tax, period filtering, PDF/CSV/JSON export escaping.
 - Dashboard metrics: inventory status, sold counts, cash balances, profit, and period totals.
-- Vehicle lifecycle: creation validation, VIN/domain validation, archive safety, correction workflows, and sold vehicle protections.
+- Vehicle lifecycle: creation validation, VIN/domain validation, safe vehicle archive and financial reversal guards, correction workflows, and sold vehicle protections.
 - Expense and cash integrity: atomic expense cash impact, balance calculations, reversal integrity, and negative balance rejection.
 - Sales integrity: sale breakdown, duplicate active-sale blocking, void workflow, correction workflow, and voided-sale exclusion.
 - Roles and permissions: owner/admin/member/accountant/viewer security helpers and route schemas.
 - Backups: generation, ZIP verification, restore dry-run, missing file rejection, and restore preparation safety.
 - Market Snap: market separation, condition risk, sold refresh skip, low/no comparable guardrails, CatBoost candidate-only status, and calibration reporting.
-- Migrations: required migration order, append-only release migrations, RLS/security grants, and no unreviewed destructive production data changes.
+- Market Snap dashboard: confirm the inventory table reads persisted snapshots only, labels values as estimates, exposes confidence/comparable/missing/warning data, and does not display a browser-generated fallback when no snapshot exists.
+- Migrations: required migration order, append-only release migrations, RLS/security grants, safe vehicle archive behavior, and explicit review of any exceptional permanent purge migration.
 
 ## Migration Readiness
 
@@ -43,10 +44,14 @@ Before applying to production:
 1. Apply `supabase/schema.sql` to a clean Supabase project.
 2. Apply every file in `supabase/migrations/` in filename order.
 3. Confirm every migration is append-only or uses guarded `if exists` / `if not exists` statements where it changes existing schema.
-4. Confirm no migration drops financial, vehicle, sale, cash, contact, attachment, backup, or activity-log data.
+4. Confirm normal vehicle removal calls `archive_vehicle` and preserves financial, vehicle, sale, cash, contact, attachment, backup, and activity-log history. Any `purge_vehicle_completely` use must remain exceptional, owner/admin-only, vehicle-scoped, explicitly confirmed, and separately reviewed.
 5. Confirm RLS remains enabled for organization-owned tables.
 6. Confirm security-definer RPCs check `auth.uid()` and organization role where user-triggered.
-7. Confirm destructive cleanup RPCs are service-role only.
+7. Confirm cash manual edits use `update_manual_company_cash_transaction` / `update_manual_external_cash_transaction`, direct cash update policies are removed, and system-generated cash rows can only be corrected through vehicle/sale workflows.
+8. Confirm purchase correction excludes voided/reversed cash impacts, rejects duplicate active impacts, and recreates a missing linked purchase payment atomically.
+9. Confirm sale void/correction fails closed for missing or duplicate cash impacts and preserves the original buyer link when no replacement buyer is entered.
+10. Confirm VINs are normalized and validated, duplicate active VIN writes are blocked under concurrency, and direct user inserts cannot create system-generated cash rows.
+11. Confirm destructive cleanup RPCs are either service-role only or, for the exceptional `purge_vehicle_completely` path, protected by authenticated owner/admin authorization, exact vehicle-scoped confirmation, organization/vehicle locks, and atomic balance guards. Confirm the normal UI has no permanent-delete action.
 
 ## Supabase And Storage Checklist
 
@@ -79,18 +84,18 @@ Complete in a fresh desktop browser session:
 2. Create an organization.
 3. Join an organization with an invite code and verify the new user starts with the expected restricted role.
 4. Add a vehicle and refresh/deep link to the vehicle detail page.
-5. Add a vehicle expense and verify the cash impact appears exactly once.
+5. Add a vehicle expense and verify the cash impact appears exactly once; edit it to a lower amount and void one with a reason, confirming the expense remains in history and the linked cash reversal is recorded.
 6. Record a sale and verify paper sale, real client payment, external commission, cash entries, and tax report totals.
 7. Void a sale with a reason and verify reversal entries preserve the audit trail.
 8. Correct a sale with a reason and verify the old sale is corrected, the new sale is active, and ledgers stay balanced.
 9. Archive a vehicle and verify it disappears from active inventory but remains auditable.
-10. Create company and external cash transactions, then reverse them where allowed.
+10. Create company and external cash transactions, edit a manual row, then reverse it where allowed. Confirm the original and linked reversal remain visible and balances are deterministic.
 11. Create buyer/seller/vendor/contact records and verify empty/error states.
 12. Upload an allowed attachment and reject a dangerous file type.
 13. Export tax PDF, CSV, and JSON.
 14. Generate and verify a backup ZIP.
 15. Run restore preparation and confirm it performs dry-run checks only.
-16. Open Market Snap and Deal Radar; confirm estimates show confidence, comparable counts, missing data, and warnings.
+16. Open Market Snap and Deal Radar; confirm estimates show confidence, comparable counts, missing data, and warnings. Confirm the Market Snap inventory table is empty or clearly reports an unavailable snapshot when stored valuation data is absent.
 17. Refresh Dashboard, Vehicles, Cash, Contacts, Taxes, Backups, Market Snap, Deal Radar, and Settings routes.
 
 ## Market Snap OpenLane Extension Checklist

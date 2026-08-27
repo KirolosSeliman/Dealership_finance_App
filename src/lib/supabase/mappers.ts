@@ -123,6 +123,9 @@ export function mapExpense(row: Row): VehicleExpense {
     note: optionalString(row.note),
     createdAt: dateTimeValue(row.created_at),
     createdBy: String(row.created_by ?? ""),
+    voidedAt: optionalString(row.voided_at),
+    voidedBy: optionalString(row.voided_by),
+    voidReason: optionalString(row.void_reason),
   };
 }
 

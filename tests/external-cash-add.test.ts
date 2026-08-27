@@ -153,7 +153,7 @@ test("manual external cash migration expands only the external cash type constra
 });
 
 test("cash management UI exposes manual external cash before existing actions", () => {
-  const source = readFileSync(join(process.cwd(), "src/components/dealer-flow-app.tsx"), "utf8");
+  const source = readFileSync(join(process.cwd(), "src/features/app/feature-views.tsx"), "utf8");
   const externalCard = source.slice(source.indexOf("function CashManagement"), source.indexOf("function CashLedger"));
   assert.match(externalCard, /t\.actions\.addExternalCash/);
   assert.match(externalCard, /type="external_cash_added"/);

@@ -1,11 +1,10 @@
 import { z } from "zod";
 import {
-  COMPANY_CASH_TRANSACTION_TYPES,
   CONTACT_TYPES,
   EXPENSE_CATEGORIES,
   EXPENSE_FUNDING_SOURCES,
   EXPENSE_TAX_BEHAVIORS,
-  EXTERNAL_CASH_TRANSACTION_TYPES,
+  MANUAL_CASH_TRANSACTION_TYPES,
   PURCHASE_SOURCES,
   ROLES,
   VEHICLE_STATUSES,
@@ -15,7 +14,7 @@ const optionalText = z.string().trim().optional().or(z.literal(""));
 const money = z.coerce.number().finite().min(0).max(999_999_999);
 const positiveMoney = z.coerce.number().finite().positive().max(999_999_999);
 const dateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD.");
-const cashTransactionTypes = [...COMPANY_CASH_TRANSACTION_TYPES, ...EXTERNAL_CASH_TRANSACTION_TYPES] as [string, ...string[]];
+const cashTransactionTypes = [...MANUAL_CASH_TRANSACTION_TYPES] as [string, ...string[]];
 const vinPattern = /^[A-HJ-NPR-Z0-9]{17}$/;
 
 export function normalizeVin(value: unknown) {
@@ -87,10 +86,15 @@ export const vehicleAnyUpdateSchema = z.union([
   vehiclePurchaseCorrectionSchema,
 ]);
 
-export const deleteVehicleSchema = z.object({
+export const archiveVehicleSchema = z.object({
   vehicleId: z.string().uuid(),
-  confirmationText: z.string().trim().min(1).max(100),
-  archiveReason: optionalText,
+  reason: z.string().trim().max(500).optional().or(z.literal("")),
+});
+
+export const expenseVoidSchema = z.object({
+  vehicleId: z.string().uuid(),
+  expenseId: z.string().uuid(),
+  reason: z.string().trim().min(3).max(500),
 });
 
 export const expenseSchema = z.object({

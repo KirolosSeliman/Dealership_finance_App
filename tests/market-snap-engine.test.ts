@@ -209,6 +209,22 @@ test("Market Snap migration stores sold outcome errors and exposes calibration r
   assert.match(sql, /average_percentage_error/i);
 });
 
+test("Market Snap dashboard reads persisted valuations instead of manufacturing fallback snapshots", () => {
+  const source = readFileSync(join(process.cwd(), "src/features/app/feature-views.tsx"), "utf8");
+
+  assert.match(source, /\/api\/market-snap\/dashboard/);
+  assert.doesNotMatch(source, /comparables:\s*\[\]/);
+});
+
+test("Market Snap calibration is exposed through the authenticated admin route", () => {
+  const route = readFileSync(join(process.cwd(), "src/app/api/market-snap/admin/calibration/route.ts"), "utf8");
+  const api = readFileSync(join(process.cwd(), "src/lib/server/market-snap-api.ts"), "utf8");
+
+  assert.match(route, /calibrationReport/);
+  assert.match(api, /market_snap_calibration_report/);
+  assert.match(api, /requireOrganizationRole\(client, userId, payload\.organizationId, \["owner", "admin"\]\)/);
+});
+
 test("Market Snap does not invent missing condition, diagnostic, or image findings", () => {
   const normalized = normalizeListing({
     organizationId: "org-1",
