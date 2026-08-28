@@ -105,9 +105,12 @@ After the base schema, run the migrations in `supabase/migrations`:
 20260830_vehicle_correction_integrity.sql
 20260831_sale_cash_impact_integrity.sql
 20260832_validation_domain_integrity_hardening.sql
+20260833_accounting_model_v2.sql
 ```
 
 The production constraints migrations add financial data checks, prevent duplicate sales for the same vehicle, validate organization matches for expenses/sales/attachments, enforce private attachment paths, protect final owners, restrict sensitive file reads, and add atomic vehicle/sale/expense RPCs. Validation hardening normalizes and validates VINs, blocks concurrent duplicate active VIN writes, and prevents direct manual insertion of system-generated cash rows.
+
+Accounting Model V2 is additive and versioned. New vehicle purchases require an explicit persisted purchase-tax rate, new sales use atomic V2 RPCs with sale-before-tax, customer-total, company/external routing, company cost basis, pending recoverable tax, sale-time tax settlement, estimated profit tax, and tracked net profit. Legacy sales remain readable under their original paper-sale semantics. Apply `20260833_accounting_model_v2.sql` after the validation hardening migration; it preserves historical financial rows and adds only forward-compatible columns, constraints, indexes, and RPCs.
 
 Normal vehicle removal uses the owner/admin-only `archive_vehicle(uuid, uuid, text)` RPC from `20260825_archive_vehicle_cash_refund.sql`. It hides the vehicle from active inventory, preserves financial, tax, sale, cash, document, and activity history, and reverses live vehicle-cost cash impacts with linked auditable rows. Vehicles with an active sale must have the sale voided before archival. Expense creation, correction, and voiding use atomic database RPCs; voiding preserves the expense and adds a linked cash reversal. Cash corrections preserve the original entry and require a linked reversal; manual cash edits use account-specific atomic RPCs and system-generated rows cannot be edited directly. The application does not push migrations automatically; apply the archive, `20260827_vehicle_archive_default.sql`, `20260828_atomic_expense_void.sql`, `20260829_cash_ledger_reversal_hardening.sql`, `20260830_vehicle_correction_integrity.sql`, `20260831_sale_cash_impact_integrity.sql`, and `20260832_validation_domain_integrity_hardening.sql` migrations before enabling the production UI flow. The historical `purge_vehicle_completely` RPC is disabled for `public` and `authenticated` by the forward migration and is not part of the application workflow.
 
@@ -160,7 +163,7 @@ Manual R2 uploads require an authenticated owner/admin of the selected organizat
 ## Deployment checklist
 
 - Configure all environment variables from `.env.example`.
-- Run `supabase/schema.sql`, then every SQL file in `supabase/migrations`.
+- Run `supabase/schema.sql`, then every SQL file in `supabase/migrations` in filename order, including `20260833_accounting_model_v2.sql`.
 - Confirm `dealer-flow-private` is a private Supabase Storage bucket.
 - Confirm RLS is enabled on organization-owned tables.
 - Confirm `CRON_SECRET` is set in production and in the Vercel cron authorization header.

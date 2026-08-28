@@ -39,6 +39,7 @@ test("external cash transaction constants include manual additions and preserve 
     "external_cash_personally_removed",
     "external_vehicle_expense_paid",
     "external_vehicle_expense_refunded",
+    "external_sale_payment_received",
   ]);
   assert.ok(COMPANY_CASH_TRANSACTION_TYPES.includes("company_cash_added"));
 });

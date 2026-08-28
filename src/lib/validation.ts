@@ -12,6 +12,8 @@ import {
 
 const optionalText = z.string().trim().optional().or(z.literal(""));
 const money = z.coerce.number().finite().min(0).max(999_999_999);
+const centMoney = money.refine((value) => Number.isInteger(value * 100), "Use no more than two decimal places.");
+const taxRate = z.coerce.number().finite().min(0).max(1);
 const positiveMoney = z.coerce.number().finite().positive().max(999_999_999);
 const dateString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD.");
 const cashTransactionTypes = [...MANUAL_CASH_TRANSACTION_TYPES] as [string, ...string[]];
@@ -47,9 +49,14 @@ export const vehicleSchema = z.object({
   purchasePrice: money,
   purchaseDate: dateString,
   purchaseSource: z.enum(PURCHASE_SOURCES as [string, ...string[]]),
+  purchaseTaxRate: taxRate.optional(),
   status: z.enum(VEHICLE_STATUSES as [string, ...string[]]),
   listedPrice: money.optional().or(z.literal("")),
   notes: optionalText,
+});
+
+export const vehicleV2Schema = vehicleSchema.extend({
+  purchaseTaxRate: taxRate,
 });
 
 export const vehicleUpdateSchema = vehicleSchema.pick({
@@ -77,6 +84,7 @@ export const vehiclePurchaseCorrectionSchema = z.object({
   purchasePrice: money,
   purchaseDate: dateString,
   purchaseSource: z.enum(PURCHASE_SOURCES as [string, ...string[]]),
+  purchaseTaxRate: taxRate,
   reason: z.string().trim().min(3).max(500),
 });
 
@@ -124,7 +132,7 @@ export const applyRecurringExpenseTemplateSchema = z.object({
   templateId: z.string().uuid(),
 });
 
-export const saleSchema = z.object({
+const legacySaleSchema = z.object({
   saleDate: dateString.optional().or(z.literal("")),
   taxableProfitAmount: money,
   realClientPayment: money,
@@ -135,15 +143,51 @@ export const saleSchema = z.object({
   notes: optionalText,
 });
 
+const saleV2Fields = z.object({
+  saleDate: dateString.optional().or(z.literal("")),
+  salePriceBeforeTax: centMoney,
+  salesTaxRate: taxRate,
+  companyPaymentAmount: centMoney,
+  externalPaymentAmount: centMoney,
+  buyerName: optionalText,
+  phone: optionalText,
+  email: z.string().email().optional().or(z.literal("")),
+  address: optionalText,
+  notes: optionalText,
+});
+
+function refineSaleV2Payments(value: z.infer<typeof saleV2Fields>, context: z.RefinementCtx) {
+  const salesTaxAmount = Math.round(value.salePriceBeforeTax * value.salesTaxRate * 100) / 100;
+  const customerTotalCents = Math.round((value.salePriceBeforeTax + salesTaxAmount) * 100);
+  if (Math.round((value.companyPaymentAmount + value.externalPaymentAmount) * 100) !== customerTotalCents) {
+    context.addIssue({
+      code: "custom",
+      path: ["companyPaymentAmount"],
+      message: "Company and external payments must equal the customer total exactly.",
+    });
+  }
+}
+
+export const saleV2Schema = saleV2Fields.superRefine(refineSaleV2Payments);
+
+// Keep the legacy shape parseable for historical correction/import callers.
+export const saleSchema = z.union([saleV2Schema, legacySaleSchema]);
+
 export const saleVoidSchema = z.object({
   saleId: z.string().uuid(),
   reason: z.string().trim().min(3).max(500),
 });
 
-export const saleCorrectionSchema = saleSchema.extend({
-  saleId: z.string().uuid(),
-  reason: z.string().trim().min(3).max(500),
-});
+export const saleCorrectionSchema = z.union([
+  saleV2Fields.extend({
+    saleId: z.string().uuid(),
+    reason: z.string().trim().min(3).max(500),
+  }).superRefine(refineSaleV2Payments),
+  legacySaleSchema.extend({
+    saleId: z.string().uuid(),
+    reason: z.string().trim().min(3).max(500),
+  }),
+]);
 
 export const cashTransactionSchema = z.object({
   type: z.enum(cashTransactionTypes),

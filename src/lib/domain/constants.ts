@@ -52,6 +52,11 @@ export const COMPANY_CASH_TRANSACTION_TYPES: CompanyCashTransactionType[] = [
   "vehicle_cost_refunded",
   "paper_sale_received",
   "external_transfer_received",
+  "sale_payment_received",
+  "vehicle_tax_refund_received",
+  "vehicle_tax_payment_made",
+  "profit_tax_paid",
+  "profit_tax_refunded",
 ];
 export const EXTERNAL_CASH_TRANSACTION_TYPES: ExternalCashTransactionType[] = [
   "external_cash_added",
@@ -61,6 +66,7 @@ export const EXTERNAL_CASH_TRANSACTION_TYPES: ExternalCashTransactionType[] = [
   "external_cash_personally_removed",
   "external_vehicle_expense_paid",
   "external_vehicle_expense_refunded",
+  "external_sale_payment_received",
 ];
 export const MANUAL_CASH_TRANSACTION_TYPES = [
   "company_cash_added",
@@ -71,6 +77,8 @@ export const MANUAL_CASH_TRANSACTION_TYPES = [
 ] as const;
 
 export const TAXABLE_PROFIT_TAX_RATE = 0.22;
+export const ACCOUNTING_V2_SALES_TAX_RATE = 0.05;
+export const ACCOUNTING_V2_PROFIT_TAX_RATE = 0.22;
 export const OPENLANE_PURCHASE_TAX_RATE = 0.05;
 export const QUEBEC_EXPENSE_TAX_RATE = 0.15;
 export const PURCHASE_TAX_RATE_BY_SOURCE: Record<PurchaseSource, number> = {

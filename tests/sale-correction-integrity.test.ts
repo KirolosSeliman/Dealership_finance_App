@@ -34,8 +34,8 @@ test("sale correction API, repository, UI, and Market Snap remain workflow-based
   assert.match(route, /case "voidSale"/);
   assert.match(route, /case "correctSale"/);
   assert.match(route, /\["owner", "admin", "member"\]/);
-  assert.match(repository, /rpc\("void_vehicle_sale_atomic"/);
-  assert.match(repository, /rpc\("correct_vehicle_sale_atomic"/);
+  assert.match(repository, /void_vehicle_sale_accounting_v2/);
+  assert.match(repository, /correct_vehicle_sale_accounting_v2/);
   assert.match(component, /Void only for cancelled or accidental sales/);
   assert.match(component, /Correction reason/);
   assert.match(training, /voided_sale/i);

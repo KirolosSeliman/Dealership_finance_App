@@ -1,4 +1,6 @@
 import {
+  ACCOUNTING_V2_PROFIT_TAX_RATE,
+  ACCOUNTING_V2_SALES_TAX_RATE,
   getPurchaseTaxRate,
   QUEBEC_EXPENSE_TAX_RATE,
   TAXABLE_PROFIT_TAX_RATE,
@@ -10,6 +12,115 @@ import type {
   Vehicle,
   VehicleExpense,
 } from "@/types/domain";
+
+export interface AccountingV2SaleBreakdown {
+  salePriceBeforeTax: number;
+  salesTaxRate: number;
+  salesTaxAmount: number;
+  customerTotal: number;
+  companyPaymentAmount: number;
+  externalPaymentAmount: number;
+  companyCostBasis: number;
+  companyGrossCashInvested: number;
+  recoverableCompanyTax: number;
+  taxSettlementAmount: number;
+  profitTaxRate: number;
+  grossProfit: number;
+  externalVehicleCost: number;
+  profitTaxDue: number;
+  trackedNetProfit: number;
+}
+
+type AccountingV2SaleInput = {
+  vehicle: Vehicle;
+  expenses: VehicleExpense[];
+  salePriceBeforeTax: number;
+  salesTaxRate?: number;
+  companyPaymentAmount: number;
+  externalPaymentAmount: number;
+  profitTaxRate?: number;
+};
+
+export function calculateVehicleCompanyCostBasis(vehicle: Vehicle, expenses: VehicleExpense[]) {
+  const vehicleExpenses = getActiveVehicleExpenses(vehicle, expenses);
+  const purchaseExpense = vehicleExpenses.find((expense) => expense.category === "vehicle_purchase_price");
+  const purchaseFallback = purchaseExpense ? 0 : vehicle.purchasePrice;
+  return roundMoney(
+    vehicleExpenses
+      .filter((expense) => expense.fundingSource !== "external_cash")
+      .reduce((sum, expense) => sum + expense.amountBeforeTax, purchaseFallback),
+  );
+}
+
+export function calculateVehicleCompanyGrossCashInvested(vehicle: Vehicle, expenses: VehicleExpense[]) {
+  const vehicleExpenses = getActiveVehicleExpenses(vehicle, expenses);
+  const purchaseExpense = vehicleExpenses.find((expense) => expense.category === "vehicle_purchase_price");
+  const purchaseFallback = purchaseExpense ? 0 : vehicle.purchasePrice;
+  return roundMoney(
+    vehicleExpenses
+      .filter((expense) => expense.fundingSource !== "external_cash")
+      .reduce((sum, expense) => sum + expense.totalAmount, purchaseFallback),
+  );
+}
+
+export function calculatePendingRecoverableCompanyTax(vehicle: Vehicle, expenses: VehicleExpense[]) {
+  return roundMoney(
+    getActiveVehicleExpenses(vehicle, expenses)
+      .filter((expense) => expense.fundingSource !== "external_cash" && expense.taxAmount > 0)
+      .reduce((sum, expense) => sum + expense.taxAmount, 0),
+  );
+}
+
+export function calculateExternalVehicleCost(vehicle: Vehicle, expenses: VehicleExpense[]) {
+  return roundMoney(
+    getActiveVehicleExpenses(vehicle, expenses)
+      .filter((expense) => expense.fundingSource === "external_cash")
+      .reduce((sum, expense) => sum + expense.totalAmount, 0),
+  );
+}
+
+export function calculateSaleTax(input: { salePriceBeforeTax: number; salesTaxRate?: number }) {
+  const salePriceBeforeTax = normalizeCents(input.salePriceBeforeTax, "Sale price before tax");
+  const salesTaxRate = normalizeRate(input.salesTaxRate ?? ACCOUNTING_V2_SALES_TAX_RATE, "Sales tax rate");
+  const salesTaxAmount = roundMoney(salePriceBeforeTax * salesTaxRate);
+  return {
+    salePriceBeforeTax,
+    salesTaxRate,
+    salesTaxAmount,
+    customerTotal: roundMoney(salePriceBeforeTax + salesTaxAmount),
+  };
+}
+
+export function calculateAccountingV2SaleBreakdown(input: AccountingV2SaleInput): AccountingV2SaleBreakdown {
+  const saleTax = calculateSaleTax(input);
+  const companyPaymentAmount = normalizeCents(input.companyPaymentAmount, "Company payment amount");
+  const externalPaymentAmount = normalizeCents(input.externalPaymentAmount, "External payment amount");
+  if (toCents(companyPaymentAmount) + toCents(externalPaymentAmount) !== toCents(saleTax.customerTotal)) {
+    throw new Error("Payment routing must equal the customer total exactly in cents.");
+  }
+
+  const companyCostBasis = calculateVehicleCompanyCostBasis(input.vehicle, input.expenses);
+  const companyGrossCashInvested = calculateVehicleCompanyGrossCashInvested(input.vehicle, input.expenses);
+  const recoverableCompanyTax = calculatePendingRecoverableCompanyTax(input.vehicle, input.expenses);
+  const externalVehicleCost = calculateExternalVehicleCost(input.vehicle, input.expenses);
+  const profitTaxRate = normalizeRate(input.profitTaxRate ?? ACCOUNTING_V2_PROFIT_TAX_RATE, "Profit tax rate");
+  const grossProfit = roundMoney(saleTax.salePriceBeforeTax - companyCostBasis);
+  const profitTaxDue = Math.max(0, roundMoney(grossProfit * profitTaxRate));
+  return {
+    ...saleTax,
+    companyPaymentAmount,
+    externalPaymentAmount,
+    companyCostBasis,
+    companyGrossCashInvested,
+    recoverableCompanyTax,
+    taxSettlementAmount: roundMoney(recoverableCompanyTax - saleTax.salesTaxAmount),
+    profitTaxRate,
+    grossProfit,
+    externalVehicleCost,
+    profitTaxDue,
+    trackedNetProfit: roundMoney(grossProfit - profitTaxDue - externalVehicleCost),
+  };
+}
 
 export function calculateExpenseTax(input: {
   purchaseSource?: string;
@@ -89,12 +200,14 @@ export function calculateSaleBreakdown(input: {
 export function calculateCompanyCashBalance(transactions: CompanyCashTransaction[]) {
   return roundMoney(
     transactions.filter((transaction) => !transaction.deletedAt).reduce((sum, transaction) => {
-      if (transaction.type === "vehicle_cost_refunded") {
+      if (["vehicle_cost_refunded", "vehicle_tax_refund_received"].includes(transaction.type)) {
         return sum + transaction.amount;
       }
       if (
         transaction.type === "company_cash_withdrawn" ||
-        transaction.type === "vehicle_cost_paid"
+        transaction.type === "vehicle_cost_paid" ||
+        transaction.type === "vehicle_tax_payment_made" ||
+        transaction.type === "profit_tax_paid"
       ) {
         return sum - transaction.amount;
       }
@@ -129,25 +242,30 @@ export function calculateDashboardMetrics(input: {
   externalCashTransactions: ExternalCashTransaction[];
 }) {
   const activeSales = input.sales.filter(isActiveSale);
-  const vehiclesById = indexVehiclesById(input.vehicles);
   const vehiclesInStock = input.vehicles.filter((vehicle) =>
     !vehicle.archivedAt && ["purchased", "in_repair", "listed_for_sale"].includes(vehicle.status),
   );
   const soldVehicles = input.vehicles.filter((vehicle) => vehicle.status === "sold" && activeSales.some((sale) => sale.vehicleId === vehicle.id));
   const inventoryValue = vehiclesInStock.reduce(
-    (sum, vehicle) => sum + calculateVehicleTotalCost(vehicle, input.expenses),
+    (sum, vehicle) => sum + (isV2Vehicle(vehicle, activeSales)
+      ? calculateVehicleCompanyCostBasis(vehicle, input.expenses)
+      : calculateVehicleTotalCost(vehicle, input.expenses)),
     0,
   );
-  const totalExpenses =
-    input.vehicles.reduce((sum, vehicle) => sum + vehicle.purchasePrice, 0) +
-    input.expenses
-      .filter((expense) => !expense.voidedAt)
-      .reduce((sum, expense) => sum + normalizedExpenseAmount(expense, vehiclesById.get(expense.vehicleId)), 0);
-  const totalTaxableProfit = activeSales.reduce(
-    (sum, sale) => sum + sale.taxableProfitAmount,
-    0,
-  );
-  const totalProfitTaxDue = activeSales.reduce((sum, sale) => sum + sale.profitTaxDue, 0);
+  const totalExpenses = input.vehicles.reduce((sum, vehicle) => {
+    if (isV2Vehicle(vehicle, activeSales)) {
+      return sum + calculateVehicleCompanyGrossCashInvested(vehicle, input.expenses) + calculateExternalVehicleCost(vehicle, input.expenses);
+    }
+    return sum + vehicle.purchasePrice + input.expenses
+      .filter((expense) => expense.vehicleId === vehicle.id && !expense.voidedAt)
+      .reduce((expenseSum, expense) => expenseSum + normalizedExpenseAmount(expense, vehicle), 0);
+  }, 0);
+  const netProfit = activeSales.reduce((sum, sale) => {
+    if (sale.accountingModelVersion === 2) {
+      return sum + (sale.trackedNetProfit ?? roundMoney((sale.grossProfit ?? 0) - sale.profitTaxDue - (sale.externalVehicleCost ?? 0)));
+    }
+    return sum + sale.taxableProfitAmount - sale.profitTaxDue;
+  }, 0);
   const averageTimeToSell =
     soldVehicles.length === 0
       ? 0
@@ -160,7 +278,7 @@ export function calculateDashboardMetrics(input: {
   return {
     companyCash: calculateCompanyCashBalance(input.companyCashTransactions),
     externalCash: calculateExternalCashBalance(input.externalCashTransactions),
-    netProfit: roundMoney(totalTaxableProfit - totalProfitTaxDue),
+    netProfit: roundMoney(netProfit),
     totalExpenses: roundMoney(totalExpenses),
     vehiclesInStock: vehiclesInStock.length,
     vehiclesSold: soldVehicles.length,
@@ -192,17 +310,31 @@ export function generateTaxReport(input: {
     input.startDate,
     input.endDate,
   );
-  const totalTaxableProfit = sales.reduce((sum, sale) => sum + sale.taxableProfitAmount, 0);
+  const totalTaxableProfit = sales.reduce((sum, sale) => sum + (sale.accountingModelVersion === 2 ? sale.grossProfit ?? 0 : sale.taxableProfitAmount), 0);
   const taxDue = sales.reduce((sum, sale) => sum + sale.profitTaxDue, 0);
   const vehiclePurchaseCosts = calculatePeriodPurchaseCosts(input.vehicles, input.startDate, input.endDate);
   const periodExpenses = calculatePeriodExpenses(input.vehicles, input.expenses, input.startDate, input.endDate);
 
-  return {
+  const v2Sales = sales.filter((sale) => sale.accountingModelVersion === 2);
+  const v2VehicleIds = new Set(v2Sales.map((sale) => sale.vehicleId));
+  const v2Expenses = expenses.filter((expense) => v2VehicleIds.has(expense.vehicleId));
+  const v2CompanyGrossCashInvested = roundMoney(v2Expenses
+    .filter((expense) => expense.fundingSource !== "external_cash")
+    .reduce((sum, expense) => sum + expense.totalAmount, 0));
+  const v2ExternalVehicleCost = roundMoney(v2Expenses
+    .filter((expense) => expense.fundingSource === "external_cash")
+    .reduce((sum, expense) => sum + expense.totalAmount, 0));
+  const legacySales = sales.filter((sale) => sale.accountingModelVersion !== 2);
+  const legacyVehicles = input.vehicles.filter((vehicle) => !v2VehicleIds.has(vehicle.id));
+  const legacyExpenses = expenses.filter((expense) => !v2VehicleIds.has(expense.vehicleId));
+  const legacyTotalExpenses = calculatePeriodPurchaseCosts(legacyVehicles, input.startDate, input.endDate)
+    + calculatePeriodExpenses(legacyVehicles, legacyExpenses, input.startDate, input.endDate);
+  const report = {
     totalTaxableProfit: roundMoney(totalTaxableProfit),
     taxDue: roundMoney(taxDue),
-    totalCompanySales: roundMoney(sales.reduce((sum, sale) => sum + sale.paperSalePrice, 0)),
+    totalCompanySales: roundMoney(legacySales.reduce((sum, sale) => sum + sale.paperSalePrice, 0)),
     totalExternalCommission: roundMoney(
-      sales.reduce((sum, sale) => sum + sale.externalCommission, 0),
+      legacySales.reduce((sum, sale) => sum + sale.externalCommission, 0),
     ),
     externalTransferredToCompany: roundMoney(
       externalCash
@@ -220,16 +352,35 @@ export function generateTaxReport(input: {
         .filter((expense) => expense.category === "auction_fee")
         .reduce((sum, expense) => sum + expense.amountBeforeTax, 0),
     ),
-    totalExpenses: roundMoney(vehiclePurchaseCosts + periodExpenses),
+    totalExpenses: roundMoney(v2Sales.length > 0
+      ? legacyTotalExpenses + v2CompanyGrossCashInvested + v2ExternalVehicleCost
+      : vehiclePurchaseCosts + periodExpenses),
     taxesPaidOnPurchasesAndExpenses: roundMoney(
       expenses.reduce((sum, expense) => sum + expense.taxAmount, 0),
     ),
-    netProfitAfterTax: roundMoney(totalTaxableProfit - taxDue),
+    netProfitAfterTax: roundMoney(sales.reduce((sum, sale) => sale.accountingModelVersion === 2
+      ? sum + (sale.trackedNetProfit ?? 0)
+      : sum + sale.taxableProfitAmount - sale.profitTaxDue, 0)),
     companyCashAdded: roundMoney(
       companyCash
         .filter((transaction) => transaction.type === "company_cash_added")
         .reduce((sum, transaction) => sum + transaction.amount, 0),
     ),
+  };
+  if (v2Sales.length === 0) return report;
+  return {
+    ...report,
+    totalSalePriceBeforeTax: roundMoney(v2Sales.reduce((sum, sale) => sum + (sale.salePriceBeforeTax ?? 0), 0)),
+    totalSalesTaxCollected: roundMoney(v2Sales.reduce((sum, sale) => sum + (sale.salesTaxAmount ?? 0), 0)),
+    totalCustomerSales: roundMoney(v2Sales.reduce((sum, sale) => sum + (sale.customerTotal ?? 0), 0)),
+    totalCompanyPayment: roundMoney(v2Sales.reduce((sum, sale) => sum + (sale.companyPaymentAmount ?? 0), 0)),
+    totalExternalPayment: roundMoney(v2Sales.reduce((sum, sale) => sum + (sale.externalPaymentAmount ?? 0), 0)),
+    totalCompanyCostBasis: roundMoney(v2Sales.reduce((sum, sale) => sum + (sale.companyCostBasis ?? 0), 0)),
+    totalCompanyGrossCashInvested: roundMoney(v2Sales.reduce((sum, sale) => sum + (sale.companyGrossCashInvested ?? 0), 0)),
+    totalRecoverableCompanyTax: roundMoney(v2Sales.reduce((sum, sale) => sum + (sale.recoverableCompanyTax ?? 0), 0)),
+    totalTaxSettlement: roundMoney(v2Sales.reduce((sum, sale) => sum + (sale.taxSettlementAmount ?? 0), 0)),
+    totalExternalVehicleCost: roundMoney(v2Sales.reduce((sum, sale) => sum + (sale.externalVehicleCost ?? 0), 0)),
+    totalTrackedNetProfit: roundMoney(v2Sales.reduce((sum, sale) => sum + (sale.trackedNetProfit ?? 0), 0)),
   };
 }
 
@@ -298,4 +449,28 @@ function normalizedExpenseAmount(expense: VehicleExpense, vehicle?: Vehicle) {
     return vehicle && vehicle.purchasePrice <= 0 ? expense.totalAmount : expense.taxAmount;
   }
   return expense.totalAmount;
+}
+
+function getActiveVehicleExpenses(vehicle: Vehicle, expenses: VehicleExpense[]) {
+  return expenses.filter((expense) => expense.vehicleId === vehicle.id && !expense.voidedAt);
+}
+
+function isV2Vehicle(vehicle: Vehicle, sales: Sale[]) {
+  return vehicle.accountingModelVersion === 2 || sales.some((sale) => sale.vehicleId === vehicle.id && sale.accountingModelVersion === 2);
+}
+
+function toCents(value: number) {
+  return Math.round(value * 100);
+}
+
+function normalizeCents(value: number, label: string) {
+  if (!Number.isFinite(value) || value < 0) throw new Error(`${label} must be a nonnegative finite amount.`);
+  const cents = toCents(value);
+  if (cents !== value * 100) throw new Error(`${label} must use at most two decimal places.`);
+  return cents / 100;
+}
+
+function normalizeRate(value: number, label: string) {
+  if (!Number.isFinite(value) || value < 0 || value > 1) throw new Error(`${label} must be between 0% and 100%.`);
+  return value;
 }

@@ -945,8 +945,11 @@ test("sale void correction migration preserves sale and reverses cash impacts", 
   assert.match(calculations, /function isActiveSale/i);
   assert.match(marketSnapApi, /\.is\("voided_at", null\)/i);
   assert.match(marketSnapApi, /\.eq\("status", "active"\)/i);
-  assert.match(repository, /rpc\("void_vehicle_sale_atomic"/i);
-  assert.match(repository, /rpc\("correct_vehicle_sale_atomic"/i);
+  assert.match(repository, /void_vehicle_sale_accounting_v2/i);
+  assert.match(repository, /void_vehicle_sale_atomic/i);
+  assert.match(repository, /correct_vehicle_sale_accounting_v2/i);
+  assert.match(repository, /correct_vehicle_sale_atomic/i);
+  assert.match(repository, /getSaleAccountingVersion/i);
 });
 
 test("dashboard metrics use sold and in-stock vehicle status", () => {
@@ -999,6 +1002,7 @@ test("vehicle purchase correction validation requires auditable financial inputs
     purchasePrice: 12000,
     purchaseDate: "2026-03-15",
     purchaseSource: "OpenLane",
+    purchaseTaxRate: 0.13,
     reason: "Corrected auction invoice",
   }).success, true);
   assert.equal(vehicleAnyUpdateSchema.safeParse({
@@ -1029,7 +1033,7 @@ test("vehicle financial correction migration is atomic and blocks sold vehicles"
   assert.match(sql, /vehicle_purchase_corrected/i);
   assert.match(sql, /grant execute on function correct_vehicle_purchase/i);
 
-  assert.match(repository, /rpc\("correct_vehicle_purchase"/i);
+  assert.match(repository, /correct_vehicle_purchase_accounting_v2/i);
   assert.match(repository, /rpc\("transition_vehicle_status"/i);
   const updateVehicleBody = repository.slice(repository.indexOf("export async function updateVehicle"));
   assert.doesNotMatch(updateVehicleBody, /\bpurchase_price:/);

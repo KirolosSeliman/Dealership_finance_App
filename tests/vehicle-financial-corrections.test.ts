@@ -40,6 +40,7 @@ test("vehicle edit schema keeps basic, status, and purchase correction modes sep
     purchasePrice: 10000,
     purchaseDate: "2026-08-29",
     purchaseSource: "OpenLane",
+    purchaseTaxRate: 0.13,
     reason: "Corrected invoice",
   }).success, true);
   assert.equal(vehicleAnyUpdateSchema.safeParse({
@@ -59,6 +60,6 @@ test("vehicle correction UI and repository keep financial fields out of basic ed
   assert.match(details, /Sold vehicle purchase details are locked/);
   const updateVehicleBody = repository.slice(repository.indexOf("export async function updateVehicle"));
   assert.doesNotMatch(updateVehicleBody.slice(0, updateVehicleBody.indexOf('if (updateMode === "status")')), /\bpurchase_price:/);
-  assert.match(updateVehicleBody, /rpc\("correct_vehicle_purchase"/);
+  assert.match(updateVehicleBody, /rpc\("correct_vehicle_purchase_accounting_v2"/);
   assert.match(updateVehicleBody, /rpc\("transition_vehicle_status"/);
 });

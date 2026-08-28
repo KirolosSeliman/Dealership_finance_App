@@ -37,6 +37,15 @@ export async function generateBackupExport(data: AppData) {
   zip.file("tax-reports.csv", toCsv([report]));
   zip.file("attachments-metadata.json", JSON.stringify(data.attachments, null, 2));
   zip.file("activity-logs.csv", toCsv(data.activityLogs));
+  const summaryReport = report as typeof report & {
+    totalSalePriceBeforeTax?: number;
+    totalSalesTaxCollected?: number;
+    totalCompanyCostBasis?: number;
+    totalRecoverableCompanyTax?: number;
+    totalTaxSettlement?: number;
+    totalExternalVehicleCost?: number;
+    totalTrackedNetProfit?: number;
+  };
   const summaryPdf = await generateReportPdf({
     title: "Dealer Flow Backup Summary",
     organizationId: data.activeOrganizationId,
@@ -51,6 +60,15 @@ export async function generateBackupExport(data: AppData) {
       `Contacts: ${data.contacts.length}`,
       `Total taxable profit: ${report.totalTaxableProfit}`,
       `Estimated tax due: ${report.taxDue}`,
+      ...(summaryReport.totalSalePriceBeforeTax !== undefined ? [
+        `V2 sale price before tax: ${summaryReport.totalSalePriceBeforeTax}`,
+        `V2 sales tax collected: ${summaryReport.totalSalesTaxCollected ?? 0}`,
+        `V2 company cost basis: ${summaryReport.totalCompanyCostBasis ?? 0}`,
+        `V2 recoverable company tax: ${summaryReport.totalRecoverableCompanyTax ?? 0}`,
+        `V2 tax settlement: ${summaryReport.totalTaxSettlement ?? 0}`,
+        `V2 external vehicle cost: ${summaryReport.totalExternalVehicleCost ?? 0}`,
+        `V2 tracked net profit: ${summaryReport.totalTrackedNetProfit ?? 0}`,
+      ] : []),
     ],
   });
   zip.file("summary.pdf", await summaryPdf.arrayBuffer());
@@ -77,6 +95,32 @@ export async function generateTaxReportExport(
     });
   }
 
+  const reportWithV2Fields = report as typeof report & {
+    totalSalePriceBeforeTax?: number;
+    totalSalesTaxCollected?: number;
+    totalCustomerSales?: number;
+    totalCompanyPayment?: number;
+    totalExternalPayment?: number;
+    totalCompanyCostBasis?: number;
+    totalCompanyGrossCashInvested?: number;
+    totalRecoverableCompanyTax?: number;
+    totalTaxSettlement?: number;
+    totalExternalVehicleCost?: number;
+    totalTrackedNetProfit?: number;
+  };
+  const v2Lines = reportWithV2Fields.totalSalePriceBeforeTax === undefined ? [] : [
+    `V2 sale price before tax: ${reportWithV2Fields.totalSalePriceBeforeTax}`,
+    `V2 sales tax collected: ${reportWithV2Fields.totalSalesTaxCollected ?? 0}`,
+    `V2 customer sales: ${reportWithV2Fields.totalCustomerSales ?? 0}`,
+    `V2 company payment: ${reportWithV2Fields.totalCompanyPayment ?? 0}`,
+    `V2 external payment: ${reportWithV2Fields.totalExternalPayment ?? 0}`,
+    `V2 company cost basis: ${reportWithV2Fields.totalCompanyCostBasis ?? 0}`,
+    `V2 company gross cash invested: ${reportWithV2Fields.totalCompanyGrossCashInvested ?? 0}`,
+    `V2 recoverable company tax: ${reportWithV2Fields.totalRecoverableCompanyTax ?? 0}`,
+    `V2 tax settlement: ${reportWithV2Fields.totalTaxSettlement ?? 0}`,
+    `V2 external vehicle cost: ${reportWithV2Fields.totalExternalVehicleCost ?? 0}`,
+    `V2 tracked net profit: ${reportWithV2Fields.totalTrackedNetProfit ?? 0}`,
+  ];
   return generateReportPdf({
     title: "Dealer Flow Tax Report",
     organizationId: data.activeOrganizationId,
@@ -86,8 +130,10 @@ export async function generateTaxReportExport(
       TAX_DISCLAIMER,
       `Total taxable profit: ${report.totalTaxableProfit}`,
       `Estimated 22% tax due: ${report.taxDue}`,
-      `Company/paper sales: ${report.totalCompanySales}`,
-      `External commission earned: ${report.totalExternalCommission}`,
+      ...(v2Lines.length > 0 ? v2Lines : [
+        `Company/paper sales: ${report.totalCompanySales}`,
+        `External commission earned: ${report.totalExternalCommission}`,
+      ]),
       `External transferred to company: ${report.externalTransferredToCompany}`,
       `External personally removed: ${report.externalPersonallyRemoved}`,
       `Vehicle purchase costs: ${report.vehiclePurchaseCosts}`,

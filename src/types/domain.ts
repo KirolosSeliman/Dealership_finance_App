@@ -37,6 +37,7 @@ export type ContactType =
 export type AttachmentType = "file" | "photo" | "link";
 export type ExpenseFundingSource = "company_cash" | "external_cash";
 export type ExpenseTaxBehavior = "no_tax" | "add_15_percent" | "custom";
+export type AccountingModelVersion = 1 | 2;
 
 export type CompanyCashTransactionType =
   | "company_cash_added"
@@ -44,7 +45,12 @@ export type CompanyCashTransactionType =
   | "vehicle_cost_paid"
   | "vehicle_cost_refunded"
   | "paper_sale_received"
-  | "external_transfer_received";
+  | "external_transfer_received"
+  | "sale_payment_received"
+  | "vehicle_tax_refund_received"
+  | "vehicle_tax_payment_made"
+  | "profit_tax_paid"
+  | "profit_tax_refunded";
 
 export type ExternalCashTransactionType =
   | "external_cash_added"
@@ -53,7 +59,8 @@ export type ExternalCashTransactionType =
   | "external_transfer_returned"
   | "external_cash_personally_removed"
   | "external_vehicle_expense_paid"
-  | "external_vehicle_expense_refunded";
+  | "external_vehicle_expense_refunded"
+  | "external_sale_payment_received";
 
 export interface Organization {
   id: string;
@@ -83,6 +90,7 @@ export interface Vehicle {
   purchasePrice: number;
   purchaseDate: string;
   purchaseSource: PurchaseSource;
+  accountingModelVersion?: AccountingModelVersion;
   status: VehicleStatus;
   listedPrice?: number;
   notes?: string;
@@ -155,6 +163,21 @@ export interface Sale {
   voidReason?: string;
   correctedBySaleId?: string;
   correctionOfSaleId?: string;
+  accountingModelVersion?: AccountingModelVersion;
+  salePriceBeforeTax?: number;
+  salesTaxRate?: number;
+  salesTaxAmount?: number;
+  customerTotal?: number;
+  companyPaymentAmount?: number;
+  externalPaymentAmount?: number;
+  companyCostBasis?: number;
+  companyGrossCashInvested?: number;
+  recoverableCompanyTax?: number;
+  taxSettlementAmount?: number;
+  profitTaxRate?: number;
+  grossProfit?: number;
+  externalVehicleCost?: number;
+  trackedNetProfit?: number;
   createdAt: string;
   createdBy: string;
 }

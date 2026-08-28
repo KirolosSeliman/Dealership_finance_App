@@ -1,4 +1,4 @@
-import { calculateVehicleTotalCost, roundMoney } from "@/lib/domain/calculations";
+import { calculateVehicleCompanyCostBasis, calculateVehicleTotalCost, roundMoney } from "@/lib/domain/calculations";
 import { getPurchaseTaxRate, QUEBEC_EXPENSE_TAX_RATE } from "@/lib/domain/constants";
 import type { Vehicle, VehicleExpense } from "@/types/domain";
 import type {
@@ -119,7 +119,11 @@ export function runComparableEstimator(input: ValuationInput & { expenses?: Vehi
   const feeTaxRate = input.feeTaxRate ?? QUEBEC_EXPENSE_TAX_RATE;
   const listedOrHammer = normalized.buyNowPrice || normalized.currentBid || normalized.auctionHammerPrice || normalized.listedPrice || input.vehicle?.purchasePrice || 0;
   const estimatedTaxAmount = roundMoney(listedOrHammer * purchaseTaxRate + auctionFees * feeTaxRate);
-  const currentCostBasis = input.vehicle ? calculateVehicleTotalCost(input.vehicle, input.expenses ?? []) : listedOrHammer;
+  const currentCostBasis = input.vehicle
+    ? input.vehicle.accountingModelVersion === 2
+      ? calculateVehicleCompanyCostBasis(input.vehicle, input.expenses ?? [])
+      : calculateVehicleTotalCost(input.vehicle, input.expenses ?? [])
+    : listedOrHammer;
   const estimatedTotalAcquisitionCost = roundMoney(
     listedOrHammer + auctionFees + estimatedTransportCost + estimatedInspectionCost + estimatedHiddenFees + estimatedTaxAmount + estimatedReconditioningCost,
   );

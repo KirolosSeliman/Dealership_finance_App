@@ -27,10 +27,10 @@ import {
   formDataToObject,
   normalizeVin,
   saleCorrectionSchema,
-  saleSchema,
+  saleV2Schema,
   saleVoidSchema,
   vehicleAnyUpdateSchema,
-  vehicleSchema,
+  vehicleV2Schema,
 } from "@/lib/validation";
 import type { AppData, CompanyCashTransactionType, ExternalCashTransactionType, Role } from "@/types/domain";
 
@@ -69,7 +69,7 @@ export async function handleDomainMutation(input: {
     switch (operation) {
       case "createVehicle": {
         await requireRole(client, user.id, organizationId, ["owner", "admin", "member"]);
-        const parsed = vehicleSchema.parse(formDataToObject(formData));
+        const parsed = vehicleV2Schema.parse(formDataToObject(formData));
         formData.set("vin", parsed.vin);
         await assertUniqueActiveVin(client, organizationId, parsed.vin);
         const id = await createVehicle(client, organizationId, formData);
@@ -115,7 +115,7 @@ export async function handleDomainMutation(input: {
       }
       case "recordSale": {
         await requireRole(client, user.id, organizationId, ["owner", "admin", "member"]);
-        saleSchema.parse(formDataToObject(formData));
+        saleV2Schema.parse(formDataToObject(formData));
         const vehicle = await getVehicle(client, organizationId, String(formData.get("vehicleId") || ""));
         const appData = await loadAppData(client, user, organizationId);
         if (appData.sales.some((sale) => sale.vehicleId === vehicle.id && isActiveSale(sale))) {
@@ -334,7 +334,7 @@ function toClientErrorMessage(error: unknown, operation: DomainMutationOperation
   if (operation === "updateVehicle" && (normalized.includes("correct_vehicle_purchase") || normalized.includes("transition_vehicle_status") || normalized.includes("does not exist"))) {
     return "Vehicle correction database migration is missing. Run the latest vehicle correction migration in Supabase, then try again.";
   }
-  if ((operation === "voidSale" || operation === "correctSale") && (normalized.includes("void_vehicle_sale_atomic") || normalized.includes("correct_vehicle_sale_atomic") || normalized.includes("does not exist"))) {
+  if ((operation === "voidSale" || operation === "correctSale") && (normalized.includes("void_vehicle_sale_atomic") || normalized.includes("correct_vehicle_sale_atomic") || normalized.includes("void_vehicle_sale_accounting_v2") || normalized.includes("correct_vehicle_sale_accounting_v2") || normalized.includes("record_vehicle_sale_accounting_v2") || normalized.includes("does not exist"))) {
     return "Sale correction database migration is missing. Run the latest sale correction migration in Supabase, then try again.";
   }
   if (operation === "voidExpense" && (normalized.includes("void_vehicle_expense_with_cash_reversal") || normalized.includes("does not exist"))) {

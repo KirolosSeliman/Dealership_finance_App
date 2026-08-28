@@ -38,6 +38,7 @@ import {
   EXPENSE_CATEGORIES,
   EXPENSE_FUNDING_SOURCES,
   EXPENSE_TAX_BEHAVIORS,
+  ACCOUNTING_V2_SALES_TAX_RATE,
   getAllowedVehicleStatusTransitions,
   PURCHASE_SOURCES,
   ROLES,
@@ -46,9 +47,14 @@ import {
 } from "@/lib/domain/constants";
 import {
   calculateCompanyCashBalance,
+  calculateAccountingV2SaleBreakdown,
   calculateDashboardMetrics,
   calculateExternalCashBalance,
-  calculateSaleBreakdown,
+  calculateSaleTax,
+  calculateVehicleCompanyCostBasis,
+  calculateVehicleCompanyGrossCashInvested,
+  calculateExternalVehicleCost,
+  calculatePendingRecoverableCompanyTax,
   calculateVehicleTotalCost,
   daysBetween,
   generateTaxReport,
@@ -75,7 +81,7 @@ import type {
 
 type CashAccount = "company" | "external";
 type CashTransaction = CompanyCashTransaction | ExternalCashTransaction;
-export type VehiclePrefill = Partial<Pick<Vehicle, "year" | "make" | "model" | "trim" | "mileage" | "purchasePrice" | "purchaseSource" | "notes">>;
+export type VehiclePrefill = Partial<Pick<Vehicle, "year" | "make" | "model" | "trim" | "mileage" | "purchasePrice" | "purchaseSource" | "notes">> & { purchaseTaxRate?: number };
 
 const LEGACY_MARKET_UI_VISIBLE = false;
 
@@ -262,8 +268,7 @@ export function Dashboard({
     externalCashTransactions: activeExternalTransactions,
   });
   const rangeExpenseTotal = roundDisplayNumber(
-    visibleVehicles.reduce((sum, vehicle) => sum + vehicle.purchasePrice, 0) +
-      visibleExpenses.reduce((sum, expense) => sum + normalizedExpenseAmount(expense), 0),
+    rangeMetrics.totalExpenses,
   );
   const metricCards = [
     [t.metrics.companyCash, money(metrics.companyCash), <Banknote key="a" size={18} />],
@@ -275,17 +280,17 @@ export function Dashboard({
     [t.metrics.inventoryValue, money(metrics.inventoryValue), <Building2 key="g" size={18} />],
     [t.metrics.averageTimeToSell, `${rangeMetrics.averageTimeToSell}`, <Activity key="h" size={18} />],
   ];
-  const salesSeries = buildDailySeries(visibleSales.map((sale) => ({ date: sale.saleDate, value: sale.paperSalePrice })));
-  const profitSeries = buildDailySeries(visibleSales.map((sale) => ({ date: sale.saleDate, value: sale.taxableProfitAmount - sale.profitTaxDue })));
+  const salesSeries = buildDailySeries(visibleSales.map((sale) => ({ date: sale.saleDate, value: salePriceForDisplay(sale) })));
+  const profitSeries = buildDailySeries(visibleSales.map((sale) => ({ date: sale.saleDate, value: saleNetProfitForDisplay(sale) })));
   const expenseSeries = buildDailySeries([
-    ...visibleVehicles.map((vehicle) => ({ date: vehicle.purchaseDate, value: vehicle.purchasePrice })),
+    ...visibleVehicles.map((vehicle) => ({ date: vehicle.purchaseDate, value: vehicleCostForDisplay(vehicle, scoped.expenses, visibleSales) })),
     ...visibleExpenses.map((expense) => ({ date: expense.date, value: normalizedExpenseAmount(expense) })),
   ]);
   const companyCashSeries = buildBalanceSeries(activeCompanyTransactions, dateRange, calculateCompanyCashBalance);
   const externalCashSeries = buildBalanceSeries(activeExternalTransactions, dateRange, calculateExternalCashBalance);
   const inventoryValueSeries = buildDailySeries(visibleVehicles.map((vehicle) => ({
     date: vehicle.purchaseDate,
-    value: calculateVehicleTotalCost(vehicle, scoped.expenses),
+    value: vehicleCostForDisplay(vehicle, scoped.expenses, visibleSales),
   })));
   const vehiclesSoldSeries = buildDailySeries(visibleSales.map((sale) => ({ date: sale.saleDate, value: 1 })));
   const lotTimeSeries = buildDailySeries(visibleSoldVehicles.map((vehicle) => {
@@ -417,6 +422,8 @@ export function VehiclesSection(props: {
   expenses: VehicleExpense[];
   recurringExpenseTemplates: RecurringVehicleExpenseTemplate[];
   sales: Sale[];
+  companyCashTransactions: CompanyCashTransaction[];
+  externalCashTransactions: ExternalCashTransaction[];
   contacts: ContactRecord[];
   attachments: AppData["attachments"];
   activityLogs: AppData["activityLogs"];
@@ -512,7 +519,7 @@ function Inventory({
           <table className="data-table">
             <thead>
               <tr>
-                {[t.fields.make, t.fields.vin, t.fields.status, t.fields.purchaseDate, t.fields.purchaseSource, t.fields.purchasePrice, t.metrics.totalExpenses, t.fields.vehicleTotalCost, t.fields.paperSalePrice, t.fields.realClientPayment, t.fields.externalCommission, t.metrics.netProfit, t.inventory.daysInInventory].map((header) => <th key={header}>{header}</th>)}
+                {[t.fields.make, t.fields.vin, t.fields.status, t.fields.purchaseDate, t.fields.purchaseSource, t.fields.purchasePrice, t.fields.companyCostBasis, t.fields.companyGrossCashInvested, t.fields.salePriceBeforeTax, t.fields.customerTotal, t.fields.externalVehicleCost, t.fields.trackedNetProfit, t.inventory.daysInInventory].map((header) => <th key={header}>{header}</th>)}
               </tr>
             </thead>
             <tbody>
@@ -525,7 +532,8 @@ function Inventory({
               )}
               {vehicles.map((vehicle) => {
                 const sale = sales.find((item) => item.vehicleId === vehicle.id && isActiveSale(item));
-                const totalCost = calculateVehicleTotalCost(vehicle, expenses);
+                const totalCost = vehicleCostForDisplay(vehicle, expenses, sales);
+                const accountingV2 = isAccountingV2Vehicle(vehicle, sale ? [sale] : []);
                 const expenseTotal = expenses.filter((expense) => expense.vehicleId === vehicle.id).reduce((sum, expense) => sum + expense.totalAmount, 0);
                 return (
                   <tr key={vehicle.id} onClick={() => navigate("vehicles", { mode: "detail", vehicleId: vehicle.id, tab: "overview" })}>
@@ -535,12 +543,12 @@ function Inventory({
                     <td>{vehicle.purchaseDate}</td>
                     <td>{formatLabel(vehicle.purchaseSource)}</td>
                     <td>{money(vehicle.purchasePrice)}</td>
-                    <td>{money(expenseTotal)}</td>
-                    <td>{money(totalCost)}</td>
-                    <td>{sale ? money(sale.paperSalePrice) : "-"}</td>
-                    <td>{sale ? money(sale.realClientPayment) : "-"}</td>
-                    <td>{sale ? money(sale.externalCommission) : "-"}</td>
-                    <td>{sale ? money(sale.taxableProfitAmount - sale.profitTaxDue) : "-"}</td>
+                    <td>{money(sale?.accountingModelVersion === 2 ? sale.companyCostBasis ?? totalCost : expenseTotal)}</td>
+                    <td>{money(accountingV2 ? sale?.companyGrossCashInvested ?? vehicleGrossCashForDisplay(vehicle, expenses, sale ? [sale] : []) : totalCost)}</td>
+                    <td>{sale ? money(salePriceForDisplay(sale)) : "-"}</td>
+                    <td>{sale ? money(sale.accountingModelVersion === 2 ? sale.customerTotal ?? 0 : sale.realClientPayment) : "-"}</td>
+                    <td>{sale ? money(sale.accountingModelVersion === 2 ? sale.externalVehicleCost ?? vehicleExternalCostForDisplay(vehicle, expenses, [sale]) : sale.externalCommission) : "-"}</td>
+                    <td>{sale ? money(saleNetProfitForDisplay(sale)) : "-"}</td>
                     <td>{sale ? daysBetween(vehicle.purchaseDate, sale.saleDate) : daysBetween(vehicle.purchaseDate, today())}</td>
                   </tr>
                 );
@@ -561,6 +569,8 @@ export function VehicleDetailTabs({
   expenses,
   recurringExpenseTemplates,
   sales,
+  companyCashTransactions,
+  externalCashTransactions,
   contacts,
   attachments,
   activityLogs,
@@ -582,7 +592,7 @@ export function VehicleDetailTabs({
   const sale = sales.find((item) => item.vehicleId === vehicle.id && isActiveSale(item));
   const vehicleAttachments = attachments.filter((attachment) => attachment.vehicleId === vehicle.id || attachment.saleId === sale?.id);
   const vehiclePhotos = attachments.filter((attachment) => attachment.vehicleId === vehicle.id && attachment.type === "photo");
-  const totalCost = calculateVehicleTotalCost(vehicle, expenses);
+  const totalCost = vehicleCostForDisplay(vehicle, expenses, sales);
   const [confirmArchiveOpen, setConfirmArchiveOpen] = useState(false);
   const [archiveReason, setArchiveReason] = useState("");
 
@@ -601,7 +611,7 @@ export function VehicleDetailTabs({
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
             <Info label={t.fields.purchaseSource} value={formatLabel(vehicle.purchaseSource)} />
             <Info label={t.fields.purchaseDate} value={vehicle.purchaseDate} />
-            <Info label={t.fields.vehicleTotalCost} value={money(totalCost)} />
+            <Info label={vehicle.accountingModelVersion === 2 ? t.fields.companyCostBasis : t.fields.vehicleTotalCost} value={money(totalCost)} />
           </div>
         </div>
         <div className="flex flex-col gap-2 lg:items-end">
@@ -679,8 +689,9 @@ export function VehicleDetailTabs({
               [t.fields.status, t.status[vehicle.status]],
               [t.fields.purchaseSource, formatLabel(vehicle.purchaseSource)],
               [t.fields.purchaseDate, vehicle.purchaseDate],
-              [t.fields.vehicleTotalCost, money(totalCost)],
-              [t.metrics.netProfit, sale ? money(sale.taxableProfitAmount - sale.profitTaxDue) : money((vehicle.listedPrice ?? totalCost) - totalCost)],
+              [vehicle.accountingModelVersion === 2 ? t.fields.companyCostBasis : t.fields.vehicleTotalCost, money(totalCost)],
+              [t.fields.recoverableCompanyTax, money(vehicleRecoverableTaxForDisplay(vehicle, expenses, sale ? [sale] : []))],
+              [t.metrics.netProfit, sale ? money(saleNetProfitForDisplay(sale)) : money((vehicle.listedPrice ?? totalCost) - totalCost)],
             ]} />
           </Panel>
           <Panel title={t.sections.saleDetails}>
@@ -692,10 +703,10 @@ export function VehicleDetailTabs({
           </div>
         </div>
       )}
-      {selectedTab === "details" && <VehicleDetailsTab t={t} vehicle={vehicle} sale={sale} onSubmit={editVehicle} permissions={permissions} />}
+      {selectedTab === "details" && <VehicleDetailsTab t={t} vehicle={vehicle} expenses={expenses} sale={sale} onSubmit={editVehicle} permissions={permissions} />}
       {selectedTab === "expenses" && <Expenses t={t} vehicle={vehicle} expenses={expenses} recurringExpenseTemplates={recurringExpenseTemplates} onSubmit={addExpense} onApplyTemplate={applyRecurringExpenseTemplate} onEdit={editExpense} onVoid={voidExpense} permissions={permissions} loading={loading} />}
       {selectedTab === "documents" && <DocumentsTab t={t} vehicle={vehicle} attachments={vehicleAttachments} onSubmit={addAttachment} permissions={permissions} />}
-      {selectedTab === "sale" && <SaleForm t={t} vehicle={vehicle} expenses={expenses} onSubmit={recordSale} onVoid={voidSale} onCorrect={correctSale} sale={sale} permissions={permissions} />}
+      {selectedTab === "sale" && <SaleForm t={t} vehicle={vehicle} expenses={expenses} companyCashTransactions={companyCashTransactions} externalCashTransactions={externalCashTransactions} onSubmit={recordSale} onVoid={voidSale} onCorrect={correctSale} sale={sale} permissions={permissions} />}
       {selectedTab === "timeline" && (
         <Panel title={tabLabel(t, "timeline")}>
           <Ledger
@@ -710,7 +721,7 @@ export function VehicleDetailTabs({
 }
 
 export function VehicleCard({ t, vehicle, expenses, sale, onOpen }: { t: ReturnType<typeof getDictionary>; vehicle: Vehicle; expenses: VehicleExpense[]; sale?: Sale; onOpen: () => void }) {
-  const totalCost = calculateVehicleTotalCost(vehicle, expenses);
+  const totalCost = vehicleCostForDisplay(vehicle, expenses, sale ? [sale] : []);
   return (
     <button className="vehicle-card" onClick={onOpen}>
       <VehiclePhotoPreview vehicle={vehicle} className="mb-4 aspect-[16/9]" iconSize={46} />
@@ -723,9 +734,9 @@ export function VehicleCard({ t, vehicle, expenses, sale, onOpen }: { t: ReturnT
       </div>
       <dl className="mt-4 grid grid-cols-2 gap-3 text-sm">
         <Info label={t.fields.purchaseSource} value={formatLabel(vehicle.purchaseSource)} />
-        <Info label={t.fields.vehicleTotalCost} value={money(totalCost)} />
+        <Info label={vehicle.accountingModelVersion === 2 ? t.fields.companyCostBasis : t.fields.vehicleTotalCost} value={money(totalCost)} />
         <Info label={t.fields.listedPrice} value={vehicle.listedPrice ? money(vehicle.listedPrice) : "-"} />
-        <Info label={t.inventory.estimatedProfit} value={sale ? money(sale.taxableProfitAmount - sale.profitTaxDue) : money((vehicle.listedPrice ?? totalCost) - totalCost)} />
+        <Info label={t.inventory.estimatedProfit} value={sale ? money(saleNetProfitForDisplay(sale)) : money((vehicle.listedPrice ?? totalCost) - totalCost)} />
       </dl>
     </button>
   );
@@ -807,6 +818,8 @@ export function PhotoManager({
 export function AddVehicle({ t, onSubmit, prefill }: { t: ReturnType<typeof getDictionary>; onSubmit: (formData: FormData) => void; prefill?: VehiclePrefill }) {
   const [decoded, setDecoded] = useState<Partial<Vehicle>>({});
   const [vin, setVin] = useState("");
+  const [purchasePrice, setPurchasePrice] = useState(prefill?.purchasePrice ?? 0);
+  const [purchaseTaxRate, setPurchaseTaxRate] = useState(prefill?.purchaseTaxRate ?? 0.05);
   const [loading, setLoading] = useState(false);
   async function decode() {
     setLoading(true);
@@ -828,7 +841,16 @@ export function AddVehicle({ t, onSubmit, prefill }: { t: ReturnType<typeof getD
       <Field label={t.fields.trim}><input className="control w-full" name="trim" defaultValue={decoded.trim ?? prefill?.trim} /></Field>
       <Field label={t.fields.color}><input className="control w-full" name="color" defaultValue={decoded.color} /></Field>
       <Field label={t.fields.mileage}><input className="control w-full" name="mileage" type="number" defaultValue={prefill?.mileage} /></Field>
-      <Field label={t.fields.purchasePrice}><input className="control w-full" name="purchasePrice" type="number" step="0.01" defaultValue={prefill?.purchasePrice} required /></Field>
+      <Field label={t.fields.purchasePrice}><input className="control w-full" name="purchasePrice" type="number" min="0" step="0.01" value={purchasePrice || ""} onChange={(event) => setPurchasePrice(Number(event.target.value))} required /></Field>
+      <Field label={t.fields.purchaseTaxRate}><PurchaseTaxSelector defaultRate={purchaseTaxRate} onRateChange={setPurchaseTaxRate} /></Field>
+      <div className="lg:col-span-2 rounded-md border border-cyan-300/20 bg-cyan-300/8 p-3 text-sm text-cyan-100">
+        <p className="font-medium text-white">Purchase cash preview</p>
+        <div className="mt-2 grid gap-2 sm:grid-cols-3">
+          <Info label={t.fields.purchasePrice} value={money(roundDisplayNumber(Math.max(0, purchasePrice)))} />
+          <Info label={t.fields.purchaseTaxAmount} value={money(roundDisplayNumber(Math.max(0, purchasePrice) * purchaseTaxRate))} />
+          <Info label={t.fields.purchaseGrossAmount} value={money(roundDisplayNumber(Math.max(0, purchasePrice) * (1 + purchaseTaxRate)))} />
+        </div>
+      </div>
       <Field label={t.fields.purchaseDate}><input className="control w-full" name="purchaseDate" type="date" defaultValue={today()} required /></Field>
       <Field label={t.fields.purchaseSource}><select className="control w-full" name="purchaseSource" defaultValue={prefill?.purchaseSource}>{PURCHASE_SOURCES.map((source) => <option key={source} value={source}>{formatLabel(source)}</option>)}</select></Field>
       <Field label={t.fields.status}><select className="control w-full" name="status" defaultValue="purchased">{VEHICLE_STATUSES.map((status) => <option key={status} value={status}>{t.status[status]}</option>)}</select></Field>
@@ -839,21 +861,54 @@ export function AddVehicle({ t, onSubmit, prefill }: { t: ReturnType<typeof getD
   );
 }
 
+function PurchaseTaxSelector({ defaultRate, disabled = false, onRateChange }: { defaultRate: number; disabled?: boolean; onRateChange?: (rate: number) => void }) {
+  const knownRates = [0, 0.05, 0.13];
+  const initialOption = knownRates.includes(defaultRate) ? String(defaultRate) : "custom";
+  const [option, setOption] = useState(initialOption);
+  const [customRate, setCustomRate] = useState(knownRates.includes(defaultRate) ? "" : String(defaultRate));
+  return (
+    <div className="grid gap-2">
+      <select className="control w-full" value={option} onChange={(event) => {
+        const next = event.target.value;
+        setOption(next);
+        if (next !== "custom") onRateChange?.(Number(next));
+      }} disabled={disabled}>
+        <option value="0">No tax (0%)</option>
+        <option value="0.05">Québec (5%)</option>
+        <option value="0.13">Ontario (13%)</option>
+        <option value="custom">Custom rate</option>
+      </select>
+      {option === "custom" ? (
+        <input className="control w-full" name="purchaseTaxRate" type="number" min="0" max="1" step="0.0001" value={customRate} onChange={(event) => {
+          setCustomRate(event.target.value);
+          onRateChange?.(Number(event.target.value));
+        }} disabled={disabled} required />
+      ) : (
+        <input type="hidden" name="purchaseTaxRate" value={option} />
+      )}
+      <p className="text-xs text-slate-500">Enter rates as decimals only for custom tax (for example, 0.13).</p>
+    </div>
+  );
+}
+
 export function VehicleDetailsTab({
   t,
   vehicle,
+  expenses,
   sale,
   onSubmit,
   permissions,
 }: {
   t: ReturnType<typeof getDictionary>;
   vehicle: Vehicle;
+  expenses: VehicleExpense[];
   sale?: Sale;
   onSubmit: (formData: FormData) => void;
   permissions: Permissions;
 }) {
   const allowedStatuses = getAllowedVehicleStatusTransitions(vehicle.status);
   const soldLocked = Boolean(sale) || vehicle.status === "sold";
+  const purchaseExpense = expenses.find((expense) => expense.vehicleId === vehicle.id && expense.category === "vehicle_purchase_price" && !expense.voidedAt);
   return (
     <div className="grid gap-4 xl:grid-cols-2">
       <Panel title="Basic details">
@@ -893,6 +948,7 @@ export function VehicleDetailsTab({
           <form className="grid gap-4 lg:grid-cols-2" action={onSubmit}>
             <input type="hidden" name="updateMode" value="purchase" />
             <Field label={t.fields.purchasePrice}><input className="control w-full" name="purchasePrice" type="number" step="0.01" defaultValue={vehicle.purchasePrice} disabled={soldLocked} required /></Field>
+            <Field label={t.fields.purchaseTaxRate}><PurchaseTaxSelector defaultRate={purchaseExpense?.taxRate ?? 0} disabled={soldLocked} /></Field>
             <Field label={t.fields.purchaseDate}><input className="control w-full" name="purchaseDate" type="date" defaultValue={vehicle.purchaseDate} disabled={soldLocked} required /></Field>
             <Field label={t.fields.purchaseSource}><select className="control w-full" name="purchaseSource" defaultValue={vehicle.purchaseSource} disabled={soldLocked}>{PURCHASE_SOURCES.map((source) => <option key={source} value={source}>{formatLabel(source)}</option>)}</select></Field>
             <Field label="Correction reason"><textarea className="control min-h-24 w-full" name="reason" placeholder="Explain why the purchase record is being corrected" disabled={soldLocked} required /></Field>
@@ -939,6 +995,7 @@ export function Expenses({
     ? selectedTemplateId
     : activeTemplates[0]?.id ?? "";
   const selectedTemplate = activeTemplates.find((template) => template.id === effectiveSelectedTemplateId);
+  const nonPurchaseExpenseCategories = EXPENSE_CATEGORIES.filter((category) => category !== "vehicle_purchase_price");
   return (
     <div className="grid gap-4 xl:grid-cols-[420px_1fr]">
       {permissions.manageExpenses ? <div className="space-y-4">
@@ -966,7 +1023,7 @@ export function Expenses({
         )}
         <form className="panel space-y-4" action={onSubmit}>
           <h3 className="section-title">{t.actions.addExpense}</h3>
-          <Field label={t.fields.category}><select className="control w-full" name="category">{EXPENSE_CATEGORIES.map((category) => <option key={category} value={category}>{formatLabel(category)}</option>)}</select></Field>
+          <Field label={t.fields.category}><select className="control w-full" name="category">{nonPurchaseExpenseCategories.map((category) => <option key={category} value={category}>{formatLabel(category)}</option>)}</select></Field>
           <Field label={t.fields.amountBeforeTax}><input className="control w-full" name="amountBeforeTax" type="number" step="0.01" required /></Field>
           <Field label="Funding source">
             <select className="control w-full" name="fundingSource" defaultValue="company_cash">
@@ -988,14 +1045,14 @@ export function Expenses({
           )}
           {vehicleExpenses.map((expense) => (
             <div key={expense.id} className="rounded-lg border border-slate-800 bg-slate-950/35 p-3">
-              {editingExpenseId === expense.id && permissions.manageExpenses ? (
+              {editingExpenseId === expense.id && permissions.manageExpenses && expense.category !== "vehicle_purchase_price" ? (
                 <form className="grid gap-3 lg:grid-cols-2" action={(formData) => {
                   onEdit(expense.id, formData);
                   setEditingExpenseId(null);
                 }}>
                   <Field label={t.fields.category}>
                     <select className="control w-full" name="category" defaultValue={expense.category}>
-                      {EXPENSE_CATEGORIES.map((category) => <option key={category} value={category}>{formatLabel(category)}</option>)}
+                      {nonPurchaseExpenseCategories.map((category) => <option key={category} value={category}>{formatLabel(category)}</option>)}
                     </select>
                   </Field>
                   <Field label={t.fields.amountBeforeTax}><input className="control w-full" name="amountBeforeTax" type="number" step="0.01" defaultValue={expense.amountBeforeTax} required /></Field>
@@ -1013,17 +1070,19 @@ export function Expenses({
                   <InfoGrid rows={[
                     [t.fields.date, expense.date],
                     [t.fields.category, formatLabel(expense.category)],
-                    [t.fields.amountBeforeTax, money(expense.amountBeforeTax)],
-                    [t.fields.taxRate, `${Math.round(expense.taxRate * 100)}%`],
-                    [t.fields.taxAmount, money(expense.taxAmount)],
-                    [t.fields.totalAmount, money(expense.totalAmount)],
+                    [expense.category === "vehicle_purchase_price" ? t.fields.purchasePrice : t.fields.amountBeforeTax, money(expense.amountBeforeTax)],
+                    [expense.category === "vehicle_purchase_price" ? t.fields.purchaseTaxRate : t.fields.taxRate, `${Math.round(expense.taxRate * 100)}%`],
+                    [expense.category === "vehicle_purchase_price" ? t.fields.purchaseTaxAmount : t.fields.taxAmount, money(expense.taxAmount)],
+                    [expense.category === "vehicle_purchase_price" ? t.fields.purchaseGrossAmount : t.fields.totalAmount, money(expense.totalAmount)],
                     ["Funding source", formatLabel(expense.fundingSource ?? "company_cash")],
                     [t.fields.notes, expense.note],
                   ]} />
-                  {permissions.manageExpenses && <div className="flex gap-2">
+                  {expense.fundingSource === "external_cash" && <p className="rounded-md border border-amber-400/20 bg-amber-400/8 p-3 text-xs text-amber-100">{t.fields.externalFundedTaxNotice}</p>}
+                  {permissions.manageExpenses && expense.category !== "vehicle_purchase_price" && <div className="flex gap-2">
                     <button className="secondary-button" type="button" onClick={() => setEditingExpenseId(expense.id)}>Edit</button>
                     <button className="secondary-button" type="button" onClick={() => setVoidingExpenseId(expense.id)}>Void expense</button>
                   </div>}
+                  {expense.category === "vehicle_purchase_price" && <p className="text-xs text-slate-500">Purchase amounts and tax are corrected from the vehicle details tab.</p>}
                 </div>
               )}
               {voidingExpenseId === expense.id && permissions.manageExpenses && (
@@ -1091,6 +1150,8 @@ export function SaleForm({
   t,
   vehicle,
   expenses,
+  companyCashTransactions,
+  externalCashTransactions,
   onSubmit,
   onVoid,
   onCorrect,
@@ -1100,35 +1161,129 @@ export function SaleForm({
   t: ReturnType<typeof getDictionary>;
   vehicle: Vehicle;
   expenses: VehicleExpense[];
+  companyCashTransactions: CompanyCashTransaction[];
+  externalCashTransactions: ExternalCashTransaction[];
   onSubmit: (formData: FormData) => void;
   onVoid: (saleId: string, reason: string) => void;
   onCorrect: (saleId: string, formData: FormData) => void;
   sale?: Sale;
   permissions: Permissions;
 }) {
-  const [taxableProfitAmount, setTaxableProfitAmount] = useState(sale?.taxableProfitAmount ?? 1500);
-  const [realClientPayment, setRealClientPayment] = useState(sale?.realClientPayment ?? 0);
+  const isLegacySale = Boolean(sale && sale.accountingModelVersion !== 2);
+  const [salePriceBeforeTax, setSalePriceBeforeTax] = useState(sale?.salePriceBeforeTax ?? 0);
+  const [companyPaymentAmount, setCompanyPaymentAmount] = useState(sale?.companyPaymentAmount ?? 0);
+  const [externalPaymentAmount, setExternalPaymentAmount] = useState(sale?.externalPaymentAmount ?? 0);
+  const [paymentRouting, setPaymentRouting] = useState(sale?.externalPaymentAmount ? "split" : "company");
   const [voidReason, setVoidReason] = useState("");
-  const vehicleTotalCost = calculateVehicleTotalCost(vehicle, expenses);
-  const breakdown = calculateSaleBreakdown({ vehicleTotalCost, taxableProfitAmount, realClientPayment });
+  const saleTax = salePriceBeforeTax >= 0 && Number.isFinite(salePriceBeforeTax)
+    ? calculateSaleTax({ salePriceBeforeTax, salesTaxRate: ACCOUNTING_V2_SALES_TAX_RATE })
+    : undefined;
+  const routedCompanyPayment = paymentRouting === "company" ? saleTax?.customerTotal ?? 0 : companyPaymentAmount;
+  const routedExternalPayment = paymentRouting === "company" ? 0 : externalPaymentAmount;
+  let breakdown: ReturnType<typeof calculateAccountingV2SaleBreakdown> | undefined;
+  try {
+    breakdown = calculateAccountingV2SaleBreakdown({
+      vehicle,
+      expenses,
+      salePriceBeforeTax,
+      salesTaxRate: ACCOUNTING_V2_SALES_TAX_RATE,
+      companyPaymentAmount: routedCompanyPayment,
+      externalPaymentAmount: routedExternalPayment,
+    });
+  } catch {
+    breakdown = undefined;
+  }
+  const currentCompanyCash = calculateCompanyCashBalance(companyCashTransactions.filter((transaction) => !transaction.deletedAt));
+  const currentExternalCash = calculateExternalCashBalance(externalCashTransactions.filter((transaction) => !transaction.deletedAt));
+  const newCompanyCash = breakdown
+    ? currentCompanyCash + breakdown.companyPaymentAmount + Math.max(0, breakdown.taxSettlementAmount) - Math.max(0, -breakdown.taxSettlementAmount) - breakdown.profitTaxDue
+    : currentCompanyCash;
+  const newExternalCash = breakdown ? currentExternalCash + breakdown.externalPaymentAmount : currentExternalCash;
+
+  if (isLegacySale && sale) {
+    return (
+      <div className="grid gap-4 xl:grid-cols-[420px_1fr]">
+        <div className="panel space-y-4">
+          <h3 className="section-title">Legacy sale correction</h3>
+          <p className="text-sm text-slate-400">This historical sale uses the legacy accounting model. New sales use Accounting Model V2 and do not rewrite this record.</p>
+          {permissions.manageSales ? <form className="grid gap-3" action={(formData) => onCorrect(sale.id, formData)}>
+            <Field label={t.fields.saleDate}><input className="control w-full" name="saleDate" type="date" defaultValue={sale.saleDate} /></Field>
+            <Field label={t.fields.taxableProfit}><input className="control w-full" name="taxableProfitAmount" type="number" step="0.01" defaultValue={sale.taxableProfitAmount} /></Field>
+            <Field label={t.fields.realClientPayment}><input className="control w-full" name="realClientPayment" type="number" step="0.01" defaultValue={sale.realClientPayment} /></Field>
+            <Field label={t.fields.buyerName}><input className="control w-full" name="buyerName" /></Field>
+            <Field label={t.fields.phone}><input className="control w-full" name="phone" /></Field>
+            <Field label={t.fields.email}><input className="control w-full" name="email" type="email" /></Field>
+            <Field label={t.fields.address}><input className="control w-full" name="address" /></Field>
+            <Field label="Correction reason"><textarea className="control min-h-20 w-full" name="reason" required /></Field>
+            <Field label={t.fields.notes}><textarea className="control min-h-20 w-full" name="notes" defaultValue={sale.notes} /></Field>
+            <button className="secondary-button" type="submit">Correct legacy sale</button>
+          </form> : <EmptyState title="Read-only legacy sale" copy="Your role cannot correct or void sales." />}
+          {permissions.manageSales && <div className="rounded-md border border-rose-400/30 bg-rose-900/10 p-3">
+            <p className="text-sm text-rose-100">Void only for cancelled or accidental sales. This preserves the legacy record and adds linked reversal entries.</p>
+            <textarea className="control mt-3 min-h-20 w-full" value={voidReason} onChange={(event) => setVoidReason(event.target.value)} placeholder="Reason for void" />
+            <button className="danger-button mt-3" type="button" disabled={voidReason.trim().length < 3} onClick={() => onVoid(sale.id, voidReason.trim())}>Void legacy sale</button>
+          </div>}
+        </div>
+        <Panel title={t.sections.saleDetails}>
+          <InfoGrid rows={[
+            [t.fields.paperSalePrice, money(sale.paperSalePrice)],
+            [t.fields.realClientPayment, money(sale.realClientPayment)],
+            [t.fields.externalCommission, money(sale.externalCommission)],
+            [t.fields.profitTaxDue, money(sale.profitTaxDue)],
+          ]} />
+          <p className="mt-4 rounded-md border border-amber-400/20 bg-amber-400/8 p-3 text-sm text-amber-100">Legacy accounting values are shown for historical reporting only.</p>
+        </Panel>
+      </div>
+    );
+  }
+
+  const saleFields = (includeReason: boolean) => (
+    <>
+      <Field label={t.fields.saleDate}><input className="control w-full" name="saleDate" type="date" defaultValue={sale?.saleDate ?? today()} /></Field>
+      <Field label={t.fields.salePriceBeforeTax}><input className="control w-full" name="salePriceBeforeTax" type="number" min="0" step="0.01" value={salePriceBeforeTax} onChange={(event) => setSalePriceBeforeTax(Number(event.target.value))} required /></Field>
+      <input type="hidden" name="salesTaxRate" value={ACCOUNTING_V2_SALES_TAX_RATE} />
+      {saleTax && <Info label={t.fields.salesTaxAmount} value={money(saleTax.salesTaxAmount)} />}
+      {saleTax && <Info label={t.fields.customerTotal} value={money(saleTax.customerTotal)} />}
+      <Field label="Payment routing">
+        <select className="control w-full" value={paymentRouting} onChange={(event) => {
+          const next = event.target.value;
+          setPaymentRouting(next);
+          if (next === "split") setCompanyPaymentAmount(companyPaymentAmount || saleTax?.customerTotal || 0);
+        }}>
+          <option value="company">All company</option>
+          <option value="split">Split company / external</option>
+        </select>
+      </Field>
+      {paymentRouting === "company" ? (
+        <>
+          <Info label={t.fields.companyPaymentAmount} value={money(saleTax?.customerTotal ?? 0)} />
+          <input type="hidden" name="companyPaymentAmount" value={saleTax?.customerTotal ?? 0} />
+          <input type="hidden" name="externalPaymentAmount" value="0" />
+        </>
+      ) : (
+        <>
+          <Field label={t.fields.companyPaymentAmount}><input className="control w-full" name="companyPaymentAmount" type="number" min="0" step="0.01" value={companyPaymentAmount} onChange={(event) => setCompanyPaymentAmount(Number(event.target.value))} required /></Field>
+          <Field label={t.fields.externalPaymentAmount}><input className="control w-full" name="externalPaymentAmount" type="number" min="0" step="0.01" value={externalPaymentAmount} onChange={(event) => setExternalPaymentAmount(Number(event.target.value))} required /></Field>
+        </>
+      )}
+      <Field label={t.fields.buyerName}><input className="control w-full" name="buyerName" /></Field>
+      <Field label={t.fields.phone}><input className="control w-full" name="phone" /></Field>
+      <Field label={t.fields.email}><input className="control w-full" name="email" type="email" /></Field>
+      <Field label={t.fields.address}><input className="control w-full" name="address" /></Field>
+      <Field label={t.fields.notes}><textarea className="control min-h-24 w-full" name="notes" defaultValue={sale?.notes} /></Field>
+      {includeReason && <Field label="Correction reason"><textarea className="control min-h-20 w-full" name="reason" required /></Field>}
+    </>
+  );
   return (
     <div className="grid gap-4 xl:grid-cols-[420px_1fr]">
       {sale ? (
         <div className="panel space-y-4">
           <h3 className="section-title">Sale correction</h3>
-          <p className="text-sm text-slate-400">Corrections preserve the original sale, reverse its cash impact, and create a new active sale.</p>
+          <p className="text-sm text-slate-400">Corrections preserve the original V2 sale, reverse every linked cash effect, and create a new active V2 sale.</p>
           {permissions.manageSales ? (
             <>
               <form className="grid gap-3" action={(formData) => onCorrect(sale.id, formData)}>
-                <Field label={t.fields.saleDate}><input className="control w-full" name="saleDate" type="date" defaultValue={sale.saleDate} /></Field>
-                <Field label={t.fields.taxableProfit}><input className="control w-full" name="taxableProfitAmount" type="number" step="0.01" defaultValue={sale.taxableProfitAmount} /></Field>
-                <Field label={t.fields.realClientPayment}><input className="control w-full" name="realClientPayment" type="number" step="0.01" defaultValue={sale.realClientPayment} /></Field>
-                <Field label={t.fields.buyerName}><input className="control w-full" name="buyerName" /></Field>
-                <Field label={t.fields.phone}><input className="control w-full" name="phone" /></Field>
-                <Field label={t.fields.email}><input className="control w-full" name="email" type="email" /></Field>
-                <Field label={t.fields.address}><input className="control w-full" name="address" /></Field>
-                <Field label="Correction reason"><textarea className="control min-h-20 w-full" name="reason" required /></Field>
-                <Field label={t.fields.notes}><textarea className="control min-h-20 w-full" name="notes" defaultValue={sale.notes} /></Field>
+                {saleFields(true)}
                 <button className="secondary-button" type="submit">Correct sale</button>
               </form>
               <div className="rounded-md border border-rose-400/30 bg-rose-900/10 p-3">
@@ -1141,25 +1296,26 @@ export function SaleForm({
         </div>
       ) : permissions.manageSales ? <form className="panel space-y-4" action={onSubmit}>
         <h3 className="section-title">{t.actions.recordSale}</h3>
-        <Field label={t.fields.saleDate}><input className="control w-full" name="saleDate" type="date" defaultValue={today()} /></Field>
-        <Field label={t.fields.taxableProfit}><input className="control w-full" name="taxableProfitAmount" type="number" step="0.01" value={taxableProfitAmount} onChange={(event) => setTaxableProfitAmount(Number(event.target.value))} /></Field>
-        <Field label={t.fields.realClientPayment}><input className="control w-full" name="realClientPayment" type="number" step="0.01" value={realClientPayment} onChange={(event) => setRealClientPayment(Number(event.target.value))} /></Field>
-        <Field label={t.fields.buyerName}><input className="control w-full" name="buyerName" required /></Field>
-        <Field label={t.fields.phone}><input className="control w-full" name="phone" /></Field>
-        <Field label={t.fields.email}><input className="control w-full" name="email" type="email" /></Field>
-        <Field label={t.fields.address}><input className="control w-full" name="address" /></Field>
-        <Field label={t.fields.fileTitle}><input className="control w-full" placeholder="driver-license-private-path" /></Field>
-        <Field label={t.fields.notes}><textarea className="control min-h-24 w-full" name="notes" /></Field>
-        <button className="primary-button" type="submit">{t.actions.recordSale}</button>
+        {saleFields(false)}
+        <button className="primary-button" type="submit" disabled={!breakdown}>{t.actions.recordSale}</button>
       </form> : <EmptyState title="Read-only sale details" copy="Your role cannot mark vehicles as sold." />}
       <Panel title={t.sections.saleDetails}>
-        <InfoGrid rows={[
-          [t.fields.vehicleTotalCost, money(vehicleTotalCost)],
-          [t.fields.paperSalePrice, money(breakdown.paperSalePrice)],
+        {breakdown ? <InfoGrid rows={[
+          [t.fields.salePriceBeforeTax, money(breakdown.salePriceBeforeTax)],
+          [t.fields.salesTaxAmount, money(breakdown.salesTaxAmount)],
+          [t.fields.customerTotal, money(breakdown.customerTotal)],
+          [t.fields.companyCostBasis, money(breakdown.companyCostBasis)],
+          [t.fields.companyGrossCashInvested, money(breakdown.companyGrossCashInvested)],
+          [t.fields.recoverableCompanyTax, money(breakdown.recoverableCompanyTax)],
+          [t.fields.externalVehicleCost, money(breakdown.externalVehicleCost)],
+          [t.fields.taxSettlementAmount, <span key="tax-settlement-preview" className={breakdown.taxSettlementAmount >= 0 ? "text-emerald-300" : "text-rose-300"}>{breakdown.taxSettlementAmount >= 0 ? "+" : ""}{money(breakdown.taxSettlementAmount)}</span>],
+          [t.fields.grossProfit, money(breakdown.grossProfit)],
           [t.fields.profitTaxDue, money(breakdown.profitTaxDue)],
-          [t.fields.externalCommission, money(breakdown.externalCommission)],
-          [t.metrics.netProfit, money(breakdown.netProfitAfterTax)],
-        ]} />
+          [t.fields.trackedNetProfit, money(breakdown.trackedNetProfit)],
+          ["Current company cash", money(currentCompanyCash)],
+          ["Company cash after sale", money(newCompanyCash)],
+          ["External cash after sale", money(newExternalCash)],
+        ]} /> : <p className="text-sm text-rose-200">Payment routing must equal the customer total exactly in cents.</p>}
         <p className="mt-4 rounded-md border border-amber-400/20 bg-amber-400/8 p-3 text-sm text-amber-100">{TAX_DISCLAIMER}</p>
       </Panel>
     </div>
@@ -1167,6 +1323,22 @@ export function SaleForm({
 }
 
 export function SaleSummary({ t, sale, contacts }: { t: ReturnType<typeof getDictionary>; sale: Sale; contacts: ContactRecord[] }) {
+  if (sale.accountingModelVersion === 2) {
+    return <InfoGrid rows={[
+      [t.fields.salePriceBeforeTax, money(sale.salePriceBeforeTax ?? 0)],
+      [t.fields.salesTaxAmount, money(sale.salesTaxAmount ?? 0)],
+      [t.fields.customerTotal, money(sale.customerTotal ?? 0)],
+      [t.fields.companyCostBasis, money(sale.companyCostBasis ?? 0)],
+      [t.fields.companyGrossCashInvested, money(sale.companyGrossCashInvested ?? 0)],
+      [t.fields.recoverableCompanyTax, money(sale.recoverableCompanyTax ?? 0)],
+      [t.fields.taxSettlementAmount, <span key="tax-settlement-summary" className={(sale.taxSettlementAmount ?? 0) >= 0 ? "text-emerald-300" : "text-rose-300"}>{(sale.taxSettlementAmount ?? 0) >= 0 ? "+" : ""}{money(sale.taxSettlementAmount ?? 0)}</span>],
+      [t.fields.grossProfit, money(sale.grossProfit ?? 0)],
+      [t.fields.profitTaxDue, money(sale.profitTaxDue)],
+      [t.fields.externalVehicleCost, money(sale.externalVehicleCost ?? 0)],
+      [t.fields.trackedNetProfit, money(sale.trackedNetProfit ?? 0)],
+      [t.fields.buyerName, contacts.find((contact) => contact.id === sale.contactId)?.fullName],
+    ]} />;
+  }
   return <InfoGrid rows={[
     [t.fields.paperSalePrice, money(sale.paperSalePrice)],
     [t.fields.realClientPayment, money(sale.realClientPayment)],
@@ -2787,13 +2959,48 @@ function buildBalanceSeries<T extends CashTransaction>(
   }));
 }
 
+function isAccountingV2Vehicle(vehicle: Vehicle, sales: Sale[] = []) {
+  return vehicle.accountingModelVersion === 2 || sales.some((sale) => sale.vehicleId === vehicle.id && sale.accountingModelVersion === 2);
+}
+
+function vehicleCostForDisplay(vehicle: Vehicle, expenses: VehicleExpense[], sales: Sale[] = []) {
+  return isAccountingV2Vehicle(vehicle, sales)
+    ? calculateVehicleCompanyCostBasis(vehicle, expenses)
+    : calculateVehicleTotalCost(vehicle, expenses);
+}
+
+function vehicleGrossCashForDisplay(vehicle: Vehicle, expenses: VehicleExpense[], sales: Sale[] = []) {
+  return isAccountingV2Vehicle(vehicle, sales)
+    ? calculateVehicleCompanyGrossCashInvested(vehicle, expenses)
+    : calculateVehicleTotalCost(vehicle, expenses);
+}
+
+function vehicleExternalCostForDisplay(vehicle: Vehicle, expenses: VehicleExpense[], sales: Sale[] = []) {
+  return isAccountingV2Vehicle(vehicle, sales) ? calculateExternalVehicleCost(vehicle, expenses) : 0;
+}
+
+function vehicleRecoverableTaxForDisplay(vehicle: Vehicle, expenses: VehicleExpense[], sales: Sale[] = []) {
+  return isAccountingV2Vehicle(vehicle, sales) ? calculatePendingRecoverableCompanyTax(vehicle, expenses) : 0;
+}
+
+function salePriceForDisplay(sale: Sale) {
+  return sale.accountingModelVersion === 2 ? sale.salePriceBeforeTax ?? 0 : sale.paperSalePrice;
+}
+
+function saleNetProfitForDisplay(sale: Sale) {
+  return sale.accountingModelVersion === 2
+    ? sale.trackedNetProfit ?? roundDisplayNumber((sale.grossProfit ?? 0) - sale.profitTaxDue - (sale.externalVehicleCost ?? 0))
+    : sale.taxableProfitAmount - sale.profitTaxDue;
+}
+
 function buildMonthlyBuySellSeries(scoped: AppData, range: { start: string; end: string }) {
   const months = new Map<string, { label: string; buyTotal: number; sellTotal: number; count: number }>();
   scoped.sales.filter((sale) => isActiveSale(sale) && isInDateRange(sale.saleDate, range)).forEach((sale) => {
     const key = sale.saleDate.slice(0, 7);
     const current = months.get(key) ?? { label: key.slice(5), buyTotal: 0, sellTotal: 0, count: 0 };
-    current.buyTotal += sale.vehicleTotalCost;
-    current.sellTotal += sale.paperSalePrice;
+    const vehicle = scoped.vehicles.find((item) => item.id === sale.vehicleId);
+    current.buyTotal += vehicle ? vehicleCostForDisplay(vehicle, scoped.expenses, scoped.sales) : sale.vehicleTotalCost;
+    current.sellTotal += salePriceForDisplay(sale);
     current.count += 1;
     months.set(key, current);
   });

@@ -181,7 +181,7 @@ export async function saveLanguagePreference(client: Client, language: "en" | "f
 }
 
 export async function createVehicle(client: Client, organizationId: string, formData: FormData) {
-  const { data, error } = await client.rpc("create_vehicle_with_defaults", {
+  const { data, error } = await client.rpc("create_vehicle_with_defaults_v2", {
     p_organization_id: organizationId,
     p_vin: normalizeVin(formData.get("vin")),
     p_year: optionalNumber(formData.get("year")),
@@ -193,6 +193,7 @@ export async function createVehicle(client: Client, organizationId: string, form
     p_purchase_price: numberValue(formData.get("purchasePrice")),
     p_purchase_date: stringValue(formData.get("purchaseDate")) || today(),
     p_purchase_source: (stringValue(formData.get("purchaseSource")) || "other") as PurchaseSource,
+    p_purchase_tax_rate: numberValue(formData.get("purchaseTaxRate")),
     p_status: (stringValue(formData.get("status")) || "purchased") as VehicleStatus,
     p_listed_price: optionalNumber(formData.get("listedPrice")),
     p_notes: optionalString(formData.get("notes")),
@@ -204,12 +205,13 @@ export async function createVehicle(client: Client, organizationId: string, form
 export async function updateVehicle(client: Client, vehicle: Vehicle, formData: FormData) {
   const updateMode = stringValue(formData.get("updateMode")) || "basic";
   if (updateMode === "purchase") {
-    const { error } = await client.rpc("correct_vehicle_purchase", {
+    const { error } = await client.rpc("correct_vehicle_purchase_accounting_v2", {
       p_organization_id: vehicle.organizationId,
       p_vehicle_id: vehicle.id,
       p_purchase_price: numberValue(formData.get("purchasePrice")),
       p_purchase_date: stringValue(formData.get("purchaseDate")) || today(),
       p_purchase_source: stringValue(formData.get("purchaseSource")) as PurchaseSource,
+      p_purchase_tax_rate: numberValue(formData.get("purchaseTaxRate")),
       p_reason: stringValue(formData.get("reason")),
     });
     if (error) throw error;
@@ -271,6 +273,9 @@ export async function archiveVehicle(
 export async function createExpense(client: Client, vehicle: Vehicle, formData: FormData) {
   const amountBeforeTax = numberValue(formData.get("amountBeforeTax"));
   const category = stringValue(formData.get("category")) as ExpenseCategory;
+  if (vehicle.accountingModelVersion === 2 && category === "vehicle_purchase_price") {
+    throw new Error("Vehicle purchase price and tax must be entered through the vehicle purchase workflow.");
+  }
   const tax = calculateExpenseTax({
     purchaseSource: vehicle.purchaseSource,
     category,
@@ -297,6 +302,9 @@ export async function createExpense(client: Client, vehicle: Vehicle, formData: 
 export async function updateExpense(client: Client, vehicle: Vehicle, expenseId: string, formData: FormData) {
   const amountBeforeTax = numberValue(formData.get("amountBeforeTax"));
   const category = stringValue(formData.get("category")) as ExpenseCategory;
+  if (vehicle.accountingModelVersion === 2 && category === "vehicle_purchase_price") {
+    throw new Error("Vehicle purchase price and tax must be corrected through the audited purchase workflow.");
+  }
   const tax = calculateExpenseTax({
     purchaseSource: vehicle.purchaseSource,
     category,
@@ -429,12 +437,14 @@ export async function voidVehicleExpense(client: Client, vehicle: Vehicle, expen
 }
 
 export async function recordVehicleSale(client: Client, _appData: AppData, vehicle: Vehicle, formData: FormData) {
-  const { data, error } = await client.rpc("record_vehicle_sale_atomic", {
+  const { data, error } = await client.rpc("record_vehicle_sale_accounting_v2", {
     p_organization_id: vehicle.organizationId,
     p_vehicle_id: vehicle.id,
     p_sale_date: stringValue(formData.get("saleDate")) || today(),
-    p_taxable_profit_amount: numberValue(formData.get("taxableProfitAmount")),
-    p_real_client_payment: numberValue(formData.get("realClientPayment")),
+    p_sale_price_before_tax: numberValue(formData.get("salePriceBeforeTax")),
+    p_sales_tax_rate: numberValue(formData.get("salesTaxRate")),
+    p_company_payment_amount: numberValue(formData.get("companyPaymentAmount")),
+    p_external_payment_amount: numberValue(formData.get("externalPaymentAmount")),
     p_buyer_name: optionalString(formData.get("buyerName")),
     p_phone: optionalString(formData.get("phone")),
     p_email: optionalString(formData.get("email")),
@@ -446,7 +456,8 @@ export async function recordVehicleSale(client: Client, _appData: AppData, vehic
 }
 
 export async function voidVehicleSale(client: Client, organizationId: string, saleId: string, reason: string) {
-  const { error } = await client.rpc("void_vehicle_sale_atomic", {
+  const version = await getSaleAccountingVersion(client, organizationId, saleId);
+  const { error } = await client.rpc(version === 2 ? "void_vehicle_sale_accounting_v2" : "void_vehicle_sale_atomic", {
     p_organization_id: organizationId,
     p_sale_id: saleId,
     p_reason: reason,
@@ -455,19 +466,39 @@ export async function voidVehicleSale(client: Client, organizationId: string, sa
 }
 
 export async function correctVehicleSale(client: Client, organizationId: string, saleId: string, formData: FormData) {
-  const { data, error } = await client.rpc("correct_vehicle_sale_atomic", {
-    p_organization_id: organizationId,
-    p_sale_id: saleId,
-    p_sale_date: stringValue(formData.get("saleDate")) || today(),
-    p_taxable_profit_amount: numberValue(formData.get("taxableProfitAmount")),
-    p_real_client_payment: numberValue(formData.get("realClientPayment")),
-    p_buyer_name: optionalString(formData.get("buyerName")),
-    p_phone: optionalString(formData.get("phone")),
-    p_email: optionalString(formData.get("email")),
-    p_address: optionalString(formData.get("address")),
-    p_notes: optionalString(formData.get("notes")),
-    p_reason: stringValue(formData.get("reason")),
-  });
+  const version = await getSaleAccountingVersion(client, organizationId, saleId);
+  const { data, error } = await client.rpc(
+    version === 2 ? "correct_vehicle_sale_accounting_v2" : "correct_vehicle_sale_atomic",
+    version === 2
+      ? {
+          p_organization_id: organizationId,
+          p_sale_id: saleId,
+          p_sale_date: stringValue(formData.get("saleDate")) || today(),
+          p_sale_price_before_tax: numberValue(formData.get("salePriceBeforeTax")),
+          p_sales_tax_rate: numberValue(formData.get("salesTaxRate")),
+          p_company_payment_amount: numberValue(formData.get("companyPaymentAmount")),
+          p_external_payment_amount: numberValue(formData.get("externalPaymentAmount")),
+          p_buyer_name: optionalString(formData.get("buyerName")),
+          p_phone: optionalString(formData.get("phone")),
+          p_email: optionalString(formData.get("email")),
+          p_address: optionalString(formData.get("address")),
+          p_notes: optionalString(formData.get("notes")),
+          p_reason: stringValue(formData.get("reason")),
+        }
+      : {
+          p_organization_id: organizationId,
+          p_sale_id: saleId,
+          p_sale_date: stringValue(formData.get("saleDate")) || today(),
+          p_taxable_profit_amount: numberValue(formData.get("taxableProfitAmount")),
+          p_real_client_payment: numberValue(formData.get("realClientPayment")),
+          p_buyer_name: optionalString(formData.get("buyerName")),
+          p_phone: optionalString(formData.get("phone")),
+          p_email: optionalString(formData.get("email")),
+          p_address: optionalString(formData.get("address")),
+          p_notes: optionalString(formData.get("notes")),
+          p_reason: stringValue(formData.get("reason")),
+        },
+  );
   if (error) throw error;
   return String(data);
 }
@@ -554,6 +585,20 @@ export async function updateCashTransaction(
     p_note: note,
   });
   if (error) throw error;
+}
+
+async function getSaleAccountingVersion(client: Client, organizationId: string, saleId: string) {
+  const { data, error } = await client
+    .from("sales")
+    .select("accounting_model_version")
+    .eq("id", saleId)
+    .eq("organization_id", organizationId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("Sale not found.");
+  return data.accounting_model_version === null || data.accounting_model_version === undefined
+    ? undefined
+    : Number(data.accounting_model_version);
 }
 
 export async function deleteCashTransaction(

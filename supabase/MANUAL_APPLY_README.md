@@ -2,7 +2,7 @@
 
 Use [MANUAL_APPLY_ALL.sql](./MANUAL_APPLY_ALL.sql) for manual copy/paste into the Supabase SQL Editor.
 
-The bundle contains 40 ordered sections:
+The bundle contains 41 ordered sections:
 
 1. `supabase/schema.sql`
 2. The three legacy root SQL files under `supabase/`
@@ -23,3 +23,5 @@ The SQL Editor does not provide reliable migration history for manually pasted s
 The bundle includes `20260826_permanent_vehicle_purge.sql` because it is part of the repository SQL set. That migration defines an exceptional, separately protected purge RPC; the normal application workflow uses archive and does not call the purge RPC.
 
 The `20260507_sales_member_policy.sql` policy appears once in the legacy root files and once in the migrations directory because both files exist in the repository. The later copy safely replaces the earlier policy on a clean setup.
+
+The final section is `supabase/migrations/20260833_accounting_model_v2.sql`. For an existing production project, apply that file only after the preceding migrations are present; it is the single forward-only Accounting Model V2 schema/RPC migration and preserves legacy financial rows. The same complete SQL is kept in that migration file as the copy/paste source for the final manual section.

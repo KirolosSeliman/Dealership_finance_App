@@ -668,7 +668,7 @@ export async function averageBuySellChart(request: Request) {
     await requireOrganizationRole(client, userData.user.id, organizationId, ["owner", "admin", "member", "accountant", "viewer"]);
     const { data, error } = await client
       .from("sales")
-      .select("sale_date, paper_sale_price, vehicle_total_cost")
+      .select("sale_date, paper_sale_price, vehicle_total_cost, accounting_model_version, sale_price_before_tax, company_cost_basis")
       .eq("organization_id", organizationId)
       .is("voided_at", null)
       .eq("status", "active");
@@ -678,8 +678,8 @@ export async function averageBuySellChart(request: Request) {
       const month = String(sale.sale_date ?? "").slice(0, 7);
       const row = months.find((item) => item.month === month);
       if (!row) continue;
-      row.buyTotal += Number(sale.vehicle_total_cost ?? 0);
-      row.sellTotal += Number(sale.paper_sale_price ?? 0);
+      row.buyTotal += Number(sale.accounting_model_version === 2 ? sale.company_cost_basis ?? sale.vehicle_total_cost ?? 0 : sale.vehicle_total_cost ?? 0);
+      row.sellTotal += Number(sale.accounting_model_version === 2 ? sale.sale_price_before_tax ?? sale.paper_sale_price ?? 0 : sale.paper_sale_price ?? 0);
       row.count += 1;
     }
     return NextResponse.json({

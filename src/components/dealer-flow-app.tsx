@@ -868,6 +868,8 @@ export function DealerFlowApp() {
               expenses={scoped.expenses}
               recurringExpenseTemplates={scoped.recurringExpenseTemplates}
               sales={scoped.sales}
+              companyCashTransactions={scoped.companyCashTransactions}
+              externalCashTransactions={scoped.externalCashTransactions}
               contacts={scoped.contacts}
               attachments={scoped.attachments}
               activityLogs={scoped.activityLogs}

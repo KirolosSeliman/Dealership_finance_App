@@ -93,6 +93,9 @@ export function mapVehicle(row: Row): Vehicle {
     purchasePrice: numberValue(row.purchase_price),
     purchaseDate: dateValue(row.purchase_date),
     purchaseSource: String(row.purchase_source ?? "other") as Vehicle["purchaseSource"],
+    accountingModelVersion: row.accounting_model_version === null || row.accounting_model_version === undefined
+      ? undefined
+      : Number(row.accounting_model_version) as Vehicle["accountingModelVersion"],
     status: String(row.status ?? "purchased") as Vehicle["status"],
     listedPrice: optionalNumber(row.listed_price),
     notes: optionalString(row.notes),
@@ -171,6 +174,23 @@ export function mapSale(row: Row): Sale {
     voidReason: optionalString(row.void_reason),
     correctedBySaleId: optionalString(row.corrected_by_sale_id),
     correctionOfSaleId: optionalString(row.correction_of_sale_id),
+    accountingModelVersion: row.accounting_model_version === null || row.accounting_model_version === undefined
+      ? undefined
+      : Number(row.accounting_model_version) as Sale["accountingModelVersion"],
+    salePriceBeforeTax: optionalNumber(row.sale_price_before_tax),
+    salesTaxRate: optionalNumber(row.sales_tax_rate),
+    salesTaxAmount: optionalNumber(row.sales_tax_amount),
+    customerTotal: optionalNumber(row.customer_total),
+    companyPaymentAmount: optionalNumber(row.company_payment_amount),
+    externalPaymentAmount: optionalNumber(row.external_payment_amount),
+    companyCostBasis: optionalNumber(row.company_cost_basis),
+    companyGrossCashInvested: optionalNumber(row.company_gross_cash_invested),
+    recoverableCompanyTax: optionalNumber(row.recoverable_company_tax),
+    taxSettlementAmount: optionalNumber(row.tax_settlement_amount),
+    profitTaxRate: optionalNumber(row.profit_tax_rate),
+    grossProfit: optionalNumber(row.gross_profit),
+    externalVehicleCost: optionalNumber(row.external_vehicle_cost),
+    trackedNetProfit: optionalNumber(row.tracked_net_profit),
     createdAt: dateTimeValue(row.created_at),
     createdBy: String(row.created_by ?? ""),
   };

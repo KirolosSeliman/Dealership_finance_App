@@ -135,6 +135,7 @@ test("external cash constants preserve all transaction types including transfer 
     "external_cash_personally_removed",
     "external_vehicle_expense_paid",
     "external_vehicle_expense_refunded",
+    "external_sale_payment_received",
   ]);
 });
 
