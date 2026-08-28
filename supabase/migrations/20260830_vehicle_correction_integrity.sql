@@ -267,4 +267,5 @@ end;
 $$;
 
 revoke execute on function correct_vehicle_purchase(uuid, uuid, numeric, date, purchase_source, text) from public;
+revoke execute on function correct_vehicle_purchase(uuid, uuid, numeric, date, purchase_source, text) from anon;
 grant execute on function correct_vehicle_purchase(uuid, uuid, numeric, date, purchase_source, text) to authenticated;

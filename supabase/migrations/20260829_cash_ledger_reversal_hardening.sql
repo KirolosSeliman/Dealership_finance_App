@@ -245,6 +245,8 @@ end;
 $$;
 
 revoke execute on function update_manual_company_cash_transaction(uuid, uuid, numeric, date, text) from public;
+revoke execute on function update_manual_company_cash_transaction(uuid, uuid, numeric, date, text) from anon;
 revoke execute on function update_manual_external_cash_transaction(uuid, uuid, numeric, date, text) from public;
+revoke execute on function update_manual_external_cash_transaction(uuid, uuid, numeric, date, text) from anon;
 grant execute on function update_manual_company_cash_transaction(uuid, uuid, numeric, date, text) to authenticated;
 grant execute on function update_manual_external_cash_transaction(uuid, uuid, numeric, date, text) to authenticated;

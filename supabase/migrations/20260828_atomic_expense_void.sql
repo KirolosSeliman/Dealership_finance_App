@@ -629,12 +629,16 @@ $$;
 -- The historical hard-delete function remains in migration history for
 -- existing databases, but is no longer callable by application users.
 revoke all on function delete_vehicle_expense(uuid) from public;
+revoke all on function delete_vehicle_expense(uuid) from anon;
 revoke all on function delete_vehicle_expense(uuid) from authenticated;
 drop policy if exists "delete expenses" on vehicle_expenses;
 
 revoke all on function create_vehicle_expense_with_cash_impact(uuid, uuid, uuid, expense_category, numeric, numeric, numeric, numeric, text, date, text) from public;
+revoke all on function create_vehicle_expense_with_cash_impact(uuid, uuid, uuid, expense_category, numeric, numeric, numeric, numeric, text, date, text) from anon;
 grant execute on function create_vehicle_expense_with_cash_impact(uuid, uuid, uuid, expense_category, numeric, numeric, numeric, numeric, text, date, text) to authenticated;
 revoke all on function update_vehicle_expense_with_cash_impact(uuid, uuid, uuid, expense_category, numeric, numeric, numeric, numeric, date, text) from public;
+revoke all on function update_vehicle_expense_with_cash_impact(uuid, uuid, uuid, expense_category, numeric, numeric, numeric, numeric, date, text) from anon;
 grant execute on function update_vehicle_expense_with_cash_impact(uuid, uuid, uuid, expense_category, numeric, numeric, numeric, numeric, date, text) to authenticated;
 revoke all on function void_vehicle_expense_with_cash_reversal(uuid, uuid, uuid, text) from public;
+revoke all on function void_vehicle_expense_with_cash_reversal(uuid, uuid, uuid, text) from anon;
 grant execute on function void_vehicle_expense_with_cash_reversal(uuid, uuid, uuid, text) to authenticated;

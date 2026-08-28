@@ -7,6 +7,7 @@ alter table external_cash_transactions
         'external_commission_earned',
         'external_cash_transferred_to_company',
         'external_cash_personally_removed',
-        'external_vehicle_expense_paid'
+        'external_vehicle_expense_paid',
+        'external_vehicle_expense_refunded'
       )
     );

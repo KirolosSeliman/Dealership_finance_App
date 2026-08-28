@@ -22,7 +22,8 @@ alter table external_cash_transactions
         'external_cash_transferred_to_company',
         'external_transfer_returned',
         'external_cash_personally_removed',
-        'external_vehicle_expense_paid'
+        'external_vehicle_expense_paid',
+        'external_vehicle_expense_refunded'
       )
     );
 
@@ -594,7 +595,12 @@ end;
 $$;
 
 revoke execute on function transfer_external_cash_to_company(uuid, numeric, date, text) from public;
+revoke execute on function transfer_external_cash_to_company(uuid, numeric, date, text) from anon;
 grant execute on function transfer_external_cash_to_company(uuid, numeric, date, text) to authenticated;
 
 revoke execute on function reverse_external_cash_transfer_pair(uuid, uuid, text) from public;
+revoke execute on function reverse_external_cash_transfer_pair(uuid, uuid, text) from anon;
 grant execute on function reverse_external_cash_transfer_pair(uuid, uuid, text) to authenticated;
+
+revoke execute on function reverse_company_cash_transaction(uuid, uuid, text) from anon;
+revoke execute on function reverse_external_cash_transaction(uuid, uuid, text) from anon;

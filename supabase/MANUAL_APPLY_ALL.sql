@@ -3400,9 +3400,11 @@ end;
 $$;
 
 revoke all on function create_vehicle_expense_with_cash_impact(uuid, uuid, uuid, expense_category, numeric, numeric, numeric, numeric, text, date, text) from public;
+revoke all on function create_vehicle_expense_with_cash_impact(uuid, uuid, uuid, expense_category, numeric, numeric, numeric, numeric, text, date, text) from anon;
 grant execute on function create_vehicle_expense_with_cash_impact(uuid, uuid, uuid, expense_category, numeric, numeric, numeric, numeric, text, date, text) to authenticated;
 
 revoke all on function update_vehicle_expense_with_cash_impact(uuid, uuid, uuid, expense_category, numeric, numeric, numeric, numeric, date, text) from public;
+revoke all on function update_vehicle_expense_with_cash_impact(uuid, uuid, uuid, expense_category, numeric, numeric, numeric, numeric, date, text) from anon;
 grant execute on function update_vehicle_expense_with_cash_impact(uuid, uuid, uuid, expense_category, numeric, numeric, numeric, numeric, date, text) to authenticated;
 
 
@@ -3691,7 +3693,9 @@ end;
 $$;
 
 revoke execute on function reverse_company_cash_transaction(uuid, uuid, text) from public;
+revoke execute on function reverse_company_cash_transaction(uuid, uuid, text) from anon;
 revoke execute on function reverse_external_cash_transaction(uuid, uuid, text) from public;
+revoke execute on function reverse_external_cash_transaction(uuid, uuid, text) from anon;
 grant execute on function reverse_company_cash_transaction(uuid, uuid, text) to authenticated;
 grant execute on function reverse_external_cash_transaction(uuid, uuid, text) to authenticated;
 
@@ -4014,6 +4018,7 @@ $$;
 
 revoke execute on function transition_vehicle_status(uuid, uuid, vehicle_status, text) from public;
 revoke execute on function correct_vehicle_purchase(uuid, uuid, numeric, date, purchase_source, text) from public;
+revoke execute on function correct_vehicle_purchase(uuid, uuid, numeric, date, purchase_source, text) from anon;
 grant execute on function transition_vehicle_status(uuid, uuid, vehicle_status, text) to authenticated;
 grant execute on function correct_vehicle_purchase(uuid, uuid, numeric, date, purchase_source, text) to authenticated;
 
@@ -5770,7 +5775,8 @@ alter table external_cash_transactions
         'external_commission_earned',
         'external_cash_transferred_to_company',
         'external_cash_personally_removed',
-        'external_vehicle_expense_paid'
+        'external_vehicle_expense_paid',
+        'external_vehicle_expense_refunded'
       )
     );
 
@@ -5803,7 +5809,8 @@ alter table external_cash_transactions
         'external_cash_transferred_to_company',
         'external_transfer_returned',
         'external_cash_personally_removed',
-        'external_vehicle_expense_paid'
+        'external_vehicle_expense_paid',
+        'external_vehicle_expense_refunded'
       )
     );
 
@@ -6375,10 +6382,15 @@ end;
 $$;
 
 revoke execute on function transfer_external_cash_to_company(uuid, numeric, date, text) from public;
+revoke execute on function transfer_external_cash_to_company(uuid, numeric, date, text) from anon;
 grant execute on function transfer_external_cash_to_company(uuid, numeric, date, text) to authenticated;
 
 revoke execute on function reverse_external_cash_transfer_pair(uuid, uuid, text) from public;
+revoke execute on function reverse_external_cash_transfer_pair(uuid, uuid, text) from anon;
 grant execute on function reverse_external_cash_transfer_pair(uuid, uuid, text) to authenticated;
+
+revoke execute on function reverse_company_cash_transaction(uuid, uuid, text) from anon;
+revoke execute on function reverse_external_cash_transaction(uuid, uuid, text) from anon;
 
 
 -- ============================================================================
@@ -7804,14 +7816,18 @@ $$;
 -- The historical hard-delete function remains in migration history for
 -- existing databases, but is no longer callable by application users.
 revoke all on function delete_vehicle_expense(uuid) from public;
+revoke all on function delete_vehicle_expense(uuid) from anon;
 revoke all on function delete_vehicle_expense(uuid) from authenticated;
 drop policy if exists "delete expenses" on vehicle_expenses;
 
 revoke all on function create_vehicle_expense_with_cash_impact(uuid, uuid, uuid, expense_category, numeric, numeric, numeric, numeric, text, date, text) from public;
+revoke all on function create_vehicle_expense_with_cash_impact(uuid, uuid, uuid, expense_category, numeric, numeric, numeric, numeric, text, date, text) from anon;
 grant execute on function create_vehicle_expense_with_cash_impact(uuid, uuid, uuid, expense_category, numeric, numeric, numeric, numeric, text, date, text) to authenticated;
 revoke all on function update_vehicle_expense_with_cash_impact(uuid, uuid, uuid, expense_category, numeric, numeric, numeric, numeric, date, text) from public;
+revoke all on function update_vehicle_expense_with_cash_impact(uuid, uuid, uuid, expense_category, numeric, numeric, numeric, numeric, date, text) from anon;
 grant execute on function update_vehicle_expense_with_cash_impact(uuid, uuid, uuid, expense_category, numeric, numeric, numeric, numeric, date, text) to authenticated;
 revoke all on function void_vehicle_expense_with_cash_reversal(uuid, uuid, uuid, text) from public;
+revoke all on function void_vehicle_expense_with_cash_reversal(uuid, uuid, uuid, text) from anon;
 grant execute on function void_vehicle_expense_with_cash_reversal(uuid, uuid, uuid, text) to authenticated;
 
 
@@ -8066,7 +8082,9 @@ end;
 $$;
 
 revoke execute on function update_manual_company_cash_transaction(uuid, uuid, numeric, date, text) from public;
+revoke execute on function update_manual_company_cash_transaction(uuid, uuid, numeric, date, text) from anon;
 revoke execute on function update_manual_external_cash_transaction(uuid, uuid, numeric, date, text) from public;
+revoke execute on function update_manual_external_cash_transaction(uuid, uuid, numeric, date, text) from anon;
 grant execute on function update_manual_company_cash_transaction(uuid, uuid, numeric, date, text) to authenticated;
 grant execute on function update_manual_external_cash_transaction(uuid, uuid, numeric, date, text) to authenticated;
 
@@ -8733,7 +8751,9 @@ end;
 $$;
 
 revoke execute on function void_vehicle_sale_atomic(uuid, uuid, text) from public;
+revoke execute on function void_vehicle_sale_atomic(uuid, uuid, text) from anon;
 revoke execute on function correct_vehicle_sale_atomic(uuid, uuid, date, numeric, numeric, text, text, text, text, text, text) from public;
+revoke execute on function correct_vehicle_sale_atomic(uuid, uuid, date, numeric, numeric, text, text, text, text, text, text) from anon;
 grant execute on function void_vehicle_sale_atomic(uuid, uuid, text) to authenticated;
 grant execute on function correct_vehicle_sale_atomic(uuid, uuid, date, numeric, numeric, text, text, text, text, text, text) to authenticated;
 
@@ -8862,5 +8882,6 @@ with check (
 );
 
 revoke all on function prevent_duplicate_active_vehicle_vin() from public;
+revoke all on function prevent_duplicate_active_vehicle_vin() from anon;
 revoke all on function prevent_duplicate_active_vehicle_vin() from authenticated;
 

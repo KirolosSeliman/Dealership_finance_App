@@ -380,6 +380,8 @@ end;
 $$;
 
 revoke execute on function void_vehicle_sale_atomic(uuid, uuid, text) from public;
+revoke execute on function void_vehicle_sale_atomic(uuid, uuid, text) from anon;
 revoke execute on function correct_vehicle_sale_atomic(uuid, uuid, date, numeric, numeric, text, text, text, text, text, text) from public;
+revoke execute on function correct_vehicle_sale_atomic(uuid, uuid, date, numeric, numeric, text, text, text, text, text, text) from anon;
 grant execute on function void_vehicle_sale_atomic(uuid, uuid, text) to authenticated;
 grant execute on function correct_vehicle_sale_atomic(uuid, uuid, date, numeric, numeric, text, text, text, text, text, text) to authenticated;

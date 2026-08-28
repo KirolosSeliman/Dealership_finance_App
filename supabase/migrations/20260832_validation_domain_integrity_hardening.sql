@@ -118,4 +118,5 @@ with check (
 );
 
 revoke all on function prevent_duplicate_active_vehicle_vin() from public;
+revoke all on function prevent_duplicate_active_vehicle_vin() from anon;
 revoke all on function prevent_duplicate_active_vehicle_vin() from authenticated;
